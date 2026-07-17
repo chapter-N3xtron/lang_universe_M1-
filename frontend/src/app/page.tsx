@@ -369,6 +369,7 @@ export default function Home() {
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -386,10 +387,23 @@ export default function Home() {
     }
   }, []);
 
+  const scrollToBottom = useCallback(() => {
+    const el = chatContainerRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+  }, []);
+
   const activeSession = sessions.find((s) => s.id === selectedId);
   const activeThread = activeSession?.threads.find(
     (t) => t.id === activeSession.activeThreadId
   );
+
+  const messages = activeThread?.messages ?? [];
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, loading, activeInquiry, scrollToBottom]);
 
   const updateSession = useCallback(
     (updater: (session: ChatSession) => ChatSession) => {
@@ -886,7 +900,6 @@ export default function Home() {
     setTitleInput("");
   }, [activeThread, titleInput, handleThreadTitleChange]);
 
-  const messages = activeThread?.messages ?? [];
   const agentLabel =
     AGENT_OPTIONS.find((a) => a.value === activeThread?.agent)?.label ??
     "Agent";
@@ -1023,7 +1036,7 @@ export default function Home() {
         </header>
 
         {/* Messages */}
-        <main className="flex-1 overflow-y-auto px-4 py-6">
+        <main ref={chatContainerRef} className="flex-1 overflow-y-auto px-4 py-6">
           <div className="mx-auto flex max-w-3xl flex-col gap-6">
             {messages.map((msg, idx) => (
               <Message

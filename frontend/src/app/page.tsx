@@ -248,6 +248,11 @@ const AGENT_OPTIONS: { value: AgentType; label: string; icon: React.ReactNode }[
       icon: <Microchip className="h-4 w-4" />,
     },
     {
+      value: "uncensored-coder",
+      label: "Uncensored Coder",
+      icon: <Cpu className="h-4 w-4" />,
+    },
+    {
       value: "research",
       label: "Research",
       icon: <Telescope className="h-4 w-4" />,
@@ -258,9 +263,11 @@ function makeWelcomeMessage(agent: AgentType): ChatMessage {
   const content =
     agent === "opencode"
       ? "Hi, I'm OpenCode. Point me at a workspace and ask me to edit, build, or explain code."
-      : agent === "research"
-        ? "Hi, I'm Research. Ask me to gather sources, summarize topics, or dig into web data."
-        : "Welcome! I'm Jasper, your general LangGraph assistant. What would you like to do?";
+      : agent === "uncensored-coder"
+        ? "Hi, I'm Uncensored Coder. I'll work on any coding, config, or creative automation task without filters."
+        : agent === "research"
+          ? "Hi, I'm Research. Ask me to gather sources, summarize topics, or dig into web data."
+          : "Welcome! I'm Jasper, your general LangGraph assistant. What would you like to do?";
 
   return {
     id: uuidv4(),
@@ -686,7 +693,10 @@ export default function Home() {
             updatedAt: now,
           };
         }
-        const workspace = agent === "opencode" ? DEFAULT_WORKSPACE : undefined;
+        const workspace =
+          agent === "opencode" || agent === "uncensored-coder"
+            ? DEFAULT_WORKSPACE
+            : undefined;
         const mode: ThreadMode | undefined =
           agent === "opencode" ? "live" : undefined;
         const model = activeThread?.model;
@@ -1189,7 +1199,8 @@ export default function Home() {
               </div>
 
               {/* Right column: repo picker and live/async switch */}
-              {activeThread?.agent === "opencode" && (
+              {(activeThread?.agent === "opencode" ||
+                activeThread?.agent === "uncensored-coder") && (
                 <div className="flex flex-col items-end gap-2">
                   <Button
                     size="sm"

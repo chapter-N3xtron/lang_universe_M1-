@@ -10,7 +10,7 @@ export type ApiChatMessage = {
 export type ChatRequest = {
   message: string;
   history: ApiChatMessage[];
-  target_agent?: "jasper" | "opencode" | "research";
+  target_agent?: "jasper" | "opencode" | "uncensored-coder" | "research";
   workspace?: string;
   mode?: "live" | "async";
   model?: string;
@@ -49,7 +49,7 @@ export type FSListResponse = {
 export async function sendChatMessage(
   message: string,
   history: ApiChatMessage[],
-  target_agent?: "jasper" | "opencode" | "research",
+  target_agent?: "jasper" | "opencode" | "uncensored-coder" | "research",
   workspace?: string,
   mode?: "live" | "async",
   model?: string

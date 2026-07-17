@@ -26,7 +26,7 @@ import {
 } from "lucide-react"
 import { useState, useMemo } from "react"
 
-export type AgentType = "jasper" | "opencode" | "research"
+export type AgentType = "jasper" | "opencode" | "uncensored-coder" | "research"
 
 export type ThreadMode = "live" | "async"
 

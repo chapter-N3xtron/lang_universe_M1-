@@ -3,6 +3,7 @@ from typing import TypedDict, Annotated, List
 import operator
 from src.opencode_agent import create_opencode_graph
 from src.research_agent import create_research_graph
+from src.uncensored_coder_agent import run_uncensored_coder
 
 
 class State(TypedDict):
@@ -17,6 +18,8 @@ def router(state: State):
     target = (state.get("target_agent") or "").lower()
     if target == "opencode":
         return "opencode"
+    if target == "uncensored-coder":
+        return "uncensored-coder"
     if target == "research":
         return "research"
     if target == "jasper":
@@ -68,14 +71,40 @@ def create_chat_ui():
         result = research_app.invoke({"messages": state["messages"]})
         return {"messages": result["messages"]}
 
+    def run_uncensored_coder_node(state):
+        messages = state["messages"]
+        user_query = ""
+        for m in reversed(messages):
+            if isinstance(m, dict) and m.get("role") == "user":
+                user_query = m.get("content", "")
+                break
+        history = [
+            {"role": m.get("role"), "content": m.get("content")}
+            for m in messages
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+        ][:-1]
+        result = run_uncensored_coder(
+            message=user_query,
+            history=history,
+            model=state.get("model"),
+            workspace=state.get("workspace"),
+        )
+        if not result["success"]:
+            content = f"[Uncensored Coder error]\n\n{result['error'] or 'Unknown error'}"
+        else:
+            content = result["text"] or "(no response)"
+        return {"messages": [{"role": "assistant", "content": content}]}
+
     graph.add_node("jasper", jasper_agent)
     graph.add_node("opencode", run_opencode)
     graph.add_node("research", run_research)
+    graph.add_node("uncensored-coder", run_uncensored_coder_node)
 
-    graph.add_conditional_edges(START, router, ["jasper", "opencode", "research", END])
+    graph.add_conditional_edges(START, router, ["jasper", "opencode", "uncensored-coder", "research", END])
     graph.add_edge("jasper", END)
     graph.add_edge("opencode", END)
     graph.add_edge("research", END)
+    graph.add_edge("uncensored-coder", END)
 
     return graph.compile()
 

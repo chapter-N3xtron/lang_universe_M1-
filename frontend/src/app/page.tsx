@@ -17,6 +17,8 @@ import {
   Bot,
   Microchip,
   Telescope,
+  FolderSearch,
+  HelpCircle,
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { cn } from "@/lib/utils";
@@ -64,6 +66,27 @@ import {
 const DEFAULT_WORKSPACE =
   "/Users/chaptercaptaingeneral/LangGraph_AgentChat_ui_Opencode_CLI";
 const STORAGE_KEY = "langgraph-agent-chat-sessions";
+const RECENT_WORKSPACES_KEY = "langgraph-recent-workspaces";
+
+function loadRecentWorkspaces(): string[] {
+  if (typeof window === "undefined") return [DEFAULT_WORKSPACE];
+  try {
+    const raw = localStorage.getItem(RECENT_WORKSPACES_KEY);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return parsed.includes(DEFAULT_WORKSPACE)
+      ? parsed
+      : [DEFAULT_WORKSPACE, ...parsed];
+  } catch {
+    return [DEFAULT_WORKSPACE];
+  }
+}
+
+function saveRecentWorkspace(path: string) {
+  if (typeof window === "undefined") return;
+  const current = loadRecentWorkspaces();
+  const next = [path, ...current.filter((p) => p !== path)].slice(0, 10);
+  localStorage.setItem(RECENT_WORKSPACES_KEY, JSON.stringify(next));
+}
 
 const AGENT_OPTIONS: { value: AgentType; label: string; icon: React.ReactNode }[] =
   [
@@ -501,13 +524,18 @@ export default function Home() {
 
       updateSession((session) => {
         const now = new Date();
+        const existing = session.threads.find((t) => t.agent === agent);
+        if (existing) {
+          return {
+            ...session,
+            activeThreadId: existing.id,
+            updatedAt: now,
+          };
+        }
         const workspace = agent === "opencode" ? DEFAULT_WORKSPACE : undefined;
         const mode: ThreadMode | undefined =
           agent === "opencode" ? "live" : undefined;
-        const newThread = createThread(agent, {
-          workspace,
-          mode,
-        });
+        const newThread = createThread(agent, { workspace, mode });
         return {
           ...session,
           activeThreadId: newThread.id,
@@ -545,6 +573,7 @@ export default function Home() {
         ...thread,
         workspace: newWorkspace,
       }));
+      saveRecentWorkspace(newWorkspace);
     },
     [activeThread, updateActiveThread]
   );
@@ -712,29 +741,6 @@ export default function Home() {
               )}
             </Button>
 
-            <Select
-              value={activeThread?.agent ?? "jasper"}
-              onValueChange={(v) => handleAgentChange(v as AgentType)}
-            >
-              <SelectTrigger className="w-40 border-zinc-700 bg-zinc-800/50 text-zinc-100">
-                <SelectValue placeholder="Select agent" />
-              </SelectTrigger>
-              <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
-                {AGENT_OPTIONS.map((opt) => (
-                  <SelectItem
-                    key={opt.value}
-                    value={opt.value}
-                    className="focus:bg-zinc-800 focus:text-zinc-100"
-                  >
-                    <span className="flex items-center gap-2">
-                      {opt.icon}
-                      {opt.label}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
             <div className="flex items-center gap-2 min-w-0">
               {editingTitle ? (
                 <>
@@ -791,23 +797,46 @@ export default function Home() {
               <>
                 <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-3 py-1.5 border border-zinc-700">
                   <FolderKanban className="h-4 w-4 text-zinc-400" />
-                  <Input
+                  <Select
                     value={activeThread?.workspace ?? DEFAULT_WORKSPACE}
-                    onChange={(e) => handleWorkspaceChange(e.target.value)}
-                    className="bg-transparent text-xs text-zinc-200 w-64 outline-none font-mono border-none focus-visible:ring-0 p-0"
-                    title="Workspace path for OpenCode CLI"
-                  />
+                    onValueChange={(v) => handleWorkspaceChange(v ?? DEFAULT_WORKSPACE)}
+                  >
+                    <SelectTrigger className="w-64 border-none bg-transparent text-xs text-zinc-200 font-mono focus:ring-0 p-0 h-auto shadow-none">
+                      <SelectValue placeholder="Select repo…" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-xs">
+                      {loadRecentWorkspaces().map((path) => (
+                        <SelectItem
+                          key={path}
+                          value={path}
+                          className="focus:bg-zinc-800 focus:text-zinc-100 text-xs font-mono"
+                        >
+                          {path}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-3 py-1.5 border border-zinc-700">
-                  <span className="text-xs text-zinc-400">Async</span>
-                  <Switch
-                    checked={activeThread?.mode === "live"}
-                    onCheckedChange={(checked) =>
-                      handleModeChange(checked ? "live" : "async")
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={async () => {
+                    if (!activeThread?.workspace) return;
+                    try {
+                      const dir = await (window as any).showDirectoryPicker?.();
+                      if (dir) {
+                        const path = `/Users${dir.name ? `/${dir.name}` : ""}`;
+                        handleWorkspaceChange(path);
+                      }
+                    } catch {
+                      // user cancelled or API unavailable
                     }
-                  />
-                  <span className="text-xs text-zinc-200">Live</span>
-                </div>
+                  }}
+                  className="h-8 w-8 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                  title="Browse repo (File System Access API)"
+                >
+                  <FolderSearch className="h-4 w-4" />
+                </Button>
               </>
             )}
             <Button
@@ -953,6 +982,80 @@ export default function Home() {
         {/* Input */}
         <footer className="border-t border-zinc-800 bg-zinc-900 px-4 py-4">
           <div className="mx-auto max-w-3xl">
+            {/* Agent / repo / mode toolbar above input */}
+            <div className="flex items-center gap-3 mb-2">
+              <Select
+                value={activeThread?.agent ?? "jasper"}
+                onValueChange={(v) => handleAgentChange(v as AgentType)}
+              >
+                <SelectTrigger className="w-40 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
+                  <SelectValue placeholder="Select agent" />
+                </SelectTrigger>
+                <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
+                  {AGENT_OPTIONS.map((opt) => (
+                    <SelectItem
+                      key={opt.value}
+                      value={opt.value}
+                      className="focus:bg-zinc-800 focus:text-zinc-100"
+                    >
+                      <span className="flex items-center gap-2">
+                        {opt.icon}
+                        {opt.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {activeThread?.agent === "opencode" && (
+                <>
+                  <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-2 py-1 border border-zinc-700">
+                    <FolderKanban className="h-3 w-3 text-zinc-400" />
+                    <Select
+                      value={activeThread?.workspace ?? DEFAULT_WORKSPACE}
+                    onValueChange={(v) => handleWorkspaceChange(v ?? DEFAULT_WORKSPACE)}
+                    >
+                      <SelectTrigger className="w-56 border-none bg-transparent text-xs text-zinc-200 font-mono focus:ring-0 p-0 h-auto shadow-none">
+                        <SelectValue placeholder="Select repo…" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-xs">
+                        {loadRecentWorkspaces().map((path) => (
+                          <SelectItem
+                            key={path}
+                            value={path}
+                            className="focus:bg-zinc-800 focus:text-zinc-100 text-xs font-mono"
+                          >
+                            {path}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-2 py-1 border border-zinc-700">
+                    <Switch
+                      id="mode-switch"
+                      checked={activeThread?.mode === "async"}
+                      onCheckedChange={(checked) =>
+                        handleModeChange(checked ? "async" : "live")
+                      }
+                      className="data-[state=checked]:bg-blue-600"
+                    />
+                    <label
+                      htmlFor="mode-switch"
+                      className="text-xs text-zinc-300 cursor-pointer select-none"
+                      title="Live: ask for permission. Async: run in background and report back."
+                    >
+                      {activeThread?.mode === "async" ? "Async" : "Live"}
+                    </label>
+                    <span title="Live: ask for permission. Async: run in background and report back.">
+                      <HelpCircle className="h-3 w-3 text-zinc-500" />
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+
             <PromptInput
               value={input}
               onValueChange={setInput}

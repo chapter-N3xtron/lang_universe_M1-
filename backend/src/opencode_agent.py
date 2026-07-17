@@ -23,8 +23,11 @@ def opencode_coding_agent(state: State):
     try:
         workspace = state.get("workspace")
         mode = state.get("mode", "live")
+        message = user_query
+        if workspace:
+            message = f"[Workspace: {workspace}]\n\n{user_query}"
         result = run_opencode(
-            message=user_query,
+            message=message,
             title=user_query[:50],
             workspace=workspace,
             auto_approve=(mode == "async"),

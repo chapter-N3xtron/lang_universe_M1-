@@ -230,7 +230,7 @@ def run_uncensored_coder(
     model: Optional[str] = None,
     workspace: Optional[str] = None,
     max_turns: int = 10,
-    timeout: int = 300,
+    timeout: int = 900,
 ) -> dict:
     """
     Run the uncensored coder agent.

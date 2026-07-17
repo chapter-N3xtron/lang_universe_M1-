@@ -59,6 +59,7 @@ export async function sendChatMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, history, target_agent, workspace, mode, model } as ChatRequest),
     cache: "no-store",
+    signal: AbortSignal.timeout(900000),
   });
 
   if (!res.ok) {

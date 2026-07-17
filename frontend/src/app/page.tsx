@@ -817,52 +817,6 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
-            {activeThread?.agent === "opencode" && (
-              <>
-                <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-3 py-1.5 border border-zinc-700">
-                  <FolderKanban className="h-4 w-4 text-zinc-400" />
-                  <Select
-                    value={activeThread?.workspace ?? DEFAULT_WORKSPACE}
-                    onValueChange={(v) => handleWorkspaceChange(v ?? DEFAULT_WORKSPACE)}
-                  >
-                    <SelectTrigger className="w-64 border-none bg-transparent text-xs text-zinc-200 font-mono focus:ring-0 p-0 h-auto shadow-none">
-                      <SelectValue placeholder="Select repo…" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-xs">
-                      {loadRecentWorkspaces().map((path) => (
-                        <SelectItem
-                          key={path}
-                          value={path}
-                          className="focus:bg-zinc-800 focus:text-zinc-100 text-xs font-mono"
-                        >
-                          {path}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={async () => {
-                    if (!activeThread?.workspace) return;
-                    try {
-                      const dir = await (window as any).showDirectoryPicker?.();
-                      if (dir) {
-                        const path = `/Users${dir.name ? `/${dir.name}` : ""}`;
-                        handleWorkspaceChange(path);
-                      }
-                    } catch {
-                      // user cancelled or API unavailable
-                    }
-                  }}
-                  className="h-8 w-8 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                  title="Browse repo (File System Access API)"
-                >
-                  <FolderSearch className="h-4 w-4" />
-                </Button>
-              </>
-            )}
             <Button
               size="sm"
               variant="ghost"
@@ -1040,8 +994,8 @@ export default function Home() {
                     className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-zinc-800 px-2"
                     title="Choose repo"
                   >
-                    <FolderKanban className="h-4 w-4 text-zinc-400" />
-                    <span className="max-w-[12rem] truncate font-heading tracking-wide">
+                    <FolderSearch className="h-4 w-4 text-zinc-400" />
+                    <span className="max-w-[24rem] truncate font-heading tracking-wide">
                       {repoName(activeThread?.workspace ?? DEFAULT_WORKSPACE)}
                     </span>
                   </Button>

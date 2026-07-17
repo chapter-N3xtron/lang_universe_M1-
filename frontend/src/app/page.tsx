@@ -1127,64 +1127,68 @@ export default function Home() {
         {/* Input */}
         <footer className="border-t border-zinc-800 bg-zinc-900 px-4 py-4">
           <div className="mx-auto max-w-3xl">
-            {/* Agent / repo / model / mode toolbar above input */}
-            <div className="flex items-center gap-3 mb-2">
-              <Select
-                value={activeThread?.agent ?? "jasper"}
-                onValueChange={(v) => handleAgentChange(v as AgentType)}
-              >
-                <SelectTrigger className="w-40 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
-                  <SelectValue placeholder="Select agent" />
-                </SelectTrigger>
-                <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
-                  {AGENT_OPTIONS.map((opt) => (
-                    <SelectItem
-                      key={opt.value}
-                      value={opt.value}
-                      className="focus:bg-zinc-800 focus:text-zinc-100"
-                    >
+            {/* Two-tier toolbar above input */}
+            <div className="flex items-start justify-between gap-3 mb-2">
+              {/* Left column: model on top, agent below */}
+              <div className="flex flex-col gap-2">
+                {availableModels.length > 0 && (
+                  <Select
+                    value={activeModel}
+                    onValueChange={(v) => handleModelChange(v ?? defaultModel)}
+                  >
+                    <SelectTrigger className="w-56 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
                       <span className="flex items-center gap-2">
-                        {opt.icon}
-                        {opt.label}
+                        <Cpu className="h-3.5 w-3.5 text-zinc-400" />
+                        <SelectValue placeholder="Model" />
                       </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {availableModels.length > 0 && (
-                <Select
-                  value={activeModel}
-                  onValueChange={(v) => handleModelChange(v ?? defaultModel)}
-                >
-                  <SelectTrigger className="w-56 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
-                    <span className="flex items-center gap-2">
-                      <Cpu className="h-3.5 w-3.5 text-zinc-400" />
-                      <SelectValue placeholder="Model" />
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-sm">
-                    {availableModels.map((m) => (
-                      <SelectItem
-                        key={m.id}
-                        value={m.id}
-                        className="focus:bg-zinc-800 focus:text-zinc-100"
-                        title={m.id}
-                      >
-                        <span className="flex items-center gap-2 truncate">
-                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-heading">
-                            {m.provider}
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-sm">
+                      {availableModels.map((m) => (
+                        <SelectItem
+                          key={m.id}
+                          value={m.id}
+                          className="focus:bg-zinc-800 focus:text-zinc-100"
+                          title={m.id}
+                        >
+                          <span className="flex items-center gap-2 truncate">
+                            <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-heading">
+                              {m.provider}
+                            </span>
+                            <span className="truncate">{m.name}</span>
                           </span>
-                          <span className="truncate">{m.name}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                <Select
+                  value={activeThread?.agent ?? "jasper"}
+                  onValueChange={(v) => handleAgentChange(v as AgentType)}
+                >
+                  <SelectTrigger className="w-40 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
+                    <SelectValue placeholder="Select agent" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
+                    {AGENT_OPTIONS.map((opt) => (
+                      <SelectItem
+                        key={opt.value}
+                        value={opt.value}
+                        className="focus:bg-zinc-800 focus:text-zinc-100"
+                      >
+                        <span className="flex items-center gap-2">
+                          {opt.icon}
+                          {opt.label}
                         </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              )}
+              </div>
 
+              {/* Right column: repo picker and live/async switch */}
               {activeThread?.agent === "opencode" && (
-                <>
+                <div className="flex flex-col items-end gap-2">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1218,7 +1222,7 @@ export default function Home() {
                       <HelpCircle className="h-3 w-3 text-zinc-500" />
                     </span>
                   </div>
-                </>
+                </div>
               )}
             </div>
 

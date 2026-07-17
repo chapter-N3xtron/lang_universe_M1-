@@ -2,15 +2,17 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
-export type ChatMessage = {
+export type ApiChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
 export type ChatRequest = {
   message: string;
-  history: ChatMessage[];
+  history: ApiChatMessage[];
+  target_agent?: "jasper" | "opencode" | "research";
   workspace?: string;
+  mode?: "live" | "async";
 };
 
 export type ChatResponse = {
@@ -23,13 +25,15 @@ export type STTResponse = {
 
 export async function sendChatMessage(
   message: string,
-  history: ChatMessage[],
-  workspace?: string
+  history: ApiChatMessage[],
+  target_agent?: "jasper" | "opencode" | "research",
+  workspace?: string,
+  mode?: "live" | "async"
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history, workspace } as ChatRequest),
+    body: JSON.stringify({ message, history, target_agent, workspace, mode } as ChatRequest),
     cache: "no-store",
   });
 

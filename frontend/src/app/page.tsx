@@ -1,10 +1,35 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Sparkles, Volume2, Mic, Square, Plus, PanelLeftClose, PanelLeft, Pencil, Check, X, FolderKanban } from "lucide-react";
+import {
+  Send,
+  Sparkles,
+  Volume2,
+  Mic,
+  Square,
+  Plus,
+  PanelLeftClose,
+  PanelLeft,
+  Pencil,
+  Check,
+  X,
+  FolderKanban,
+  Bot,
+  Microchip,
+  Telescope,
+} from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   PromptInput,
   PromptInputTextarea,
@@ -19,6 +44,10 @@ import {
 import {
   AgentChatHistory,
   ChatSession,
+  ChatThread,
+  ChatMessage,
+  AgentType,
+  ThreadMode,
 } from "@/components/agents-ui/agent-chat-history";
 import {
   ChatArtifact,
@@ -30,23 +59,84 @@ import {
   sendChatMessage,
   synthesizeSpeech,
   transcribeAudio,
-  ChatMessage,
 } from "@/lib/api";
 
-const WELCOME_MESSAGE: ChatMessage = {
-  role: "assistant",
-  content:
-    "Welcome! I'm your LangGraph assistant. I can help with coding tasks (via OpenCode CLI) or research (via Firecrawl). What would you like to do?",
-};
-
+const DEFAULT_WORKSPACE =
+  "/Users/chaptercaptaingeneral/LangGraph_AgentChat_ui_Opencode_CLI";
 const STORAGE_KEY = "langgraph-agent-chat-sessions";
-const DEFAULT_WORKSPACE = "/Users/chaptercaptaingeneral/LangGraph_AgentChat_ui_Opencode_CLI";
+
+const AGENT_OPTIONS: { value: AgentType; label: string; icon: React.ReactNode }[] =
+  [
+    { value: "jasper", label: "Jasper", icon: <Bot className="h-4 w-4" /> },
+    {
+      value: "opencode",
+      label: "OpenCode",
+      icon: <Microchip className="h-4 w-4" />,
+    },
+    {
+      value: "research",
+      label: "Research",
+      icon: <Telescope className="h-4 w-4" />,
+    },
+  ];
+
+function makeWelcomeMessage(agent: AgentType): ChatMessage {
+  const content =
+    agent === "opencode"
+      ? "Hi, I'm OpenCode. Point me at a workspace and ask me to edit, build, or explain code."
+      : agent === "research"
+        ? "Hi, I'm Research. Ask me to gather sources, summarize topics, or dig into web data."
+        : "Welcome! I'm Jasper, your general LangGraph assistant. What would you like to do?";
+
+  return {
+    id: uuidv4(),
+    role: "assistant",
+    content,
+    agent,
+    timestamp: new Date(),
+  };
+}
 
 function generateTitle(messages: ChatMessage[]): string {
   const firstUser = messages.find((m) => m.role === "user");
   if (!firstUser) return "New chat";
   const text = firstUser.content.slice(0, 40);
   return text.length < firstUser.content.length ? text + "…" : text;
+}
+
+function createThread(
+  agent: AgentType,
+  opts: { workspace?: string; mode?: ThreadMode } = {}
+): ChatThread {
+  const now = new Date();
+  return {
+    id: uuidv4(),
+    agent,
+    workspace: opts.workspace,
+    mode: opts.mode,
+    title: "New chat",
+    messages: [makeWelcomeMessage(agent)],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createSession(
+  opts: {
+    title?: string;
+    activeThread?: ChatThread;
+  } = {}
+): ChatSession {
+  const now = new Date();
+  const thread = opts.activeThread ?? createThread("jasper");
+  return {
+    id: uuidv4(),
+    title: opts.title ?? thread.title,
+    activeThreadId: thread.id,
+    threads: [thread],
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 function loadSessions(): ChatSession[] {
@@ -59,9 +149,14 @@ function loadSessions(): ChatSession[] {
       ...s,
       createdAt: new Date(s.createdAt),
       updatedAt: new Date(s.updatedAt),
-      messages: s.messages.map((m) => ({
-        ...m,
-        timestamp: new Date(m.timestamp),
+      threads: s.threads.map((t) => ({
+        ...t,
+        createdAt: new Date(t.createdAt),
+        updatedAt: new Date(t.updatedAt),
+        messages: t.messages.map((m) => ({
+          ...m,
+          timestamp: new Date(m.timestamp),
+        })),
       })),
     }));
   } catch {
@@ -74,23 +169,6 @@ function saveSessions(sessions: ChatSession[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
 }
 
-function createSession(messages: ChatMessage[] = [WELCOME_MESSAGE], workspace = DEFAULT_WORKSPACE): ChatSession {
-  const now = new Date();
-  return {
-    id: uuidv4(),
-    title: generateTitle(messages),
-    workspace,
-    messages: messages.map((m) => ({
-      id: uuidv4(),
-      role: m.role,
-      content: m.content,
-      timestamp: now,
-    })),
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
 export default function Home() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [selectedId, setSelectedId] = useState<string | undefined>();
@@ -100,7 +178,9 @@ export default function Home() {
   const [recording, setRecording] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [activeInquiry, setActiveInquiry] = useState<Inquiry | null>(null);
-  const [inquiryHistory, setInquiryHistory] = useState<{ question: string; answer: string; timestamp: string }[]>([]);
+  const [inquiryHistory, setInquiryHistory] = useState<
+    { question: string; answer: string; timestamp: string }[]
+  >([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState("");
@@ -124,8 +204,11 @@ export default function Home() {
   }, []);
 
   const activeSession = sessions.find((s) => s.id === selectedId);
+  const activeThread = activeSession?.threads.find(
+    (t) => t.id === activeSession.activeThreadId
+  );
 
-  const updateActiveSession = useCallback(
+  const updateSession = useCallback(
     (updater: (session: ChatSession) => ChatSession) => {
       setSessions((prev) => {
         const next = prev.map((s) =>
@@ -138,23 +221,49 @@ export default function Home() {
     [selectedId]
   );
 
-  const addAssistantMessage = useCallback(
-    (content: string) => {
-      updateActiveSession((session) => ({
+  const updateActiveThread = useCallback(
+    (updater: (thread: ChatThread) => ChatThread) => {
+      updateSession((session) => {
+        const now = new Date();
+        const threads = session.threads.map((t) =>
+          t.id === session.activeThreadId
+            ? { ...updater({ ...t }), updatedAt: now }
+            : t
+        );
+        return { ...session, threads, updatedAt: now };
+      });
+    },
+    [updateSession]
+  );
+
+  const setActiveThreadId = useCallback(
+    (threadId: string) => {
+      updateSession((session) => ({
         ...session,
+        activeThreadId: threadId,
+        updatedAt: new Date(),
+      }));
+    },
+    [updateSession]
+  );
+
+  const addAssistantMessage = useCallback(
+    (content: string, agent: AgentType) => {
+      updateActiveThread((thread) => ({
+        ...thread,
         messages: [
-          ...session.messages,
+          ...thread.messages,
           {
             id: uuidv4(),
             role: "assistant",
             content,
+            agent,
             timestamp: new Date(),
           },
         ],
-        updatedAt: new Date(),
       }));
     },
-    [updateActiveSession]
+    [updateActiveThread]
   );
 
   const detectInquiry = useCallback((response: string) => {
@@ -168,13 +277,18 @@ export default function Home() {
       const options: string[] = [];
 
       if (inquiryType === "multipleChoice") {
-        const optionMatches = trimmed.matchAll(/\n\s*(?:•|-|\d+\.)\s+(.+)/g);
+        const optionMatches = trimmed.matchAll(
+          /\n\s*(?:•|-|\d+\.)\s+(.+)/g
+        );
         for (const match of optionMatches) {
           options.push(match[1].trim().replace(/\?$/, ""));
         }
       }
 
-      if (trimmed.toLowerCase().includes("yes or no") || trimmed.toLowerCase().includes("would you like")) {
+      if (
+        trimmed.toLowerCase().includes("yes or no") ||
+        trimmed.toLowerCase().includes("would you like")
+      ) {
         setActiveInquiry({
           id: uuidv4(),
           question: trimmed.replace(/\?\s*$/, ""),
@@ -183,7 +297,10 @@ export default function Home() {
         return;
       }
 
-      if (trimmed.toLowerCase().includes("rate") || trimmed.toLowerCase().includes("how would you rate")) {
+      if (
+        trimmed.toLowerCase().includes("rate") ||
+        trimmed.toLowerCase().includes("how would you rate")
+      ) {
         setActiveInquiry({
           id: uuidv4(),
           question: trimmed.replace(/\?\s*$/, ""),
@@ -226,42 +343,55 @@ export default function Home() {
 
   const handleSubmitWithText = useCallback(
     async (text: string) => {
-      if (!text.trim() || loading || !activeSession) return;
+      if (!text.trim() || loading || !activeSession || !activeThread) return;
       setInput("");
       setLoading(true);
 
       const now = new Date();
-      const userHistory: ChatMessage[] = activeSession.messages.map((m) => ({
+      const agent = activeThread.agent;
+      const userHistory = activeThread.messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
 
-      updateActiveSession((session) => ({
-        ...session,
-        title:
-          session.title === "New chat"
-            ? generateTitle([{ role: "user", content: text }])
-            : session.title,
-        messages: [
-          ...session.messages,
-          { id: uuidv4(), role: "user", content: text, timestamp: now },
-        ],
-        updatedAt: now,
-      }));
+      updateActiveThread((thread) => {
+        const messages = [
+          ...thread.messages,
+          {
+            id: uuidv4(),
+            role: "user" as const,
+            content: text,
+            agent,
+            timestamp: now,
+          },
+        ];
+        const title =
+          thread.title === "New chat"
+            ? generateTitle(messages)
+            : thread.title;
+        return { ...thread, title, messages };
+      });
 
       try {
-        const response = await sendChatMessage(text, userHistory, activeSession.workspace);
-        addAssistantMessage(response);
+        const response = await sendChatMessage(
+          text,
+          userHistory,
+          activeThread.agent,
+          activeThread.workspace,
+          activeThread.mode
+        );
+        addAssistantMessage(response, agent);
         detectInquiry(response);
       } catch (err) {
         addAssistantMessage(
-          `Error: ${err instanceof Error ? err.message : "Something went wrong"}`
+          `Error: ${err instanceof Error ? err.message : "Something went wrong"}`,
+          agent
         );
       } finally {
         setLoading(false);
       }
     },
-    [activeSession, loading, updateActiveSession, addAssistantMessage, detectInquiry]
+    [activeSession, activeThread, loading, updateActiveThread, addAssistantMessage, detectInquiry]
   );
 
   const stopAudio = useCallback(() => {
@@ -273,25 +403,28 @@ export default function Home() {
     setSpeakingIndex(null);
   }, []);
 
-  const playMessage = useCallback(async (content: string, index: number) => {
-    stopAudio();
-    try {
-      const blob = await synthesizeSpeech(content);
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      setSpeakingIndex(index);
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
+  const playMessage = useCallback(
+    async (content: string, index: number) => {
+      stopAudio();
+      try {
+        const blob = await synthesizeSpeech(content);
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        setSpeakingIndex(index);
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          setSpeakingIndex(null);
+          audioRef.current = null;
+        };
+        await audio.play();
+      } catch (err) {
+        console.error("TTS failed", err);
         setSpeakingIndex(null);
-        audioRef.current = null;
-      };
-      await audio.play();
-    } catch (err) {
-      console.error("TTS failed", err);
-      setSpeakingIndex(null);
-    }
-  }, [stopAudio]);
+      }
+    },
+    [stopAudio]
+  );
 
   const stopRecording = useCallback(() => {
     try {
@@ -309,7 +442,9 @@ export default function Home() {
     setMicError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: "audio/webm",
+      });
       const chunks: Blob[] = [];
 
       mediaRecorder.ondataavailable = (e) => {
@@ -347,9 +482,9 @@ export default function Home() {
     }
   }, []);
 
-  const handleNewChat = useCallback((workspace = DEFAULT_WORKSPACE) => {
+  const handleNewChat = useCallback(() => {
     stopAudio();
-    const session = createSession(undefined, workspace);
+    const session = createSession();
     setSessions((prev) => {
       const next = [session, ...prev];
       saveSessions(next);
@@ -359,13 +494,76 @@ export default function Home() {
     setInput("");
   }, [stopAudio]);
 
-  const handleWorkspaceChange = useCallback((newWorkspace: string) => {
-    if (!activeSession) return;
-    updateActiveSession((session) => ({
-      ...session,
-      workspace: newWorkspace,
-    }));
-  }, [activeSession, updateActiveSession]);
+  const handleAgentChange = useCallback(
+    (agent: AgentType) => {
+      if (!activeSession || !activeThread) return;
+      stopAudio();
+
+      updateSession((session) => {
+        const now = new Date();
+        const workspace = agent === "opencode" ? DEFAULT_WORKSPACE : undefined;
+        const mode: ThreadMode | undefined =
+          agent === "opencode" ? "live" : undefined;
+        const newThread = createThread(agent, {
+          workspace,
+          mode,
+        });
+        return {
+          ...session,
+          activeThreadId: newThread.id,
+          threads: [...session.threads, newThread],
+          updatedAt: now,
+        };
+      });
+    },
+    [activeSession, activeThread, updateSession, stopAudio]
+  );
+
+  const handleNewThread = useCallback(() => {
+    if (!activeSession || !activeThread) return;
+    stopAudio();
+    const agent = activeThread.agent;
+    updateSession((session) => {
+      const now = new Date();
+      const newThread = createThread(agent, {
+        workspace: activeThread.workspace,
+        mode: activeThread.mode,
+      });
+      return {
+        ...session,
+        activeThreadId: newThread.id,
+        threads: [...session.threads, newThread],
+        updatedAt: now,
+      };
+    });
+  }, [activeSession, activeThread, updateSession, stopAudio]);
+
+  const handleWorkspaceChange = useCallback(
+    (newWorkspace: string) => {
+      if (!activeThread) return;
+      updateActiveThread((thread) => ({
+        ...thread,
+        workspace: newWorkspace,
+      }));
+    },
+    [activeThread, updateActiveThread]
+  );
+
+  const handleModeChange = useCallback(
+    (mode: ThreadMode) => {
+      if (!activeThread) return;
+      updateActiveThread((thread) => ({ ...thread, mode }));
+    },
+    [activeThread, updateActiveThread]
+  );
+
+  const handleThreadTitleChange = useCallback(
+    (newTitle: string) => {
+      if (!activeThread) return;
+      updateActiveThread((thread) => ({ ...thread, title: newTitle }));
+    },
+    [activeThread, updateActiveThread]
+  );
 
   const handleSubmit = async () => {
     await handleSubmitWithText(input);
@@ -405,8 +603,9 @@ export default function Home() {
   const handleExportSession = useCallback((id: string) => {
     const session = sessions.find((s) => s.id === id);
     if (!session) return;
-    const data = session.messages
-      .map((m) => `## ${m.role}\n\n${m.content}`)
+    const data = session.threads
+      .flatMap((t) => t.messages)
+      .map((m) => `## ${m.role} (${m.agent})\n\n${m.content}`)
       .join("\n\n---\n\n");
     const blob = new Blob([data], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
@@ -428,10 +627,10 @@ export default function Home() {
   }, []);
 
   const startTitleEdit = useCallback(() => {
-    if (!activeSession) return;
-    setTitleInput(activeSession.title);
+    if (!activeThread) return;
+    setTitleInput(activeThread.title);
     setEditingTitle(true);
-  }, [activeSession]);
+  }, [activeThread]);
 
   const cancelTitleEdit = useCallback(() => {
     setEditingTitle(false);
@@ -439,16 +638,19 @@ export default function Home() {
   }, []);
 
   const confirmTitleEdit = useCallback(() => {
-    if (!activeSession || !titleInput.trim()) {
+    if (!activeThread || !titleInput.trim()) {
       cancelTitleEdit();
       return;
     }
-    handleRenameSession(activeSession.id, titleInput.trim());
+    handleThreadTitleChange(titleInput.trim());
     setEditingTitle(false);
     setTitleInput("");
-  }, [activeSession, titleInput, handleRenameSession]);
+  }, [activeThread, titleInput, handleThreadTitleChange]);
 
-  const messages = activeSession?.messages ?? [];
+  const messages = activeThread?.messages ?? [];
+  const agentLabel =
+    AGENT_OPTIONS.find((a) => a.value === activeThread?.agent)?.label ??
+    "Agent";
 
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-100 font-mono">
@@ -464,33 +666,38 @@ export default function Home() {
             <Sparkles className="h-5 w-5 text-blue-500" />
             <span className="font-heading text-sm">Chat History</span>
           </div>
-          <Button size="sm" variant="ghost" onClick={() => handleNewChat()} className="h-8 gap-1 text-xs">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleNewChat()}
+            className="h-8 gap-1 text-xs"
+          >
             <Plus className="h-4 w-4" /> New
           </Button>
         </div>
         <div className="min-w-[20rem] flex-1 overflow-hidden">
-            <AgentChatHistory
-              sessions={sessions}
-              selectedSessionId={selectedId}
-              showPreview={false}
-              onSelectSession={(session) => {
-                stopAudio();
-                setSelectedId(session.id);
-              }}
-              onDeleteSession={handleDeleteSession}
-              onStarSession={handleStarSession}
-              onArchiveSession={handleArchiveSession}
-              onExportSession={handleExportSession}
-              onRenameSession={handleRenameSession}
-            />
+          <AgentChatHistory
+            sessions={sessions}
+            selectedSessionId={selectedId}
+            showPreview={false}
+            onSelectSession={(session) => {
+              stopAudio();
+              setSelectedId(session.id);
+            }}
+            onDeleteSession={handleDeleteSession}
+            onStarSession={handleStarSession}
+            onArchiveSession={handleArchiveSession}
+            onExportSession={handleExportSession}
+            onRenameSession={handleRenameSession}
+          />
         </div>
       </aside>
 
       {/* Main chat */}
       <div className="flex flex-1 flex-col">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-6 py-4">
-          <div className="flex items-center gap-3">
+        <header className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-6 py-4 gap-4">
+          <div className="flex items-center gap-3 min-w-0">
             <Button
               size="icon"
               variant="ghost"
@@ -498,12 +705,40 @@ export default function Home() {
               className="h-8 w-8 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               aria-label={sidebarOpen ? "Collapse sidebar" : "Open sidebar"}
             >
-              {sidebarOpen ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeft className="h-5 w-5" />}
+              {sidebarOpen ? (
+                <PanelLeftClose className="h-5 w-5" />
+              ) : (
+                <PanelLeft className="h-5 w-5" />
+              )}
             </Button>
-            <div className="flex items-center gap-2">
+
+            <Select
+              value={activeThread?.agent ?? "jasper"}
+              onValueChange={(v) => handleAgentChange(v as AgentType)}
+            >
+              <SelectTrigger className="w-40 border-zinc-700 bg-zinc-800/50 text-zinc-100">
+                <SelectValue placeholder="Select agent" />
+              </SelectTrigger>
+              <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
+                {AGENT_OPTIONS.map((opt) => (
+                  <SelectItem
+                    key={opt.value}
+                    value={opt.value}
+                    className="focus:bg-zinc-800 focus:text-zinc-100"
+                  >
+                    <span className="flex items-center gap-2">
+                      {opt.icon}
+                      {opt.label}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center gap-2 min-w-0">
               {editingTitle ? (
                 <>
-                  <input
+                  <Input
                     value={titleInput}
                     onChange={(e) => setTitleInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -511,7 +746,7 @@ export default function Home() {
                       if (e.key === "Escape") cancelTitleEdit();
                     }}
                     autoFocus
-                    className="h-7 rounded bg-zinc-800 px-2 text-sm text-zinc-100 outline-none ring-1 ring-zinc-700 focus:ring-blue-500"
+                    className="h-7 rounded bg-zinc-800 px-2 text-sm text-zinc-100 outline-none ring-1 ring-zinc-700 focus:ring-blue-500 border-none"
                   />
                   <Button
                     size="icon"
@@ -532,7 +767,9 @@ export default function Home() {
                 </>
               ) : (
                 <>
-                  <h1 className="font-heading text-lg tracking-wide text-zinc-100">{activeSession?.title ?? "LangGraph Agent Chat"}</h1>
+                  <h1 className="font-heading text-lg tracking-wide text-zinc-100 truncate">
+                    {activeThread?.title ?? activeSession?.title ?? "LangGraph Agent Chat"}
+                  </h1>
                   <Button
                     size="icon"
                     variant="ghost"
@@ -543,19 +780,44 @@ export default function Home() {
                   </Button>
                 </>
               )}
-              <p className="text-xs text-zinc-400">OpenCode CLI · Research Agent</p>
+              <p className="text-xs text-zinc-400 whitespace-nowrap">
+                {agentLabel}
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-3 py-1.5 border border-zinc-700">
-              <FolderKanban className="h-4 w-4 text-zinc-400" />
-              <input
-                value={activeSession?.workspace ?? DEFAULT_WORKSPACE}
-                onChange={(e) => handleWorkspaceChange(e.target.value)}
-                className="bg-transparent text-xs text-zinc-200 w-64 outline-none font-mono"
-                title="Workspace path for OpenCode CLI"
-              />
-            </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            {activeThread?.agent === "opencode" && (
+              <>
+                <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-3 py-1.5 border border-zinc-700">
+                  <FolderKanban className="h-4 w-4 text-zinc-400" />
+                  <Input
+                    value={activeThread?.workspace ?? DEFAULT_WORKSPACE}
+                    onChange={(e) => handleWorkspaceChange(e.target.value)}
+                    className="bg-transparent text-xs text-zinc-200 w-64 outline-none font-mono border-none focus-visible:ring-0 p-0"
+                    title="Workspace path for OpenCode CLI"
+                  />
+                </div>
+                <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-3 py-1.5 border border-zinc-700">
+                  <span className="text-xs text-zinc-400">Async</span>
+                  <Switch
+                    checked={activeThread?.mode === "live"}
+                    onCheckedChange={(checked) =>
+                      handleModeChange(checked ? "live" : "async")
+                    }
+                  />
+                  <span className="text-xs text-zinc-200">Live</span>
+                </div>
+              </>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleNewThread}
+              className="h-8 gap-1 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              <Plus className="h-4 w-4" /> Thread
+            </Button>
             <div className="flex gap-2">
               <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs text-blue-400">
                 OpenCode CLI
@@ -581,7 +843,7 @@ export default function Home() {
                 <MessageAvatar
                   src=""
                   alt={msg.role}
-                  fallback={msg.role === "user" ? "U" : "A"}
+                  fallback={msg.role === "user" ? "U" : msg.agent[0].toUpperCase()}
                   className={cn(
                     "h-8 w-8",
                     msg.role === "user" ? "bg-emerald-600" : "bg-blue-600"
@@ -594,21 +856,23 @@ export default function Home() {
                       return (
                         <>
                           {text && (
-            <MessageContent
-              markdown
-              className="rounded-2xl px-4 py-3 text-sm bg-zinc-900 text-zinc-100 font-mono"
-            >
-              {text}
-            </MessageContent>
+                            <MessageContent
+                              markdown
+                              className="rounded-2xl px-4 py-3 text-sm bg-zinc-900 text-zinc-100 font-mono"
+                            >
+                              {text}
+                            </MessageContent>
                           )}
-                          {artifacts.map((artifact: ArtifactBlock, aidx: number) => (
-                            <div key={aidx} className="mt-2">
-                              <ChatArtifact
-                                content={artifact.content}
-                                language={artifact.language}
-                              />
-                            </div>
-                          ))}
+                          {artifacts.map(
+                            (artifact: ArtifactBlock, aidx: number) => (
+                              <div key={aidx} className="mt-2">
+                                <ChatArtifact
+                                  content={artifact.content}
+                                  language={artifact.language}
+                                />
+                              </div>
+                            )
+                          )}
                           <div className="flex justify-start">
                             <button
                               onClick={() =>
@@ -623,7 +887,9 @@ export default function Home() {
                                   : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
                               )}
                               aria-label={
-                                speakingIndex === idx ? "Stop speaking" : "Read aloud"
+                                speakingIndex === idx
+                                  ? "Stop speaking"
+                                  : "Read aloud"
                               }
                             >
                               {speakingIndex === idx ? (
@@ -672,8 +938,8 @@ export default function Home() {
             {activeInquiry && !loading && (
               <div className="max-w-3xl">
                 <AgentInquiry
-                  agentName="OpenCode CLI"
-                  taskContext={activeSession?.title ?? "Clarification"}
+                  agentName={agentLabel}
+                  taskContext={activeThread?.title ?? "Clarification"}
                   inquiry={activeInquiry}
                   inquiryHistory={inquiryHistory}
                   onSubmit={handleInquirySubmit}
@@ -695,13 +961,15 @@ export default function Home() {
               className="bg-zinc-950 border-zinc-800"
             >
               <PromptInputTextarea
-                placeholder="Type your message…"
+                placeholder={`Message ${agentLabel}…`}
                 className="text-zinc-100 placeholder:text-zinc-500 font-mono"
                 disabled={loading}
               />
               <PromptInputActions className="justify-between">
                 <div className="flex items-center gap-2">
-                  <PromptInputAction tooltip={recording ? "Stop recording" : "Voice input"}>
+                  <PromptInputAction
+                    tooltip={recording ? "Stop recording" : "Voice input"}
+                  >
                     <Button
                       size="icon"
                       variant="ghost"
@@ -713,11 +981,17 @@ export default function Home() {
                           : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
                       )}
                     >
-                      {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                      {recording ? (
+                        <Square className="h-4 w-4" />
+                      ) : (
+                        <Mic className="h-4 w-4" />
+                      )}
                     </Button>
                   </PromptInputAction>
                   {recording && (
-                    <span className="text-xs text-red-400 animate-pulse">Listening…</span>
+                    <span className="text-xs text-red-400 animate-pulse">
+                      Listening…
+                    </span>
                   )}
                 </div>
 
@@ -734,9 +1008,7 @@ export default function Home() {
               </PromptInputActions>
             </PromptInput>
             {micError && (
-              <p className="mt-2 text-center text-xs text-red-400">
-                {micError}
-              </p>
+              <p className="mt-2 text-center text-xs text-red-400">{micError}</p>
             )}
             <p className="mt-2 text-center text-xs text-zinc-500 font-heading tracking-wider">
               POWERED BY LANGGRAPH · OLLAMA CLOUD · AGENTS-UI-KIT

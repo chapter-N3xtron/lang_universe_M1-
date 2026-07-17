@@ -26,24 +26,51 @@ import {
 } from "lucide-react"
 import { useState, useMemo } from "react"
 
+export type AgentType = "jasper" | "opencode" | "research"
+
+export type ThreadMode = "live" | "async"
+
 export type ChatMessage = {
   id: string
   role: "user" | "assistant"
   content: string
+  agent: AgentType
   timestamp: Date
   tokens?: number
   model?: string
 }
 
+export type ChatThread = {
+  id: string
+  agent: AgentType
+  workspace?: string
+  mode?: ThreadMode
+  title: string
+  messages: ChatMessage[]
+  createdAt: Date
+  updatedAt: Date
+}
+
 export type ChatSession = {
   id: string
   title: string
-  messages: ChatMessage[]
-  workspace: string
+  activeThreadId: string
+  threads: ChatThread[]
   createdAt: Date
   updatedAt: Date
   starred?: boolean
   archived?: boolean
+}
+
+function getThreadPreview(session: ChatSession): string {
+  const thread = session.threads.find((t) => t.id === session.activeThreadId)
+  const messages = thread?.messages ?? session.threads.flatMap((t) => t.messages)
+  const lastMessage = messages[messages.length - 1]
+  return lastMessage?.content.slice(0, 100) + (lastMessage?.content.length > 100 ? "..." : "")
+}
+
+function getMessageCount(session: ChatSession): number {
+  return session.threads.reduce((acc, t) => acc + t.messages.length, 0)
 }
 
 export interface AgentChatHistoryProps {
@@ -94,8 +121,8 @@ function SessionItem({
   onExport: () => void
   onRename: (newTitle: string) => void
 }) {
-  const lastMessage = session.messages[session.messages.length - 1]
-  const preview = lastMessage?.content.slice(0, 100) + (lastMessage?.content.length > 100 ? "..." : "")
+  const preview = getThreadPreview(session)
+  const messageCount = getMessageCount(session)
   const [isEditing, setIsEditing] = useState(false)
   const [editTitle, setEditTitle] = useState(session.title)
 
@@ -147,7 +174,7 @@ function SessionItem({
             {preview}
           </p>
           <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-            <span>{session.messages.length} messages</span>
+            <span>{messageCount} messages</span>
             <span>{formatDate(session.updatedAt)}</span>
           </div>
         </div>
@@ -250,7 +277,8 @@ export function AgentChatHistory({
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
         const titleMatch = session.title.toLowerCase().includes(query)
-        const messageMatch = session.messages.some(msg => 
+        const allMessages = session.threads.flatMap((t) => t.messages)
+        const messageMatch = allMessages.some((msg) =>
           msg.content.toLowerCase().includes(query)
         )
         return titleMatch || messageMatch
@@ -331,15 +359,17 @@ export function AgentChatHistory({
           <div className="p-4 border-b">
             <h3 className="font-semibold">{selectedSession.title}</h3>
             <p className="text-sm text-muted-foreground">
-              {selectedSession.messages.length} messages • Last updated {formatDate(selectedSession.updatedAt)}
+              {getMessageCount(selectedSession)} messages • Last updated {formatDate(selectedSession.updatedAt)}
             </p>
           </div>
           
           <ScrollArea className="flex-1">
             <div className="p-4 space-y-2">
-              {selectedSession.messages.map(message => (
-                <MessagePreview key={message.id} message={message} />
-              ))}
+              {selectedSession.threads
+                .flatMap((t) => t.messages)
+                .map((message) => (
+                  <MessagePreview key={message.id} message={message} />
+                ))}
             </div>
           </ScrollArea>
         </div>

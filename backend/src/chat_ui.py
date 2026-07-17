@@ -8,21 +8,46 @@ from src.research_agent import create_research_graph
 class State(TypedDict):
     messages: Annotated[List[dict], operator.add]
     workspace: str
+    target_agent: str
+    mode: str
 
 
 def router(state: State):
-    """Route the latest user message to the appropriate agent."""
+    """Route deterministically by target_agent. Falls back to keyword heuristic only when missing."""
+    target = (state.get("target_agent") or "").lower()
+    if target == "opencode":
+        return "opencode"
+    if target == "research":
+        return "research"
+    if target == "jasper":
+        return "jasper"
+
+    # Fallback keyword heuristic for backwards compatibility
     user_messages = [m for m in state["messages"] if isinstance(m, dict) and m.get("role") == "user"]
     if not user_messages:
         return END
-
     content = user_messages[-1].get("content", "").lower()
-
     if any(word in content for word in ["code", "function", "class", "implement", "bug", "fix", "create", "write", "refactor", "add", "update", "delete", "test", "build", "repo"]):
         return "opencode"
-    elif any(word in content for word in ["research", "search", "find", "scrape", "crawl"]):
+    if any(word in content for word in ["research", "search", "find", "scrape", "crawl"]):
         return "research"
-    return "opencode"  # Default to opencode
+    return "jasper"
+
+
+def jasper_agent(state: State):
+    """Daily-driver assistant / ticket clerk. Simple echo with routing info for now."""
+    user_messages = [m for m in state["messages"] if isinstance(m, dict) and m.get("role") == "user"]
+    user_text = user_messages[-1].get("content", "") if user_messages else ""
+
+    content = f"""Hi, I'm Jasper.
+
+I heard: "{user_text}"
+
+I can hand this off to OpenCode for repo work or Research for web tasks. Use the agent selector above to choose who should handle it."""
+
+    return {
+        "messages": [{"role": "assistant", "content": content}],
+    }
 
 
 def create_chat_ui():
@@ -39,10 +64,12 @@ def create_chat_ui():
         result = research_app.invoke({"messages": state["messages"]})
         return {"messages": result["messages"]}
 
+    graph.add_node("jasper", jasper_agent)
     graph.add_node("opencode", run_opencode)
     graph.add_node("research", run_research)
 
-    graph.add_conditional_edges(START, router, ["opencode", "research", END])
+    graph.add_conditional_edges(START, router, ["jasper", "opencode", "research", END])
+    graph.add_edge("jasper", END)
     graph.add_edge("opencode", END)
     graph.add_edge("research", END)
 

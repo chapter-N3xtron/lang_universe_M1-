@@ -27,6 +27,8 @@ class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessage] = []
     workspace: str = None
+    target_agent: str = "opencode"
+    mode: str = "live"
 
 
 class ChatResponse(BaseModel):
@@ -65,7 +67,12 @@ def chat(request: ChatRequest) -> ChatResponse:
     messages = [m.model_dump() for m in request.history]
     messages.append({"role": "user", "content": request.message})
 
-    result = app_graph.invoke({"messages": messages, "workspace": request.workspace})
+    result = app_graph.invoke({
+        "messages": messages,
+        "workspace": request.workspace,
+        "target_agent": request.target_agent,
+        "mode": request.mode,
+    })
     response = result["messages"][-1]["content"]
 
     return ChatResponse(response=response)

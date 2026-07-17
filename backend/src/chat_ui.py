@@ -57,7 +57,11 @@ def create_chat_ui():
     research_app = create_research_graph()
 
     def run_opencode(state):
-        result = opencode_app.invoke({"messages": state["messages"], "workspace": state.get("workspace")})
+        result = opencode_app.invoke({
+            "messages": state["messages"],
+            "workspace": state.get("workspace"),
+            "mode": state.get("mode", "live"),
+        })
         return {"messages": result["messages"]}
 
     def run_research(state):

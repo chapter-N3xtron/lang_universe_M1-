@@ -7,6 +7,8 @@ from src.opencode_cli import run_opencode
 
 class State(TypedDict):
     messages: Annotated[List[dict], operator.add]
+    workspace: str
+    mode: str
     code_response: str
     reasoning: str
 
@@ -23,11 +25,8 @@ def opencode_coding_agent(state: State):
     try:
         workspace = state.get("workspace")
         mode = state.get("mode", "live")
-        message = user_query
-        if workspace:
-            message = f"[Workspace: {workspace}]\n\n{user_query}"
         result = run_opencode(
-            message=message,
+            message=user_query,
             title=user_query[:50],
             workspace=workspace,
             auto_approve=(mode == "async"),

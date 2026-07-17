@@ -1,0 +1,10 @@
+UI Parts
+========
+
+Agent UI component libraries and templates to evaluate for this project.
+
+- https://github.com/agents-ui/agents-kit
+  Ready-made shadcn/ui components for AI agent interfaces (prompt-kit + agent-specific components).
+
+- https://github.com/agno-agi/agent-ui
+  Modern chat interface for Agno AgentOS built with Next.js, Tailwind CSS, and TypeScript.

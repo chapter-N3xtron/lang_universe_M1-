@@ -1139,7 +1139,9 @@ export default function Home() {
                     <SelectTrigger className="w-56 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
                       <span className="flex items-center gap-2 overflow-hidden">
                         <Cpu className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
-                        <span className="truncate font-mono">{activeModel.split("/").pop() || activeModel}</span>
+                        <span className="truncate font-mono">{
+                          activeModel.replace(/^ollama\//, "").replace(/^ollama-cloud\//, "") || activeModel
+                        }</span>
                       </span>
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-sm">

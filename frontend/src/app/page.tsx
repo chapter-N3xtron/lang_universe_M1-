@@ -211,6 +211,8 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState("");
+  const [pickingWorkspace, setPickingWorkspace] = useState(false);
+  const [manualWorkspaceInput, setManualWorkspaceInput] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const initialized = useRef(false);
@@ -582,12 +584,10 @@ export default function Home() {
     [activeThread, updateActiveThread]
   );
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
   const handlePickWorkspace = useCallback(async () => {
     if (!activeThread) return;
 
-    // Try native File System Access API first
+    // Native File System Access API: opens a directory picker without uploading
     if (typeof window !== "undefined" && "showDirectoryPicker" in window) {
       try {
         const dir = await (window as any).showDirectoryPicker?.();
@@ -599,22 +599,11 @@ export default function Home() {
           return;
         }
       } catch {
-        // user cancelled or denied
+        // user cancelled or denied; show manual entry
       }
     }
 
-    // Fallback to directory input
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-      return;
-    }
-
-    // Last resort: manual prompt
-    const fallback = window.prompt(
-      "Repo path (e.g. /Users/you/project):",
-      activeThread.workspace ?? DEFAULT_WORKSPACE
-    );
-    if (fallback) handleWorkspaceChange(fallback);
+    setPickingWorkspace(true);
   }, [activeThread, handleWorkspaceChange]);
 
   const handleModeChange = useCallback(
@@ -1039,29 +1028,42 @@ export default function Home() {
               )}
             </div>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              // @ts-expect-error webkitdirectory is non-standard
-              webkitdirectory=""
-              directory=""
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                const files = e.target.files;
-                if (files && files.length > 0) {
-                  const f = files[0] as any;
-                  const fullPath = f.path || f.webkitRelativePath;
-                  if (fullPath) {
-                    const dir = fullPath.includes("/")
-                      ? fullPath.split("/")[0]
-                      : fullPath;
-                    handleWorkspaceChange(`/Users/${dir}`);
-                  }
-                }
-                e.target.value = "";
-              }}
-            />
+            {pickingWorkspace && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const path = manualWorkspaceInput.trim();
+                  if (path) handleWorkspaceChange(path);
+                  setPickingWorkspace(false);
+                  setManualWorkspaceInput("");
+                }}
+                className="flex items-center gap-2 mb-2"
+              >
+                <Input
+                  value={manualWorkspaceInput}
+                  onChange={(e) => setManualWorkspaceInput(e.target.value)}
+                  placeholder="Repo path, e.g. /Users/you/project"
+                  className="flex-1 h-8 text-xs font-mono bg-zinc-950 border-zinc-700 text-zinc-100"
+                  autoFocus
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="h-8 bg-blue-600 hover:bg-blue-500 text-white text-xs"
+                >
+                  Set
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setPickingWorkspace(false)}
+                  className="h-8 text-zinc-400 hover:bg-zinc-800 text-xs"
+                >
+                  Cancel
+                </Button>
+              </form>
+            )}
 
             <PromptInput
               value={input}

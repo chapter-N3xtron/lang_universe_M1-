@@ -21,9 +21,11 @@ def opencode_coding_agent(state: State):
             break
 
     try:
+        workspace = state.get("workspace")
         result = run_opencode(
             message=user_query,
             title=user_query[:50],
+            workspace=workspace,
         )
 
         if not result["success"]:

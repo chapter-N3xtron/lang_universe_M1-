@@ -39,6 +39,7 @@ export type ChatSession = {
   id: string
   title: string
   messages: ChatMessage[]
+  workspace: string
   createdAt: Date
   updatedAt: Date
   starred?: boolean

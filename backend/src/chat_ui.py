@@ -7,6 +7,7 @@ from src.research_agent import create_research_graph
 
 class State(TypedDict):
     messages: Annotated[List[dict], operator.add]
+    workspace: str
 
 
 def router(state: State):
@@ -17,7 +18,7 @@ def router(state: State):
 
     content = user_messages[-1].get("content", "").lower()
 
-    if any(word in content for word in ["code", "function", "class", "implement", "bug", "fix", "create", "write"]):
+    if any(word in content for word in ["code", "function", "class", "implement", "bug", "fix", "create", "write", "refactor", "add", "update", "delete", "test", "build", "repo"]):
         return "opencode"
     elif any(word in content for word in ["research", "search", "find", "scrape", "crawl"]):
         return "research"
@@ -31,7 +32,7 @@ def create_chat_ui():
     research_app = create_research_graph()
 
     def run_opencode(state):
-        result = opencode_app.invoke({"messages": state["messages"]})
+        result = opencode_app.invoke({"messages": state["messages"], "workspace": state.get("workspace")})
         return {"messages": result["messages"]}
 
     def run_research(state):

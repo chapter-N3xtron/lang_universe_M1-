@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Sparkles, Volume2, Mic, Square, Plus, PanelLeftClose, PanelLeft, Pencil, Check, X } from "lucide-react";
+import { Send, Sparkles, Volume2, Mic, Square, Plus, PanelLeftClose, PanelLeft, Pencil, Check, X, FolderKanban } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ const WELCOME_MESSAGE: ChatMessage = {
 };
 
 const STORAGE_KEY = "langgraph-agent-chat-sessions";
+const DEFAULT_WORKSPACE = "/Users/chaptercaptaingeneral/LangGraph_AgentChat_ui_Opencode_CLI";
 
 function generateTitle(messages: ChatMessage[]): string {
   const firstUser = messages.find((m) => m.role === "user");
@@ -73,11 +74,12 @@ function saveSessions(sessions: ChatSession[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
 }
 
-function createSession(messages: ChatMessage[] = [WELCOME_MESSAGE]): ChatSession {
+function createSession(messages: ChatMessage[] = [WELCOME_MESSAGE], workspace = DEFAULT_WORKSPACE): ChatSession {
   const now = new Date();
   return {
     id: uuidv4(),
     title: generateTitle(messages),
+    workspace,
     messages: messages.map((m) => ({
       id: uuidv4(),
       role: m.role,
@@ -248,7 +250,7 @@ export default function Home() {
       }));
 
       try {
-        const response = await sendChatMessage(text, userHistory);
+        const response = await sendChatMessage(text, userHistory, activeSession.workspace);
         addAssistantMessage(response);
         detectInquiry(response);
       } catch (err) {
@@ -345,9 +347,9 @@ export default function Home() {
     }
   }, []);
 
-  const handleNewChat = useCallback(() => {
+  const handleNewChat = useCallback((workspace = DEFAULT_WORKSPACE) => {
     stopAudio();
-    const session = createSession();
+    const session = createSession(undefined, workspace);
     setSessions((prev) => {
       const next = [session, ...prev];
       saveSessions(next);
@@ -356,6 +358,14 @@ export default function Home() {
     setSelectedId(session.id);
     setInput("");
   }, [stopAudio]);
+
+  const handleWorkspaceChange = useCallback((newWorkspace: string) => {
+    if (!activeSession) return;
+    updateActiveSession((session) => ({
+      ...session,
+      workspace: newWorkspace,
+    }));
+  }, [activeSession, updateActiveSession]);
 
   const handleSubmit = async () => {
     await handleSubmitWithText(input);
@@ -454,7 +464,7 @@ export default function Home() {
             <Sparkles className="h-5 w-5 text-blue-500" />
             <span className="font-heading text-sm">Chat History</span>
           </div>
-          <Button size="sm" variant="ghost" onClick={handleNewChat} className="h-8 gap-1 text-xs">
+          <Button size="sm" variant="ghost" onClick={() => handleNewChat()} className="h-8 gap-1 text-xs">
             <Plus className="h-4 w-4" /> New
           </Button>
         </div>
@@ -536,13 +546,24 @@ export default function Home() {
               <p className="text-xs text-zinc-400">OpenCode CLI · Research Agent</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs text-blue-400">
-              OpenCode CLI
-            </span>
-            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-400">
-              Research
-            </span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-3 py-1.5 border border-zinc-700">
+              <FolderKanban className="h-4 w-4 text-zinc-400" />
+              <input
+                value={activeSession?.workspace ?? DEFAULT_WORKSPACE}
+                onChange={(e) => handleWorkspaceChange(e.target.value)}
+                className="bg-transparent text-xs text-zinc-200 w-64 outline-none font-mono"
+                title="Workspace path for OpenCode CLI"
+              />
+            </div>
+            <div className="flex gap-2">
+              <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs text-blue-400">
+                OpenCode CLI
+              </span>
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-400">
+                Research
+              </span>
+            </div>
           </div>
         </header>
 

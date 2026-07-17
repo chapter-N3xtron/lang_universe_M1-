@@ -28,7 +28,9 @@ You have access to these tools, which you call by writing a JSON object inside t
 - {"tool": "edit", "path": "<file>", "old_string": "<exact text>", "new_string": "<replacement>"} — exact replacement
 - {"tool": "write", "path": "<file>", "content": "<full content>"} — write a new file
 
-Think step by step. When you need to act on the workspace, output one tool call at a time, then wait for the result. After receiving the result, continue with another tool call or a final answer. Always conclude with a final plain-text answer for the user; never leave the response as only a tool call."""
+MANDATORY RULE: Whenever the user asks about the current directory, repository, files, code, or workspace, you MUST first use your tools to inspect the workspace. Start by running `bash pwd` and `bash ls -la`, then answer based on the tool results. Never say you do not have access to the filesystem.
+
+Think step by step. Output one tool call at a time, then wait for the result. After receiving the result, continue with another tool call or a final answer. Always conclude with a final plain-text answer for the user; never leave the response as only a tool call."""
 
 
 def _workspace() -> str:

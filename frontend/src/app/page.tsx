@@ -1137,9 +1137,9 @@ export default function Home() {
                     onValueChange={(v) => handleModelChange(v ?? defaultModel)}
                   >
                     <SelectTrigger className="w-56 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
-                      <span className="flex items-center gap-2">
-                        <Cpu className="h-3.5 w-3.5 text-zinc-400" />
-                        <SelectValue placeholder="Model" />
+                      <span className="flex items-center gap-2 overflow-hidden">
+                        <Cpu className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                        <span className="truncate font-mono">{activeModel.split("/").pop() || activeModel}</span>
                       </span>
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-sm">
@@ -1147,7 +1147,7 @@ export default function Home() {
                         <SelectItem
                           key={m.id}
                           value={m.id}
-                          className="focus:bg-zinc-800 focus:text-zinc-100"
+                          className="focus:bg-zinc-800 focus:text-zinc-100 font-mono"
                           title={m.id}
                         >
                           <span className="flex items-center gap-2 truncate">

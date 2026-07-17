@@ -1,0 +1,51 @@
+[project]
+name = "langgraph-agent-chat-opencode"
+version = "1.0.0"
+description = "Multi-agent system with LangGraph, Chat UI, and OpenCode CLI"
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "firecrawl-py>=1.0.0",
+    "langgraph-cli[inmem]>=0.1.0",
+    "langchain-ollama>=0.2.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-dotenv>=1.0.0",
+    "kokoro>=0.7.16",
+    "soundfile>=0.12.0",
+    "numpy>=1.26.0",
+    "faster-whisper>=1.0.0",
+    "python-multipart>=0.0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8.0",
+    "pytest>=8.0.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "N",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

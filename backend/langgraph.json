@@ -1,0 +1,10 @@
+{
+  "python_version": "3.11",
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "chat_ui": "./src/chat_ui.py:create_chat_ui"
+  },
+  "env": "./.env"
+}

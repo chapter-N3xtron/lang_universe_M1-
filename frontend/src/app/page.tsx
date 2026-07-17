@@ -768,7 +768,7 @@ export default function Home() {
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [defaultModel, setDefaultModel] = useState<string>("");
 
-  useEffect(() => {
+  const refreshModels = useCallback(() => {
     getAvailableModels()
       .then((data) => {
         setAvailableModels(data.models);
@@ -776,6 +776,15 @@ export default function Home() {
       })
       .catch((err) => console.error("Failed to load models", err));
   }, []);
+
+  useEffect(() => {
+    refreshModels();
+  }, [refreshModels]);
+
+  // Refetch available models when the user opens the model selector
+  const handleModelSelectOpen = useCallback(() => {
+    refreshModels();
+  }, [refreshModels]);
 
   const handleModelChange = useCallback(
     (modelId: string) => {
@@ -1142,10 +1151,11 @@ export default function Home() {
               {/* Left column: model on top, agent below */}
               <div className="flex flex-col gap-2">
                 {availableModels.length > 0 && (
-                  <Select
-                    value={activeModel}
-                    onValueChange={(v) => handleModelChange(v ?? defaultModel)}
-                  >
+                <Select
+                  value={activeModel}
+                  onValueChange={(v) => handleModelChange(v ?? defaultModel)}
+                  onOpenChange={(open) => open && handleModelSelectOpen()}
+                >
                     <SelectTrigger className="w-56 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
                       <span className="flex items-center gap-2 overflow-hidden">
                         <Cpu className="h-3.5 w-3.5 text-zinc-400 shrink-0" />

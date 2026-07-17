@@ -23,6 +23,17 @@ export type STTResponse = {
   transcript: string;
 };
 
+export type FSEntry = {
+  name: string;
+  path: string;
+  type: "dir" | "file";
+};
+
+export type FSListResponse = {
+  path: string;
+  entries: FSEntry[];
+};
+
 export async function sendChatMessage(
   message: string,
   history: ApiChatMessage[],
@@ -76,4 +87,20 @@ export async function transcribeAudio(audio: Blob): Promise<string> {
 
   const data: STTResponse = await res.json();
   return data.transcript;
+}
+
+export async function getHomeDirectory(): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/fs/home`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to get home directory");
+  const data = await res.json();
+  return data.path;
+}
+
+export async function listDirectory(path: string): Promise<FSListResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/fs/list?path=${encodeURIComponent(path)}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(`Failed to list ${path}`);
+  return res.json();
 }

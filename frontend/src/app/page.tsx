@@ -19,6 +19,9 @@ import {
   Telescope,
   FolderSearch,
   HelpCircle,
+  ChevronRight,
+  Folder,
+  FolderOpen,
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { cn } from "@/lib/utils";
@@ -61,7 +64,18 @@ import {
   sendChatMessage,
   synthesizeSpeech,
   transcribeAudio,
+  getHomeDirectory,
+  listDirectory,
+  FSEntry,
 } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 const DEFAULT_WORKSPACE =
   "/Users/chaptercaptaingeneral/LangGraph_AgentChat_ui_Opencode_CLI";
@@ -90,6 +104,135 @@ function saveRecentWorkspace(path: string) {
 
 function repoName(path: string): string {
   return path.split("/").filter(Boolean).pop() || path;
+}
+
+function WorkspacePickerDialog({
+  open,
+  onOpenChange,
+  current,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  current: string;
+  onSelect: (path: string) => void;
+}) {
+  const [entries, setEntries] = useState<FSEntry[]>([]);
+  const [path, setPath] = useState(current);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (target: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await listDirectory(target);
+      setPath(data.path);
+      setEntries(data.entries.filter((e) => e.type === "dir"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load directory");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    load(current);
+  }, [open, current, load]);
+
+  const parent = useCallback(() => {
+    const parts = path.split("/").filter(Boolean);
+    if (parts.length <= 1) return;
+    parts.pop();
+    load("/" + parts.join("/"));
+  }, [path, load]);
+
+  const home = useCallback(async () => {
+    const h = await getHomeDirectory();
+    load(h);
+  }, [load]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md bg-zinc-900 border-zinc-700 text-zinc-100">
+        <DialogHeader>
+          <DialogTitle className="font-heading tracking-wide">
+            Select repo
+          </DialogTitle>
+          <DialogDescription className="text-zinc-400">
+            Navigate and click a folder to select it.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center gap-2 text-xs font-mono text-zinc-300 mb-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={home}
+            className="h-6 text-xs px-2 text-zinc-400 hover:bg-zinc-800"
+          >
+            Home
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={parent}
+            disabled={path === "/"}
+            className="h-6 text-xs px-2 text-zinc-400 hover:bg-zinc-800 disabled:opacity-30"
+          >
+            Up
+          </Button>
+          <span className="truncate flex-1">{path}</span>
+        </div>
+
+        {error && (
+          <p className="text-xs text-red-400 mb-2">{error}</p>
+        )}
+
+        <div className="h-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950">
+          {loading ? (
+            <div className="p-4 text-xs text-zinc-500">Loading…</div>
+          ) : entries.length === 0 ? (
+            <div className="p-4 text-xs text-zinc-500">No folders here</div>
+          ) : (
+            <div className="divide-y divide-zinc-800">
+              {entries.map((entry) => (
+                <button
+                  key={entry.path}
+                  onClick={() => load(entry.path)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+                >
+                  <FolderOpen className="h-4 w-4 text-blue-400 shrink-0" />
+                  <span className="truncate">{entry.name}</span>
+                  <ChevronRight className="h-4 w-4 text-zinc-600 ml-auto shrink-0" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end mt-2">
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            className="text-zinc-400 hover:bg-zinc-800"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              onSelect(path);
+              onOpenChange(false);
+            }}
+            className="bg-blue-600 hover:bg-blue-500 text-white"
+          >
+            Set repo
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 const AGENT_OPTIONS: { value: AgentType; label: string; icon: React.ReactNode }[] =
@@ -212,7 +355,6 @@ export default function Home() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState("");
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
-  const [manualWorkspaceInput, setManualWorkspaceInput] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const initialized = useRef(false);
@@ -584,27 +726,9 @@ export default function Home() {
     [activeThread, updateActiveThread]
   );
 
-  const handlePickWorkspace = useCallback(async () => {
-    if (!activeThread) return;
-
-    // Native File System Access API: opens a directory picker without uploading
-    if (typeof window !== "undefined" && "showDirectoryPicker" in window) {
-      try {
-        const dir = await (window as any).showDirectoryPicker?.();
-        if (dir) {
-          const picked = dir.name
-            ? `/Users/${dir.name}`
-            : activeThread.workspace ?? DEFAULT_WORKSPACE;
-          handleWorkspaceChange(picked);
-          return;
-        }
-      } catch {
-        // user cancelled or denied; show manual entry
-      }
-    }
-
+  const handlePickWorkspace = useCallback(() => {
     setPickingWorkspace(true);
-  }, [activeThread, handleWorkspaceChange]);
+  }, []);
 
   const handleModeChange = useCallback(
     (mode: ThreadMode) => {
@@ -1028,42 +1152,12 @@ export default function Home() {
               )}
             </div>
 
-            {pickingWorkspace && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const path = manualWorkspaceInput.trim();
-                  if (path) handleWorkspaceChange(path);
-                  setPickingWorkspace(false);
-                  setManualWorkspaceInput("");
-                }}
-                className="flex items-center gap-2 mb-2"
-              >
-                <Input
-                  value={manualWorkspaceInput}
-                  onChange={(e) => setManualWorkspaceInput(e.target.value)}
-                  placeholder="Repo path, e.g. /Users/you/project"
-                  className="flex-1 h-8 text-xs font-mono bg-zinc-950 border-zinc-700 text-zinc-100"
-                  autoFocus
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="h-8 bg-blue-600 hover:bg-blue-500 text-white text-xs"
-                >
-                  Set
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setPickingWorkspace(false)}
-                  className="h-8 text-zinc-400 hover:bg-zinc-800 text-xs"
-                >
-                  Cancel
-                </Button>
-              </form>
-            )}
+            <WorkspacePickerDialog
+              open={pickingWorkspace}
+              onOpenChange={setPickingWorkspace}
+              current={activeThread?.workspace ?? DEFAULT_WORKSPACE}
+              onSelect={handleWorkspaceChange}
+            />
 
             <PromptInput
               value={input}

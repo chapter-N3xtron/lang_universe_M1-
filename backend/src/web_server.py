@@ -2,6 +2,7 @@
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import List
 
 from dotenv import load_dotenv
@@ -105,6 +106,41 @@ def stt(audio: UploadFile = File(...)) -> dict:
         audio_bytes = audio.file.read()
         text = transcribe(audio_bytes)
         return {"transcript": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FSListResponse(BaseModel):
+    path: str
+    entries: list[dict]
+
+
+@app.get("/api/fs/home")
+def fs_home() -> dict:
+    return {"path": str(Path.home())}
+
+
+@app.get("/api/fs/list")
+def fs_list(path: str) -> FSListResponse:
+    try:
+        target = Path(path).expanduser().resolve()
+        if not target.exists() or not target.is_dir():
+            raise HTTPException(status_code=400, detail="Not a valid directory")
+        entries = []
+        for child in sorted(target.iterdir()):
+            if child.name.startswith("."):
+                continue
+            try:
+                entries.append({
+                    "name": child.name,
+                    "path": str(child),
+                    "type": "dir" if child.is_dir() else "file",
+                })
+            except PermissionError:
+                continue
+        return FSListResponse(path=str(target), entries=entries)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

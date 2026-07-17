@@ -88,6 +88,10 @@ function saveRecentWorkspace(path: string) {
   localStorage.setItem(RECENT_WORKSPACES_KEY, JSON.stringify(next));
 }
 
+function repoName(path: string): string {
+  return path.split("/").filter(Boolean).pop() || path;
+}
+
 const AGENT_OPTIONS: { value: AgentType; label: string; icon: React.ReactNode }[] =
   [
     { value: "jasper", label: "Jasper", icon: <Bot className="h-4 w-4" /> },
@@ -578,6 +582,26 @@ export default function Home() {
     [activeThread, updateActiveThread]
   );
 
+  const handlePickWorkspace = useCallback(async () => {
+    if (!activeThread) return;
+    try {
+      const dir = await (window as any).showDirectoryPicker?.();
+      if (!dir) return;
+      // File System Access API gives a directory handle; we construct the best path we can.
+      const picked = dir.name
+        ? `/Users/${dir.name}`
+        : activeThread.workspace ?? DEFAULT_WORKSPACE;
+      handleWorkspaceChange(picked);
+    } catch {
+      // User cancelled or API unavailable; fall back to a simple prompt.
+      const fallback = window.prompt(
+        "Repo path (e.g. /Users/you/project):",
+        activeThread.workspace ?? DEFAULT_WORKSPACE
+      );
+      if (fallback) handleWorkspaceChange(fallback);
+    }
+  }, [activeThread, handleWorkspaceChange]);
+
   const handleModeChange = useCallback(
     (mode: ThreadMode) => {
       if (!activeThread) return;
@@ -1009,28 +1033,18 @@ export default function Home() {
 
               {activeThread?.agent === "opencode" && (
                 <>
-                  <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-2 py-1 border border-zinc-700">
-                    <FolderKanban className="h-3 w-3 text-zinc-400" />
-                    <Select
-                      value={activeThread?.workspace ?? DEFAULT_WORKSPACE}
-                    onValueChange={(v) => handleWorkspaceChange(v ?? DEFAULT_WORKSPACE)}
-                    >
-                      <SelectTrigger className="w-56 border-none bg-transparent text-xs text-zinc-200 font-mono focus:ring-0 p-0 h-auto shadow-none">
-                        <SelectValue placeholder="Select repo…" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-xs">
-                        {loadRecentWorkspaces().map((path) => (
-                          <SelectItem
-                            key={path}
-                            value={path}
-                            className="focus:bg-zinc-800 focus:text-zinc-100 text-xs font-mono"
-                          >
-                            {path}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handlePickWorkspace()}
+                    className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-zinc-800 px-2"
+                    title="Choose repo"
+                  >
+                    <FolderKanban className="h-4 w-4 text-zinc-400" />
+                    <span className="max-w-[12rem] truncate font-heading tracking-wide">
+                      {repoName(activeThread?.workspace ?? DEFAULT_WORKSPACE)}
+                    </span>
+                  </Button>
 
                   <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-2 py-1 border border-zinc-700">
                     <Switch

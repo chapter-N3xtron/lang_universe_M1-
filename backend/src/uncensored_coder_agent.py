@@ -179,16 +179,35 @@ _TOOL_DISPATCH = {
 
 
 def _extract_tool_calls(text: str) -> List[dict]:
-    """Find all ```tool ... ``` blocks in assistant output."""
+    """Find tool calls in assistant output: either inside ```tool ... ``` blocks or as inline JSON objects."""
     calls = []
-    pattern = re.compile(r"```tool\s*\n(.*?)\n```", re.DOTALL)
-    for match in pattern.findall(text):
+
+    # 1) Explicit ```tool code fences
+    fence_pattern = re.compile(r"```tool\s*\n(.*?)\n```", re.DOTALL)
+    for match in fence_pattern.findall(text):
         try:
             data = json.loads(match.strip())
             if isinstance(data, dict) and "tool" in data:
                 calls.append(data)
         except json.JSONDecodeError:
             continue
+
+    # 2) Inline JSON objects that look like tool calls, e.g. {"tool": "bash", ...}
+    #    Find outer JSON objects starting with {"tool": "..."
+    inline_pattern = re.compile(
+        r'\{\s*"tool"\s*:\s*"([a-z_]+)"((?:[^{}]|\{(?:[^{}]|\{[^}]*\})*\})*)\s*\}'
+    )
+    for match in inline_pattern.finditer(text):
+        candidate = match.group(0)
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict) and data.get("tool") in _TOOL_DISPATCH:
+                # Avoid duplicates from already-matched fences
+                if data not in calls:
+                    calls.append(data)
+        except json.JSONDecodeError:
+            continue
+
     return calls
 
 
@@ -260,7 +279,7 @@ def run_uncensored_coder(
                     "model": model,
                     "messages": messages,
                     "stream": False,
-                    "options": {"temperature": 0.7, "num_ctx": 8192},
+                    "options": {"temperature": 0.7, "num_ctx": 4096},
                 },
                 timeout=timeout,
             )

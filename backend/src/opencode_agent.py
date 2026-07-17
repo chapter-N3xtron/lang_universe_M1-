@@ -25,11 +25,17 @@ def opencode_coding_agent(state: State):
     try:
         workspace = state.get("workspace")
         mode = state.get("mode", "live")
+        history_for_model = [
+            {"role": m.get("role"), "content": m.get("content")}
+            for m in messages
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+        ]
         result = run_opencode(
             message=user_query,
             title=user_query[:50],
             workspace=workspace,
             auto_approve=(mode == "async"),
+            history=history_for_model,
         )
 
         if not result["success"]:

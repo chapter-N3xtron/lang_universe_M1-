@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from src.ollama_client import chat_ollama, list_ollama_models
+
 
 def _find_opencode_binary() -> str:
     """Locate the opencode CLI binary."""
@@ -45,6 +47,10 @@ def _default_agent() -> str:
     return os.getenv("OPENCODE_CLI_AGENT", "build")
 
 
+def _is_local_ollama_model(model: Optional[str]) -> bool:
+    return bool(model and model.startswith("ollama/") and not model.startswith("ollama-cloud/"))
+
+
 def run_opencode(
     message: str,
     workspace: Optional[str] = None,
@@ -54,9 +60,14 @@ def run_opencode(
     title: Optional[str] = None,
     auto_approve: bool = False,
     timeout: int = 300,
+    history: Optional[list] = None,
 ) -> dict:
     """
     Run `opencode run` with --format json and return structured results.
+
+    For local Ollama models (prefix `ollama/`), bypass the OpenCode CLI and
+    call the local Ollama API directly because the OpenCode CLI only
+    supports the `ollama-cloud` provider.
 
     Returns:
         {
@@ -68,9 +79,26 @@ def run_opencode(
             "error": str | None,
         }
     """
+    model = model or _default_model()
+
+    if _is_local_ollama_model(model):
+        result = chat_ollama(
+            message=message,
+            model=model,
+            history=history,
+            timeout=timeout,
+        )
+        return {
+            "success": result["success"],
+            "session_id": None,
+            "text": result["text"],
+            "artifacts": [],
+            "events": [],
+            "error": result.get("error"),
+        }
+
     binary = _find_opencode_binary()
     workspace = workspace or _default_workspace()
-    model = model or _default_model()
     agent = agent or _default_agent()
 
     cmd = [

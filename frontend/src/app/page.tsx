@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Folder,
   FolderOpen,
+  Cpu,
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,8 @@ import {
   listDirectory,
   FSEntry,
   pickFolder,
+  getAvailableModels,
+  ModelInfo,
 } from "@/lib/api";
 import {
   Dialog,
@@ -277,7 +280,7 @@ function generateTitle(messages: ChatMessage[]): string {
 
 function createThread(
   agent: AgentType,
-  opts: { workspace?: string; mode?: ThreadMode } = {}
+  opts: { workspace?: string; mode?: ThreadMode; model?: string } = {}
 ): ChatThread {
   const now = new Date();
   return {
@@ -285,6 +288,7 @@ function createThread(
     agent,
     workspace: opts.workspace,
     mode: opts.mode,
+    model: opts.model,
     title: "New chat",
     messages: [makeWelcomeMessage(agent)],
     createdAt: now,
@@ -550,7 +554,8 @@ export default function Home() {
           userHistory,
           activeThread.agent,
           activeThread.workspace,
-          activeThread.mode
+          activeThread.mode,
+          activeThread.model
         );
         addAssistantMessage(response, agent);
         detectInquiry(response);
@@ -684,7 +689,8 @@ export default function Home() {
         const workspace = agent === "opencode" ? DEFAULT_WORKSPACE : undefined;
         const mode: ThreadMode | undefined =
           agent === "opencode" ? "live" : undefined;
-        const newThread = createThread(agent, { workspace, mode });
+        const model = activeThread?.model;
+        const newThread = createThread(agent, { workspace, mode, model });
         return {
           ...session,
           activeThreadId: newThread.id,
@@ -705,6 +711,7 @@ export default function Home() {
       const newThread = createThread(agent, {
         workspace: activeThread.workspace,
         mode: activeThread.mode,
+        model: activeThread.model,
       });
       return {
         ...session,
@@ -747,6 +754,28 @@ export default function Home() {
     },
     [activeThread, updateActiveThread]
   );
+
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [defaultModel, setDefaultModel] = useState<string>("");
+
+  useEffect(() => {
+    getAvailableModels()
+      .then((data) => {
+        setAvailableModels(data.models);
+        setDefaultModel(data.default);
+      })
+      .catch((err) => console.error("Failed to load models", err));
+  }, []);
+
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      if (!activeThread) return;
+      updateActiveThread((thread) => ({ ...thread, model: modelId }));
+    },
+    [activeThread, updateActiveThread]
+  );
+
+  const activeModel = activeThread?.model ?? defaultModel;
 
   const handleThreadTitleChange = useCallback(
     (newTitle: string) => {
@@ -1098,7 +1127,7 @@ export default function Home() {
         {/* Input */}
         <footer className="border-t border-zinc-800 bg-zinc-900 px-4 py-4">
           <div className="mx-auto max-w-3xl">
-            {/* Agent / repo / mode toolbar above input */}
+            {/* Agent / repo / model / mode toolbar above input */}
             <div className="flex items-center gap-3 mb-2">
               <Select
                 value={activeThread?.agent ?? "jasper"}
@@ -1122,6 +1151,37 @@ export default function Home() {
                   ))}
                 </SelectContent>
               </Select>
+
+              {availableModels.length > 0 && (
+                <Select
+                  value={activeModel}
+                  onValueChange={(v) => handleModelChange(v ?? defaultModel)}
+                >
+                  <SelectTrigger className="w-56 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
+                    <span className="flex items-center gap-2">
+                      <Cpu className="h-3.5 w-3.5 text-zinc-400" />
+                      <SelectValue placeholder="Model" />
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-sm">
+                    {availableModels.map((m) => (
+                      <SelectItem
+                        key={m.id}
+                        value={m.id}
+                        className="focus:bg-zinc-800 focus:text-zinc-100"
+                        title={m.id}
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-heading">
+                            {m.provider}
+                          </span>
+                          <span className="truncate">{m.name}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
 
               {activeThread?.agent === "opencode" && (
                 <>

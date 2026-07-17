@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src.chat_ui import create_chat_ui
+from src.ollama_client import list_ollama_models
 from src.stt import transcribe
 from src.tts import synthesize
 
@@ -31,6 +32,7 @@ class ChatRequest(BaseModel):
     workspace: str = None
     target_agent: str = "opencode"
     mode: str = "live"
+    model: str = None
 
 
 class ChatResponse(BaseModel):
@@ -69,13 +71,25 @@ def chat(request: ChatRequest) -> ChatResponse:
     messages = [m.model_dump() for m in request.history]
     messages.append({"role": "user", "content": request.message})
 
-    result = app_graph.invoke({
-        "messages": messages,
-        "workspace": request.workspace,
-        "target_agent": request.target_agent,
-        "mode": request.mode,
-    })
-    response = result["messages"][-1]["content"]
+    # If a specific model is requested, inject it into the env for this call
+    # so run_opencode picks it up without mutating global state.
+    import os
+    original_model = os.environ.get("OPENCODE_CLI_MODEL")
+    if request.model:
+        os.environ["OPENCODE_CLI_MODEL"] = request.model
+    try:
+        result = app_graph.invoke({
+            "messages": messages,
+            "workspace": request.workspace,
+            "target_agent": request.target_agent,
+            "mode": request.mode,
+        })
+        response = result["messages"][-1]["content"]
+    finally:
+        if original_model is not None:
+            os.environ["OPENCODE_CLI_MODEL"] = original_model
+        else:
+            os.environ.pop("OPENCODE_CLI_MODEL", None)
 
     return ChatResponse(response=response)
 
@@ -177,6 +191,23 @@ def fs_pick_folder(starting_path: str | None = None) -> FSPickResponse:
         return FSPickResponse(path=output, cancelled=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/models")
+def list_models() -> dict:
+    """List available models: OpenCode cloud default plus local Ollama models."""
+    cloud_default = os.getenv("OPENCODE_CLI_MODEL", "ollama-cloud/qwen3.5:397b")
+    local_models = [
+        {"id": f"ollama/{m['name']}", "name": m["name"], "provider": "ollama"}
+        for m in list_ollama_models()
+    ]
+    return {
+        "default": cloud_default,
+        "models": [
+            {"id": cloud_default, "name": cloud_default, "provider": "opencode"},
+            *local_models,
+        ],
+    }
 
 
 @app.get("/")

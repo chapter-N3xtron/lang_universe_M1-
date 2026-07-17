@@ -13,10 +13,22 @@ export type ChatRequest = {
   target_agent?: "jasper" | "opencode" | "research";
   workspace?: string;
   mode?: "live" | "async";
+  model?: string;
 };
 
 export type ChatResponse = {
   response: string;
+};
+
+export type ModelInfo = {
+  id: string;
+  name: string;
+  provider: string;
+};
+
+export type ModelsResponse = {
+  default: string;
+  models: ModelInfo[];
 };
 
 export type STTResponse = {
@@ -39,12 +51,13 @@ export async function sendChatMessage(
   history: ApiChatMessage[],
   target_agent?: "jasper" | "opencode" | "research",
   workspace?: string,
-  mode?: "live" | "async"
+  mode?: "live" | "async",
+  model?: string
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history, target_agent, workspace, mode } as ChatRequest),
+    body: JSON.stringify({ message, history, target_agent, workspace, mode, model } as ChatRequest),
     cache: "no-store",
   });
 
@@ -54,6 +67,14 @@ export async function sendChatMessage(
 
   const data: ChatResponse = await res.json();
   return data.response;
+}
+
+export async function getAvailableModels(): Promise<ModelsResponse> {
+  const res = await fetch(`${API_BASE}/api/models`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch models: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
 }
 
 export async function synthesizeSpeech(text: string, voice = "af_heart"): Promise<Blob> {

@@ -104,3 +104,16 @@ export async function listDirectory(path: string): Promise<FSListResponse> {
   if (!res.ok) throw new Error(`Failed to list ${path}`);
   return res.json();
 }
+
+export type FSPickResponse = {
+  path: string | null;
+  cancelled: boolean;
+};
+
+export async function pickFolder(startingPath?: string): Promise<FSPickResponse> {
+  const url = new URL(`${API_BASE}/api/fs/pick-folder`);
+  if (startingPath) url.searchParams.set("starting_path", startingPath);
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to open folder picker");
+  return res.json();
+}

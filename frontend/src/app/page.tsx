@@ -67,6 +67,7 @@ import {
   getHomeDirectory,
   listDirectory,
   FSEntry,
+  pickFolder,
 } from "@/lib/api";
 import {
   Dialog,
@@ -726,9 +727,18 @@ export default function Home() {
     [activeThread, updateActiveThread]
   );
 
-  const handlePickWorkspace = useCallback(() => {
-    setPickingWorkspace(true);
-  }, []);
+  const handlePickWorkspace = useCallback(async () => {
+    if (!activeThread) return;
+    try {
+      const result = await pickFolder(activeThread.workspace ?? DEFAULT_WORKSPACE);
+      if (!result.cancelled && result.path) {
+        handleWorkspaceChange(result.path);
+      }
+    } catch (err) {
+      console.error("Folder picker failed", err);
+      setPickingWorkspace(true);
+    }
+  }, [activeThread, handleWorkspaceChange]);
 
   const handleModeChange = useCallback(
     (mode: ThreadMode) => {

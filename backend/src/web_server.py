@@ -1,6 +1,7 @@
 """FastAPI server for the LangGraph Agent Chat UI backend."""
 
 import os
+import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List
@@ -115,6 +116,11 @@ class FSListResponse(BaseModel):
     entries: list[dict]
 
 
+class FSPickResponse(BaseModel):
+    path: str | None
+    cancelled: bool
+
+
 @app.get("/api/fs/home")
 def fs_home() -> dict:
     return {"path": str(Path.home())}
@@ -141,6 +147,34 @@ def fs_list(path: str) -> FSListResponse:
         return FSListResponse(path=str(target), entries=entries)
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/fs/pick-folder", response_model=FSPickResponse)
+def fs_pick_folder(starting_path: str | None = None) -> FSPickResponse:
+    """Open native macOS folder picker via AppleScript."""
+    try:
+        default = starting_path or str(Path.home())
+        script = f'''
+        set defaultPath to POSIX file "{default}"
+        try
+            set chosenFolder to choose folder with prompt "Select a repo or folder:" default location defaultPath
+            return POSIX path of chosenFolder
+        on error
+            return "__CANCELLED__"
+        end try
+        '''
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output = result.stdout.strip()
+        if output == "__CANCELLED__" or not output:
+            return FSPickResponse(path=None, cancelled=True)
+        return FSPickResponse(path=output, cancelled=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

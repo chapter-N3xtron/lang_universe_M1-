@@ -582,24 +582,39 @@ export default function Home() {
     [activeThread, updateActiveThread]
   );
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const handlePickWorkspace = useCallback(async () => {
     if (!activeThread) return;
-    try {
-      const dir = await (window as any).showDirectoryPicker?.();
-      if (!dir) return;
-      // File System Access API gives a directory handle; we construct the best path we can.
-      const picked = dir.name
-        ? `/Users/${dir.name}`
-        : activeThread.workspace ?? DEFAULT_WORKSPACE;
-      handleWorkspaceChange(picked);
-    } catch {
-      // User cancelled or API unavailable; fall back to a simple prompt.
-      const fallback = window.prompt(
-        "Repo path (e.g. /Users/you/project):",
-        activeThread.workspace ?? DEFAULT_WORKSPACE
-      );
-      if (fallback) handleWorkspaceChange(fallback);
+
+    // Try native File System Access API first
+    if (typeof window !== "undefined" && "showDirectoryPicker" in window) {
+      try {
+        const dir = await (window as any).showDirectoryPicker?.();
+        if (dir) {
+          const picked = dir.name
+            ? `/Users/${dir.name}`
+            : activeThread.workspace ?? DEFAULT_WORKSPACE;
+          handleWorkspaceChange(picked);
+          return;
+        }
+      } catch {
+        // user cancelled or denied
+      }
     }
+
+    // Fallback to directory input
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+      return;
+    }
+
+    // Last resort: manual prompt
+    const fallback = window.prompt(
+      "Repo path (e.g. /Users/you/project):",
+      activeThread.workspace ?? DEFAULT_WORKSPACE
+    );
+    if (fallback) handleWorkspaceChange(fallback);
   }, [activeThread, handleWorkspaceChange]);
 
   const handleModeChange = useCallback(
@@ -1023,6 +1038,30 @@ export default function Home() {
                 </>
               )}
             </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              // @ts-expect-error webkitdirectory is non-standard
+              webkitdirectory=""
+              directory=""
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                  const f = files[0] as any;
+                  const fullPath = f.path || f.webkitRelativePath;
+                  if (fullPath) {
+                    const dir = fullPath.includes("/")
+                      ? fullPath.split("/")[0]
+                      : fullPath;
+                    handleWorkspaceChange(`/Users/${dir}`);
+                  }
+                }
+                e.target.value = "";
+              }}
+            />
 
             <PromptInput
               value={input}

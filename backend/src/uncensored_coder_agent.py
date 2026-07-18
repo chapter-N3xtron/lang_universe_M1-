@@ -1358,7 +1358,7 @@ def run_uncensored_coder(
         intent = slash_intent or _classify_intent(message)
         if intent in ("build_image_framework", "build_comfyui_workflow", "register_character",
                       "update_physical_description", "place_image_order"):
-            fast_result = _run_image_intent(intent, message, model)
+            fast_result = _run_image_intent(intent, message, model, force_queue=bool(slash_intent))
             if fast_result is not None:
                 # Slash commands return the raw tool output directly so the user
                 # can inspect prompts/artifacts without waiting for a summary.
@@ -1558,8 +1558,14 @@ Rules:
         return {}
 
 
-def _run_image_intent(intent: str, message: str, model: Optional[str] = None) -> Optional[str]:
+def _run_image_intent(intent: str, message: str, model: Optional[str] = None, force_queue: bool = False) -> Optional[str]:
     """Execute the image-generation intent directly without relying on the LLM to emit JSON.
+
+    Args:
+        intent: classified image-generation intent.
+        message: the raw user message.
+        model: the active chat/model identifier.
+        force_queue: if True, skip dry_run and queue immediately to ComfyUI.
 
     Returns the tool result string, or None if the intent should fall through to the LLM.
     """
@@ -1615,7 +1621,7 @@ def _run_image_intent(intent: str, message: str, model: Optional[str] = None) ->
             interaction=fields.get("interaction", ""),
             social_context=fields.get("social_context", ""),
             mood=fields.get("mood", ""),
-            dry_run=True,
+            dry_run=not force_queue,
         )
 
     return None

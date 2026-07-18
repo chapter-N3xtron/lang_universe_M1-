@@ -1177,19 +1177,30 @@ def _tool_place_image_order(
                 shutil.copy2(str(src_path), str(dest))
             return dest.name
 
+        # IP-Adapter is unreliable on Apple Silicon MPS and often produces black
+        # images. On macOS we always drop the IP-Adapter branch unless the caller
+        # explicitly bypasses this safeguard via env var.
+        disable_ipadapter_on_mac = sys.platform == "darwin" and not os.getenv("FORCE_IPADAPTER", "")
+
         # If the workflow has an IP-Adapter reference image node and a default
         # reference image exists, patch it in automatically. If the reference
         # image cannot be loaded, remove the IP-Adapter branch so the job still queues.
         ref_image = DEFAULT_IPADAPTER_REFERENCE_IMAGE
         if "20" in workflow:
-            ref_path = Path(ref_image) if Path(ref_image).is_absolute() else Path(_resolve("~/fun-multi-character-chats/ComfyUI/input").expanduser()) / ref_image
-            if ref_path.exists():
-                workflow["20"]["inputs"]["image"] = _ensure_in_comfy_input(ref_path)
-            else:
+            if disable_ipadapter_on_mac:
                 for n in ["20", "21", "22", "23"]:
                     workflow.pop(n, None)
                 # Re-wire sampler back to base lora model
                 workflow["6"]["inputs"]["model"] = ["4", 0]
+            else:
+                ref_path = Path(ref_image) if Path(ref_image).is_absolute() else Path(_resolve("~/fun-multi-character-chats/ComfyUI/input").expanduser()) / ref_image
+                if ref_path.exists():
+                    workflow["20"]["inputs"]["image"] = _ensure_in_comfy_input(ref_path)
+                else:
+                    for n in ["20", "21", "22", "23"]:
+                        workflow.pop(n, None)
+                    # Re-wire sampler back to base lora model
+                    workflow["6"]["inputs"]["model"] = ["4", 0]
 
         # If no pose hint image is provided, remove the ControlNet branch and
         # re-wire the KSampler to use the prompt nodes directly.

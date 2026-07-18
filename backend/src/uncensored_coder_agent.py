@@ -198,7 +198,7 @@ DEFAULT_ANIME_VAE = "qwen_image_vae.safetensors"
 DEFAULT_ANIME_LORA = "dakota_anima_lora.safetensors"
 DEFAULT_IMAGE_ORDER_MODEL = os.getenv("IMAGE_ORDER_MODEL", "hf.co/concedo/Beepo-22B-GGUF:Q4_K_M")
 DEFAULT_CHARACTER_REPO = os.path.expanduser("~/fun-multi-character-chats/characters")
-DEFAULT_IMAGE_RESOLUTION = (1280, 720)
+DEFAULT_IMAGE_RESOLUTION = (896, 1152)
 DEFAULT_ANIME_STYLE_PREFIX = (
     "modern anime illustration, soft digital painting, cinematic lighting, "
     "smooth shading, gentle gradients, delicate skin rendering, warm pastel tones, "
@@ -266,8 +266,8 @@ def _tool_build_comfyui_workflow(
             "4": {
                 "inputs": {
                     "lora_name": lora,
-                    "strength_model": lora_strength,
-                    "strength_clip": lora_strength,
+                    "strength_model": 0.8,
+                    "strength_clip": 0.8,
                     "model": ["1", 0],
                     "clip": ["2", 0],
                 },
@@ -980,14 +980,9 @@ def _tool_update_physical_description(name: str, description: str) -> str:
 
 def _build_negative_prompt() -> str:
     return (
-        "lowres, bad anatomy, bad hands, bad feet, missing fingers, extra finger, extra digit, "
-        "fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, "
-        "signature, watermark, username, blurry, deformed, malformed limbs, bad proportions, "
-        "mutation, extra limbs, missing arms, missing legs, extra arms, extra legs, "
-        "fused fingers, too many fingers, extra toes, missing toes, long neck, cloned face, "
-        "duplicate, text, error, multiple views, multiple panels, comic layout, speech bubble, "
-        "cropped limbs, out of frame limbs, disembodied limbs, floating limbs, twisted limbs, "
-        "incorrect hand, incorrect foot, backwards limbs, amputee"
+        "blurry, low quality, deformed, bad anatomy, extra limbs, ugly face, disfigured, "
+        "watermark, signature, text, cropped, worst quality, painting, cartoon, anime, "
+        "3d render, oversaturated"
     )
 
 
@@ -1177,30 +1172,19 @@ def _tool_place_image_order(
                 shutil.copy2(str(src_path), str(dest))
             return dest.name
 
-        # IP-Adapter is unreliable on Apple Silicon MPS and often produces black
-        # images. On macOS we always drop the IP-Adapter branch unless the caller
-        # explicitly bypasses this safeguard via env var.
-        disable_ipadapter_on_mac = sys.platform == "darwin" and not os.getenv("FORCE_IPADAPTER", "")
-
         # If the workflow has an IP-Adapter reference image node and a default
         # reference image exists, patch it in automatically. If the reference
         # image cannot be loaded, remove the IP-Adapter branch so the job still queues.
         ref_image = DEFAULT_IPADAPTER_REFERENCE_IMAGE
         if "20" in workflow:
-            if disable_ipadapter_on_mac:
+            ref_path = Path(ref_image) if Path(ref_image).is_absolute() else Path(_resolve("~/fun-multi-character-chats/ComfyUI/input").expanduser()) / ref_image
+            if ref_path.exists():
+                workflow["20"]["inputs"]["image"] = _ensure_in_comfy_input(ref_path)
+            else:
                 for n in ["20", "21", "22", "23"]:
                     workflow.pop(n, None)
                 # Re-wire sampler back to base lora model
                 workflow["6"]["inputs"]["model"] = ["4", 0]
-            else:
-                ref_path = Path(ref_image) if Path(ref_image).is_absolute() else Path(_resolve("~/fun-multi-character-chats/ComfyUI/input").expanduser()) / ref_image
-                if ref_path.exists():
-                    workflow["20"]["inputs"]["image"] = _ensure_in_comfy_input(ref_path)
-                else:
-                    for n in ["20", "21", "22", "23"]:
-                        workflow.pop(n, None)
-                    # Re-wire sampler back to base lora model
-                    workflow["6"]["inputs"]["model"] = ["4", 0]
 
         # If no pose hint image is provided, remove the ControlNet branch and
         # re-wire the KSampler to use the prompt nodes directly.

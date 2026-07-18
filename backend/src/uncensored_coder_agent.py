@@ -980,12 +980,14 @@ def _tool_update_physical_description(name: str, description: str) -> str:
 
 def _build_negative_prompt() -> str:
     return (
-        "lowres, bad anatomy, bad hands, bad feet, missing fingers, extra digit, "
+        "lowres, bad anatomy, bad hands, bad feet, missing fingers, extra finger, extra digit, "
         "fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, "
         "signature, watermark, username, blurry, deformed, malformed limbs, bad proportions, "
         "mutation, extra limbs, missing arms, missing legs, extra arms, extra legs, "
-        "fused fingers, too many fingers, long neck, cloned face, duplicate, text, error, "
-        "multiple views, multiple panels, comic layout, speech bubble, cropped limbs"
+        "fused fingers, too many fingers, extra toes, missing toes, long neck, cloned face, "
+        "duplicate, text, error, multiple views, multiple panels, comic layout, speech bubble, "
+        "cropped limbs, out of frame limbs, disembodied limbs, floating limbs, twisted limbs, "
+        "incorrect hand, incorrect foot, backwards limbs, amputee"
     )
 
 
@@ -1038,6 +1040,8 @@ def _build_scene_sentence(
     """Assemble a short, deterministic scene sentence from order fields.
 
     Clothing falls back to the character's default outfit if not provided.
+    Anima-specific anatomy/positioning instructions are appended to help the
+    model render consistent human figures, limb counts, and spatial layout.
     """
     parts = [scene]
     if action:
@@ -1056,6 +1060,16 @@ def _build_scene_sentence(
         parts.append(f"{social_context}")
     if mood:
         parts.append(f"{mood} expression")
+
+    # Anima-specific anatomy/positioning anchor instructions.
+    # These are phrased as natural-language constraints that the Anima/Qwen-image
+    # checkpoint follows more reliably than raw tag soup.
+    parts.append(
+        "perfect anatomy, exactly two arms and two legs, exactly five fingers on each hand, "
+        "exactly five toes on each foot, correct joint placement, limbs fully inside frame, "
+        "head, torso, hips, knees, and feet clearly visible, body facing the viewer, "
+        "single figure, no extra limbs, no merged limbs, no cropped limbs"
+    )
     return ", ".join(p.strip() for p in parts if p.strip())
 
 
@@ -1225,6 +1239,14 @@ def _tool_place_image_order(
             timeout=60,
         )
         resp.raise_for_status()
+        queue_data = resp.json()
+        prompt_id = queue_data.get("prompt_id")
+
+        # Poll ComfyUI for the rendered output and copy it to the SillyTavern
+        # character's generations folder.
+        copied = _copy_comfyui_output_to_character(character, prompt_id)
+        if copied:
+            return f"[queued order for '{character}']\n{resp.text}\n\nSaved to: {copied}"
         return f"[queued order for '{character}']\n{resp.text}"
     except Exception as e:
         return f"[error: {e}]"
@@ -1346,15 +1368,6 @@ def run_uncensored_coder(
         if stripped.startswith("/image"):
             slash_intent = "place_image_order"
 
-        # --- Confirmation fast path ---
-        # If the user says "queue it", "confirm", "render it", etc. after a dry-run,
-        # re-run the most recent image order for this workspace with dry_run=False.
-        confirm_keywords = {"queue it", "confirm", "render it", "send it", "go", "yes", "ok", "dry_run=false"}
-        if not slash_intent and stripped in confirm_keywords:
-            queued = _rerun_last_image_order(dry_run=False)
-            if queued:
-                return {"success": True, "text": queued, "error": None}
-
         intent = slash_intent or _classify_intent(message)
         if intent in ("build_image_framework", "build_comfyui_workflow", "register_character",
                       "update_physical_description", "place_image_order"):
@@ -1471,11 +1484,13 @@ Classify the user's message into exactly one of these categories:
 - build_comfyui_workflow: user wants a ComfyUI workflow, render pipeline, or to lock the anime style.
 - register_character: user wants to use/register a character from SillyTavern for images.
 - update_physical_description: user explicitly gives or updates a character's physical description.
-- place_image_order: user asks to draw, render, image, or scene a character (e.g. "image Amber...", "draw...", "render...", "scene:...").
-- chat: anything else (coding, chatting, questions, workspace inspection).
+- place_image_order: user asks to draw, render, image, or scene a character (e.g. "/image Amber: ...", "draw Amber...", "render Amber...", "scene: Amber...").
+- chat: anything else (coding, chatting, questions, workspace inspection, asking about status of an image, asking if something is done).
 
 Rules:
-- If the message mentions a character name plus drawing/rendering/imaging/scene, classify as place_image_order.
+- If the message starts with "/image" or "/draw", classify as place_image_order.
+- If the message explicitly asks to draw/render/image/scene a named character, classify as place_image_order.
+- If the message is a question about status, completion, or asking "is it done?", classify as chat.
 - If the message asks to build a workflow or ComfyUI pipeline, classify as build_comfyui_workflow.
 - If the message asks to register or use a SillyTavern character, classify as register_character.
 - Output ONLY the category name. No explanation, no markdown.
@@ -1592,7 +1607,13 @@ def _run_image_intent(intent: str, message: str, model: Optional[str] = None, fo
         return _tool_update_physical_description(name=name, description=description)
 
     if intent == "place_image_order":
-        fields = _extract_image_order_fields(message, model=model)
+        # Use the dedicated image-order parser (Beepo by default) to turn the
+        # free-form scene description into deterministic structured fields.
+        parse_result = run_image_order_parser(message)
+        if parse_result["success"]:
+            fields = parse_result["fields"]
+        else:
+            fields = _extract_image_order_fields(message, model=model)
         if not fields.get("character"):
             name = _guess_character_name(message)
             if name:
@@ -1625,6 +1646,60 @@ def _run_image_intent(intent: str, message: str, model: Optional[str] = None, fo
             dry_run=not force_queue,
         )
 
+    return None
+
+
+def _copy_comfyui_output_to_character(character: str, prompt_id: Optional[str], max_wait: float = 120.0) -> Optional[str]:
+    """Poll ComfyUI for a finished job and copy the output image into the SillyTavern character folder.
+
+    Destination: ~/fun-multi-character-chats/characters/<character>/generations/
+    Returns the copied file path, or None if the job is not done or has no image output.
+    """
+    if not prompt_id:
+        return None
+    server = "http://127.0.0.1:8188"
+    comfy_output_dir = Path.home() / "fun-multi-character-chats" / "ComfyUI" / "output"
+    char_gen_dir = Path.home() / "fun-multi-character-chats" / "characters" / character / "generations"
+    char_gen_dir.mkdir(parents=True, exist_ok=True)
+
+    start = time.time()
+    while time.time() - start < max_wait:
+        try:
+            resp = requests.get(f"{server}/history/{prompt_id}", timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            entry = data.get(prompt_id, {})
+            status = entry.get("status", {})
+            if status.get("status_str") == "error":
+                return None
+            if status.get("completed"):
+                outputs = entry.get("outputs", {})
+                images = []
+                for node_out in outputs.values():
+                    imgs = node_out.get("images", [])
+                    for img in imgs:
+                        if isinstance(img, dict) and img.get("type") == "output":
+                            images.append(img)
+                if images:
+                    img_info = images[0]
+                    filename = img_info["filename"]
+                    subfolder = img_info.get("subfolder", "")
+                    src = comfy_output_dir / subfolder / filename if subfolder else comfy_output_dir / filename
+                    if src.exists():
+                        import shutil
+                        dest = char_gen_dir / filename
+                        counter = 1
+                        while dest.exists():
+                            stem = Path(filename).stem
+                            suffix = Path(filename).suffix
+                            dest = char_gen_dir / f"{stem}_{counter:03d}{suffix}"
+                            counter += 1
+                        shutil.copy2(str(src), str(dest))
+                        return str(dest)
+                # No images yet but job completed; wait a moment in case filesystem lags.
+        except Exception:
+            pass
+        time.sleep(2.0)
     return None
 
 

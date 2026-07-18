@@ -1346,6 +1346,15 @@ def run_uncensored_coder(
         if stripped.startswith("/image"):
             slash_intent = "place_image_order"
 
+        # --- Confirmation fast path ---
+        # If the user says "queue it", "confirm", "render it", etc. after a dry-run,
+        # re-run the most recent image order for this workspace with dry_run=False.
+        confirm_keywords = {"queue it", "confirm", "render it", "send it", "go", "yes", "ok", "dry_run=false"}
+        if not slash_intent and stripped in confirm_keywords:
+            queued = _rerun_last_image_order(dry_run=False)
+            if queued:
+                return {"success": True, "text": queued, "error": None}
+
         intent = slash_intent or _classify_intent(message)
         if intent in ("build_image_framework", "build_comfyui_workflow", "register_character",
                       "update_physical_description", "place_image_order"):
@@ -1577,7 +1586,7 @@ def _run_image_intent(intent: str, message: str, model: Optional[str] = None) ->
         return _tool_update_physical_description(name=name, description=description)
 
     if intent == "place_image_order":
-        fields = _extract_image_order_fields(message)
+        fields = _extract_image_order_fields(message, model=model)
         if not fields.get("character"):
             name = _guess_character_name(message)
             if name:
@@ -1610,6 +1619,46 @@ def _run_image_intent(intent: str, message: str, model: Optional[str] = None) ->
         )
 
     return None
+
+
+def _rerun_last_image_order(dry_run: bool = False) -> Optional[str]:
+    """Find the most recent image order in image_orders/ and re-queue or re-dry-run it."""
+    try:
+        base = _resolve("image_orders")
+        if not base.exists():
+            return None
+        candidates = sorted(
+            [p for p in base.rglob("order_*.json") if "_patched_workflow" not in p.name],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            return None
+        latest = candidates[0]
+        with open(latest, "r", encoding="utf-8") as f:
+            order = json.load(f)
+        patched_path = latest.with_name(f"{latest.stem}_patched_workflow.json")
+        if not patched_path.exists():
+            return None
+        with open(patched_path, "r", encoding="utf-8") as f:
+            workflow = json.load(f)
+        character = order.get("character", "character")
+        if dry_run:
+            return (
+                f"[dry-run re-run for '{character}' from {latest}]\n\n"
+                f"Positive:\n{order.get('positive_prompt', '')}\n\n"
+                f"Negative:\n{order.get('negative_prompt', '')}\n\n"
+                "Set dry_run=False to queue to ComfyUI."
+            )
+        resp = requests.post(
+            "http://127.0.0.1:8188/prompt",
+            json={"prompt": workflow, "client_id": f"rerun-{character}-{int(time.time())}"},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return f"[queued re-run order for '{character}']\n{resp.text}"
+    except Exception as e:
+        return f"[error re-running order: {e}]"
 
 
 def _guess_character_name(message: str) -> Optional[str]:

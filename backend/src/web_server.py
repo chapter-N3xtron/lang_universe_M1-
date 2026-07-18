@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src.chat_ui import create_chat_ui
+from src.jobs import create_job, get_job, job_to_dict, run_job
 from src.ollama_client import list_ollama_models
 from src.stt import transcribe
 from src.tts import synthesize
@@ -208,6 +209,55 @@ def list_models() -> dict:
             *local_models,
         ],
     }
+
+
+class JobResponse(BaseModel):
+    id: str
+    status: str
+    result: str | None = None
+    error: str | None = None
+    created_at: float
+    updated_at: float
+
+
+@app.post("/api/jobs")
+def create_job_endpoint(request: ChatRequest) -> dict:
+    """Start an async agent job. Returns a job ID for polling."""
+    job_id = create_job()
+
+    messages = [m.model_dump() for m in request.history]
+    messages.append({"role": "user", "content": request.message})
+
+    import os
+    original_model = os.environ.get("OPENCODE_CLI_MODEL")
+    if request.model:
+        os.environ["OPENCODE_CLI_MODEL"] = request.model
+
+    def job_fn() -> str:
+        try:
+            result = app_graph.invoke({
+                "messages": messages,
+                "workspace": request.workspace,
+                "target_agent": request.target_agent,
+                "mode": "async",
+            })
+            return result["messages"][-1]["content"]
+        finally:
+            if original_model is not None:
+                os.environ["OPENCODE_CLI_MODEL"] = original_model
+            else:
+                os.environ.pop("OPENCODE_CLI_MODEL", None)
+
+    run_job(job_id, job_fn)
+    return {"job_id": job_id, "status": "pending"}
+
+
+@app.get("/api/jobs/{job_id}", response_model=JobResponse)
+def get_job_endpoint(job_id: str) -> JobResponse:
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobResponse(**job_to_dict(job))
 
 
 @app.get("/")

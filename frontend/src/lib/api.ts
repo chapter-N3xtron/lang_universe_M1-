@@ -35,6 +35,15 @@ export type STTResponse = {
   transcript: string;
 };
 
+export type JobInfo = {
+  id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  result: string | null;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
 export type FSEntry = {
   name: string;
   path: string;
@@ -137,5 +146,32 @@ export async function pickFolder(startingPath?: string): Promise<FSPickResponse>
   if (startingPath) url.searchParams.set("starting_path", startingPath);
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to open folder picker");
+  return res.json();
+}
+
+export async function createAgentJob(
+  message: string,
+  history: ApiChatMessage[],
+  target_agent?: "jasper" | "opencode" | "uncensored-coder" | "research",
+  workspace?: string,
+  model?: string
+): Promise<{ job_id: string; status: string }> {
+  const res = await fetch(`${API_BASE}/api/jobs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history, target_agent, workspace, mode: "async", model } as ChatRequest),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to start job: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function getAgentJob(jobId: string): Promise<JobInfo> {
+  const res = await fetch(`${API_BASE}/api/jobs/${jobId}`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Failed to get job: ${res.status} ${res.statusText}`);
+  }
   return res.json();
 }

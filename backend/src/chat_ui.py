@@ -83,16 +83,32 @@ def create_chat_ui():
             for m in messages
             if isinstance(m, dict) and m.get("role") in ("user", "assistant")
         ][:-1]
-        result = run_uncensored_coder(
-            message=user_query,
-            history=history,
-            model=state.get("model"),
-            workspace=state.get("workspace"),
-        )
-        if not result["success"]:
-            content = f"[Uncensored Coder error]\n\n{result['error'] or 'Unknown error'}"
+
+        mode = state.get("mode", "live")
+        if mode == "async":
+            from src.jobs import create_job, run_job
+            job_id = create_job()
+            run_job(
+                job_id,
+                lambda: run_uncensored_coder(
+                    message=user_query,
+                    history=history,
+                    model=state.get("model"),
+                    workspace=state.get("workspace"),
+                )["text"],
+            )
+            content = f"[Uncensored Coder async job started]\n\nJob ID: {job_id}\nPoll /api/jobs/{job_id} for results."
         else:
-            content = result["text"] or "(no response)"
+            result = run_uncensored_coder(
+                message=user_query,
+                history=history,
+                model=state.get("model"),
+                workspace=state.get("workspace"),
+            )
+            if not result["success"]:
+                content = f"[Uncensored Coder error]\n\n{result['error'] or 'Unknown error'}"
+            else:
+                content = result["text"] or "(no response)"
         return {"messages": [{"role": "assistant", "content": content}]}
 
     graph.add_node("jasper", jasper_agent)

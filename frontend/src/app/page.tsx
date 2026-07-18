@@ -71,6 +71,8 @@ import {
   pickFolder,
   getAvailableModels,
   ModelInfo,
+  createAgentJob,
+  getAgentJob,
 } from "@/lib/api";
 import {
   Dialog,
@@ -367,6 +369,10 @@ export default function Home() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState("");
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
+  const [pendingJobs, setPendingJobs] = useState<
+    { jobId: string; placeholderId: string }[]
+  >([]);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
@@ -538,6 +544,50 @@ export default function Home() {
     setActiveInquiry(null);
   }, []);
 
+  const pollJobs = useCallback(async () => {
+    if (pendingJobs.length === 0) return;
+    for (const { jobId, placeholderId } of [...pendingJobs]) {
+      try {
+        const job = await getAgentJob(jobId);
+        if (job.status === "completed" || job.status === "failed") {
+          const content =
+            job.status === "completed"
+              ? job.result ?? "(no result)"
+              : `Error: ${job.error ?? "Unknown error"}`;
+          updateActiveThread((thread) => ({
+            ...thread,
+            messages: thread.messages.map((m) =>
+              m.id === placeholderId
+                ? { ...m, content, role: "assistant" as const }
+                : m
+            ),
+          }));
+          setPendingJobs((prev) => prev.filter((j) => j.jobId !== jobId));
+        }
+      } catch (err) {
+        console.error("Job poll failed", err);
+      }
+    }
+  }, [pendingJobs, updateActiveThread]);
+
+  useEffect(() => {
+    if (pendingJobs.length === 0) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      return;
+    }
+    if (pollIntervalRef.current) return;
+    pollIntervalRef.current = setInterval(pollJobs, 2000);
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [pendingJobs, pollJobs]);
+
   const handleSubmitWithText = useCallback(
     async (text: string) => {
       if (!text.trim() || loading || !activeSession || !activeThread) return;
@@ -570,16 +620,36 @@ export default function Home() {
       });
 
       try {
-        const response = await sendChatMessage(
-          text,
-          userHistory,
-          activeThread.agent,
-          activeThread.workspace,
-          activeThread.mode,
-          activeThread.model
-        );
-        addAssistantMessage(response, agent);
-        detectInquiry(response);
+        const isAsync = activeThread.mode === "async";
+        if (isAsync) {
+          const { job_id } = await createAgentJob(
+            text,
+            userHistory,
+            activeThread.agent,
+            activeThread.workspace,
+            activeThread.model
+          );
+          const placeholderId = uuidv4();
+          addAssistantMessage(
+            `Async job started: ${job_id}\nPolling for results…`,
+            agent
+          );
+          setPendingJobs((prev) => [
+            ...prev,
+            { jobId: job_id, placeholderId: prev.length > 0 ? prev[prev.length - 1].placeholderId : placeholderId },
+          ]);
+        } else {
+          const response = await sendChatMessage(
+            text,
+            userHistory,
+            activeThread.agent,
+            activeThread.workspace,
+            activeThread.mode,
+            activeThread.model
+          );
+          addAssistantMessage(response, agent);
+          detectInquiry(response);
+        }
       } catch (err) {
         addAssistantMessage(
           `Error: ${err instanceof Error ? err.message : "Something went wrong"}`,
@@ -712,7 +782,7 @@ export default function Home() {
             ? DEFAULT_WORKSPACE
             : undefined;
         const mode: ThreadMode | undefined =
-          agent === "opencode" ? "live" : undefined;
+          agent === "opencode" ? "live" : agent === "uncensored-coder" ? "async" : undefined;
         const model = activeThread?.model;
         const newThread = createThread(agent, { workspace, mode, model });
         return {

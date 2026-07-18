@@ -55,6 +55,12 @@ venv/
 # logs
 *.log
 
+# generated image artifacts / order records
+image_orders/
+
+# character profile examples (keep tracked only if explicitly chosen)
+# image_profiles/
+
 # misc
 .DS_Store
 *.pem

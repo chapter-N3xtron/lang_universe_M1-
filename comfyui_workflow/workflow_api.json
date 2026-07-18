@@ -1,0 +1,213 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "anima-base-v1.0.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader"
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "type": "qwen_image"
+    },
+    "class_type": "CLIPLoader"
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "4": {
+    "inputs": {
+      "lora_name": "dakota_anima_lora.safetensors",
+      "strength_model": 0.5,
+      "strength_clip": 0.5,
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "LoraLoader"
+  },
+  "5": {
+    "inputs": {
+      "width": 1280,
+      "height": 720,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage"
+  },
+  "9": {
+    "inputs": {
+      "samples": [
+        "6",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "10": {
+    "inputs": {
+      "filename_prefix": "character",
+      "images": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "SaveImage"
+  },
+  "7": {
+    "inputs": {
+      "text": "<POSITIVE_PROMPT_FROM_PROMPT_ENGINE>",
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "8": {
+    "inputs": {
+      "text": "<NEGATIVE_PROMPT_FROM_PROMPT_ENGINE>",
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "20": {
+    "inputs": {
+      "image": "<REFERENCE_IMAGE_PATH_OR_EMPTY>"
+    },
+    "class_type": "LoadImage"
+  },
+  "21": {
+    "inputs": {
+      "clip_name": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+    },
+    "class_type": "CLIPVisionLoader"
+  },
+  "22": {
+    "inputs": {
+      "ipadapter_file": "ip-adapter_sd15.safetensors"
+    },
+    "class_type": "IPAdapterModelLoader"
+  },
+  "23": {
+    "inputs": {
+      "weight": 0.65,
+      "weight_type": "style transfer",
+      "combine_embeds": "concat",
+      "start_at": 0.0,
+      "end_at": 1.0,
+      "embeds_scaling": "V only",
+      "model": [
+        "4",
+        0
+      ],
+      "ipadapter": [
+        "22",
+        0
+      ],
+      "image": [
+        "20",
+        0
+      ],
+      "clip_vision": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "IPAdapterAdvanced"
+  },
+  "30": {
+    "inputs": {
+      "image": "<POSE_HINT_IMAGE_PATH_OR_EMPTY>"
+    },
+    "class_type": "LoadImage"
+  },
+  "31": {
+    "inputs": {
+      "detect_hand": "enable",
+      "detect_body": "enable",
+      "detect_face": "enable",
+      "bbox_detector": "yolox_l.onnx",
+      "pose_estimator": "dw-ll_ucoco_384.onnx",
+      "resolution": 512,
+      "image": [
+        "30",
+        0
+      ]
+    },
+    "class_type": "DWPreprocessor"
+  },
+  "32": {
+    "inputs": {
+      "control_net_name": "control_v11p_sd15_openpose_fp16.safetensors"
+    },
+    "class_type": "ControlNetLoader"
+  },
+  "33": {
+    "inputs": {
+      "strength": 0.85,
+      "start_percent": 0.0,
+      "end_percent": 1.0,
+      "positive": [
+        "7",
+        0
+      ],
+      "negative": [
+        "8",
+        0
+      ],
+      "control_net": [
+        "32",
+        0
+      ],
+      "image": [
+        "31",
+        0
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced"
+  },
+  "6": {
+    "inputs": {
+      "seed": 0,
+      "control_after_generate": "randomize",
+      "steps": 28,
+      "cfg": 4.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "sgm_uniform",
+      "denoise": 1.0,
+      "model": [
+        "23",
+        0
+      ],
+      "positive": [
+        "33",
+        0
+      ],
+      "negative": [
+        "33",
+        1
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler"
+  }
+}

@@ -1600,12 +1600,13 @@ def _run_image_intent(intent: str, message: str, model: Optional[str] = None, fo
         if not fields.get("character"):
             return "[error: could not determine which character to image. Try '/image Amber: ...']"
         character = fields["character"]
-        # Ensure profile and workflow exist first
+        # /image is read-only: use the existing profile; do not create or modify it.
         profile_dir = _image_profile_dir(character)
         if not (profile_dir / "profile.json").exists():
-            reg_result = _tool_register_character(name=character)
-            if "error" in reg_result.lower():
-                return reg_result
+            return (
+                f"[error: no image profile for '{character}'. "
+                f"Register the character first with 'register {character}' or use the UI.]"
+            )
         workflow_path = _resolve("comfyui_workflow/workflow_api.json")
         if not workflow_path.exists():
             wf_result = _tool_build_comfyui_workflow()

@@ -46,6 +46,7 @@ export type ChatThread = {
   workspace?: string
   mode?: ThreadMode
   model?: string
+  threadId?: string
   title: string
   messages: ChatMessage[]
   createdAt: Date

@@ -10,6 +10,7 @@ export type ApiChatMessage = {
 export type ChatRequest = {
   message: string;
   history: ApiChatMessage[];
+  thread_id?: string;
   target_agent?: "jasper" | "opencode" | "uncensored-coder" | "research";
   workspace?: string;
   mode?: "live" | "async";
@@ -61,12 +62,13 @@ export async function sendChatMessage(
   target_agent?: "jasper" | "opencode" | "uncensored-coder" | "research",
   workspace?: string,
   mode?: "live" | "async",
-  model?: string
+  model?: string,
+  thread_id?: string
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history, target_agent, workspace, mode, model } as ChatRequest),
+    body: JSON.stringify({ message, history, thread_id, target_agent, workspace, mode, model } as ChatRequest),
     cache: "no-store",
     signal: AbortSignal.timeout(900000),
   });
@@ -154,12 +156,13 @@ export async function createAgentJob(
   history: ApiChatMessage[],
   target_agent?: "jasper" | "opencode" | "uncensored-coder" | "research",
   workspace?: string,
-  model?: string
+  model?: string,
+  thread_id?: string
 ): Promise<{ job_id: string; status: string }> {
   const res = await fetch(`${API_BASE}/api/jobs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history, target_agent, workspace, mode: "async", model } as ChatRequest),
+    body: JSON.stringify({ message, history, thread_id, target_agent, workspace, mode: "async", model } as ChatRequest),
     cache: "no-store",
   });
   if (!res.ok) {

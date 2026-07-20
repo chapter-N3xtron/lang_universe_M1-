@@ -25,6 +25,7 @@ import {
   Cpu,
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
+
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -294,6 +295,7 @@ function createThread(
   const now = new Date();
   return {
     id: uuidv4(),
+    threadId: uuidv4(),
     agent,
     workspace: opts.workspace,
     mode: opts.mode,
@@ -596,10 +598,14 @@ export default function Home() {
 
       const now = new Date();
       const agent = activeThread.agent;
-      const userHistory = activeThread.messages.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+
+      // Ensure every thread has a durable backend thread id. The backend
+      // checkpointer accumulates messages per thread_id, so we only need to
+      // send the new user message; prior turns are loaded from server state.
+      const threadId = activeThread.threadId || uuidv4();
+      if (!activeThread.threadId) {
+        updateActiveThread((thread) => ({ ...thread, threadId }));
+      }
 
       updateActiveThread((thread) => {
         const messages = [
@@ -624,10 +630,11 @@ export default function Home() {
         if (isAsync) {
           const { job_id } = await createAgentJob(
             text,
-            userHistory,
+            [],
             activeThread.agent,
             activeThread.workspace,
-            activeThread.model
+            activeThread.model,
+            threadId
           );
           const placeholderId = uuidv4();
           addAssistantMessage(
@@ -641,11 +648,12 @@ export default function Home() {
         } else {
           const response = await sendChatMessage(
             text,
-            userHistory,
+            [],
             activeThread.agent,
             activeThread.workspace,
             activeThread.mode,
-            activeThread.model
+            activeThread.model,
+            threadId
           );
           addAssistantMessage(response, agent);
           detectInquiry(response);

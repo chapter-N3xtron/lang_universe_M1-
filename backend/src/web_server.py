@@ -2,12 +2,12 @@
 
 import os
 import subprocess
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import FastAPI, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -29,7 +29,8 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    history: List[ChatMessage] = []
+    history: list[ChatMessage] = []
+    thread_id: str | None = None
     workspace: str = None
     target_agent: str = "opencode"
     mode: str = "live"
@@ -67,24 +68,59 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _has_checkpoint(thread_id: str | None) -> bool:
+    if not thread_id:
+        return False
+    try:
+        snapshot = app_graph.get_state({"configurable": {"thread_id": thread_id}})
+        return bool(snapshot and snapshot.values)
+    except Exception:
+        return False
+
+
+def _build_invocation_input(request: ChatRequest) -> tuple[dict, list[dict]]:
+    """
+    Build the graph input and config for a chat request.
+
+    With checkpointing enabled, messages accumulate per thread. On the first
+    request for a thread we seed the graph with the full conversation history;
+    on later requests we only append the new user message to avoid duplication.
+    """
+    thread_id = request.thread_id or str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # First call for this thread: send the full history plus the new message.
+    # Subsequent calls: rely on the checkpointer for prior turns and only send
+    # the new user message.
+    if _has_checkpoint(request.thread_id):
+        messages = [{"role": "user", "content": request.message}]
+    else:
+        messages = [m.model_dump() for m in request.history]
+        messages.append({"role": "user", "content": request.message})
+
+    input_state = {
+        "messages": messages,
+        "workspace": request.workspace,
+        "target_agent": request.target_agent,
+        "mode": request.mode,
+        "model": request.model,
+    }
+    return input_state, config
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    messages = [m.model_dump() for m in request.history]
-    messages.append({"role": "user", "content": request.message})
-
     # If a specific model is requested, inject it into the env for this call
     # so run_opencode picks it up without mutating global state.
     import os
+
     original_model = os.environ.get("OPENCODE_CLI_MODEL")
     if request.model:
         os.environ["OPENCODE_CLI_MODEL"] = request.model
+
+    input_state, config = _build_invocation_input(request)
     try:
-        result = app_graph.invoke({
-            "messages": messages,
-            "workspace": request.workspace,
-            "target_agent": request.target_agent,
-            "mode": request.mode,
-        })
+        result = app_graph.invoke(input_state, config=config)
         response = result["messages"][-1]["content"]
     finally:
         if original_model is not None:
@@ -113,17 +149,17 @@ def tts(request: TTSRequest) -> Response:
             },
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/stt")
-def stt(audio: UploadFile = File(...)) -> dict:
+def stt(audio: UploadFile) -> dict:
     try:
         audio_bytes = audio.file.read()
         text = transcribe(audio_bytes)
         return {"transcript": text}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 class FSListResponse(BaseModel):
@@ -163,7 +199,7 @@ def fs_list(path: str) -> FSListResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/fs/pick-folder", response_model=FSPickResponse)
@@ -191,7 +227,7 @@ def fs_pick_folder(starting_path: str | None = None) -> FSPickResponse:
             return FSPickResponse(path=None, cancelled=True)
         return FSPickResponse(path=output, cancelled=False)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/models")
@@ -225,22 +261,18 @@ def create_job_endpoint(request: ChatRequest) -> dict:
     """Start an async agent job. Returns a job ID for polling."""
     job_id = create_job()
 
-    messages = [m.model_dump() for m in request.history]
-    messages.append({"role": "user", "content": request.message})
-
     import os
     original_model = os.environ.get("OPENCODE_CLI_MODEL")
     if request.model:
         os.environ["OPENCODE_CLI_MODEL"] = request.model
 
+    input_state, config = _build_invocation_input(request)
+    # Force async mode for jobs.
+    input_state["mode"] = "async"
+
     def job_fn() -> str:
         try:
-            result = app_graph.invoke({
-                "messages": messages,
-                "workspace": request.workspace,
-                "target_agent": request.target_agent,
-                "mode": "async",
-            })
+            result = app_graph.invoke(input_state, config=config)
             return result["messages"][-1]["content"]
         finally:
             if original_model is not None:

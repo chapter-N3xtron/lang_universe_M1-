@@ -1,16 +1,18 @@
-from langgraph.graph import StateGraph, START, END
-from typing import TypedDict, Annotated, List
 import operator
+from typing import Annotated, TypedDict
+
+from langgraph.graph import END, START, StateGraph
 
 from src.opencode_cli import run_opencode
 
 
 class State(TypedDict):
-    messages: Annotated[List[dict], operator.add]
+    messages: Annotated[list[dict], operator.add]
     workspace: str
     mode: str
     code_response: str
     reasoning: str
+    opencode_session_id: str
 
 
 def opencode_coding_agent(state: State):
@@ -25,6 +27,12 @@ def opencode_coding_agent(state: State):
     try:
         workspace = state.get("workspace")
         mode = state.get("mode", "live")
+        prior_session_id = state.get("opencode_session_id")
+
+        # For the OpenCode CLI, the authoritative conversation memory lives in
+        # the CLI's own session store. Pass the stored session id on subsequent
+        # turns so the headless agent continues the same context. We still send
+        # the full history to the local Ollama fallback branch.
         history_for_model = [
             {"role": m.get("role"), "content": m.get("content")}
             for m in messages
@@ -36,6 +44,7 @@ def opencode_coding_agent(state: State):
             workspace=workspace,
             auto_approve=(mode == "async"),
             history=history_for_model,
+            session_id=prior_session_id,
         )
 
         if not result["success"]:
@@ -58,6 +67,7 @@ Session: {result.get('session_id') or 'none'}
             "messages": [{"role": "assistant", "content": content}],
             "code_response": content,
             "reasoning": f"opencode run session={result.get('session_id')}",
+            "opencode_session_id": result.get("session_id") or prior_session_id,
         }
     except Exception as e:
         error_msg = f"""[OpenCode CLI Agent]

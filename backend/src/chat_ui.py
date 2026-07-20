@@ -1,16 +1,21 @@
-from langgraph.graph import StateGraph, START, END
-from typing import TypedDict, Annotated, List
 import operator
+from typing import Annotated, TypedDict
+
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+
+from src.magic_coder_agent import run_magic_coder
 from src.opencode_agent import create_opencode_graph
 from src.research_agent import create_research_graph
-from src.magic_coder_agent import run_magic_coder
 
 
 class State(TypedDict):
-    messages: Annotated[List[dict], operator.add]
+    messages: Annotated[list[dict], operator.add]
     workspace: str
     target_agent: str
     mode: str
+    model: str
+    opencode_session_id: str
 
 
 def router(state: State):
@@ -64,8 +69,12 @@ def create_chat_ui():
             "messages": state["messages"],
             "workspace": state.get("workspace"),
             "mode": state.get("mode", "live"),
+            "opencode_session_id": state.get("opencode_session_id"),
         })
-        return {"messages": result["messages"]}
+        return {
+            "messages": result["messages"],
+            "opencode_session_id": result.get("opencode_session_id"),
+        }
 
     def run_research(state):
         result = research_app.invoke({"messages": state["messages"]})
@@ -78,11 +87,15 @@ def create_chat_ui():
             if isinstance(m, dict) and m.get("role") == "user":
                 user_query = m.get("content", "")
                 break
+
+        # Pass all prior user/assistant turns as history. The graph's checkpointer
+        # already accumulated earlier messages, so this includes the full
+        # conversation including the current turn.
         history = [
             {"role": m.get("role"), "content": m.get("content")}
             for m in messages
             if isinstance(m, dict) and m.get("role") in ("user", "assistant")
-        ][:-1]
+        ]
 
         mode = state.get("mode", "live")
         if mode == "async":
@@ -122,15 +135,18 @@ def create_chat_ui():
     graph.add_edge("research", END)
     graph.add_edge("magic-coder", END)
 
-    return graph.compile()
+    # MemorySaver keeps graph state per thread_id in RAM. For production,
+    # swap this for a Postgres or Redis checkpointer without changing graph code.
+    checkpointer = MemorySaver()
+    return graph.compile(checkpointer=checkpointer)
 
 
 def chat():
     """Interactive chat loop with dark mode UI"""
     app = create_chat_ui()
     messages = []
-    
-    DARK_MODE = {
+
+    dark_mode = {
         "header": "\033[1;36m",
         "user": "\033[1;32m",
         "assistant": "\033[1;33m",
@@ -138,37 +154,37 @@ def chat():
         "reset": "\033[0m",
         "dim": "\033[2m"
     }
-    
-    print(f"{DARK_MODE['header']}{'=' * 70}{DARK_MODE['reset']}")
-    print(f"{DARK_MODE['header']}  LangGraph Agent Chat UI - Dark Mode{DARK_MODE['reset']}")
-    print(f"{DARK_MODE['header']}{'=' * 70}{DARK_MODE['reset']}")
-    print(f"{DARK_MODE['dim']}  Agents: OpenCode (coding) | Magic Coder (unrestricted coding) | Research (web scraping){DARK_MODE['reset']}")
-    print(f"{DARK_MODE['dim']}  Type 'quit' to exit | 'clear' to clear history{DARK_MODE['reset']}")
-    print(f"{DARK_MODE['header']}{'=' * 70}{DARK_MODE['reset']}\n")
-    
+
+    print(f"{dark_mode['header']}{'=' * 70}{dark_mode['reset']}")
+    print(f"{dark_mode['header']}  LangGraph Agent Chat UI - Dark Mode{dark_mode['reset']}")
+    print(f"{dark_mode['header']}{'=' * 70}{dark_mode['reset']}")
+    print(f"{dark_mode['dim']}  Agents: OpenCode (coding) | Magic Coder (unrestricted coding) | Research (web scraping){dark_mode['reset']}")
+    print(f"{dark_mode['dim']}  Type 'quit' to exit | 'clear' to clear history{dark_mode['reset']}")
+    print(f"{dark_mode['header']}{'=' * 70}{dark_mode['reset']}\n")
+
     while True:
         try:
-            user_input = input(f"{DARK_MODE['user']}You:{DARK_MODE['reset']} ").strip()
+            user_input = input(f"{dark_mode['user']}You:{dark_mode['reset']} ").strip()
         except EOFError:
             break
-            
+
         if user_input.lower() in ["quit", "exit"]:
-            print(f"{DARK_MODE['dim']}Goodbye!{DARK_MODE['reset']}")
+            print(f"{dark_mode['dim']}Goodbye!{dark_mode['reset']}")
             break
-        
+
         if user_input.lower() == "clear":
             messages = []
-            print(f"{DARK_MODE['dim']}Chat history cleared.{DARK_MODE['reset']}\n")
+            print(f"{dark_mode['dim']}Chat history cleared.{dark_mode['reset']}\n")
             continue
-        
+
         if not user_input:
             continue
-        
+
         messages.append({"role": "user", "content": user_input})
         result = app.invoke({"messages": messages})
-        
+
         assistant_msg = result["messages"][-1]["content"]
-        print(f"\n{DARK_MODE['assistant']}Agent:{DARK_MODE['reset']} {assistant_msg}\n")
+        print(f"\n{dark_mode['assistant']}Agent:{dark_mode['reset']} {assistant_msg}\n")
         messages.append({"role": "assistant", "content": assistant_msg})
 
 

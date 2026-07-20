@@ -5,9 +5,8 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 
-from src.ollama_client import chat_ollama, list_ollama_models
+from src.ollama_client import chat_ollama
 
 
 def _find_opencode_binary() -> str:
@@ -47,20 +46,20 @@ def _default_agent() -> str:
     return os.getenv("OPENCODE_CLI_AGENT", "build")
 
 
-def _is_local_ollama_model(model: Optional[str]) -> bool:
+def _is_local_ollama_model(model: str | None) -> bool:
     return bool(model and model.startswith("ollama/") and not model.startswith("ollama-cloud/"))
 
 
 def run_opencode(
     message: str,
-    workspace: Optional[str] = None,
-    model: Optional[str] = None,
-    agent: Optional[str] = None,
-    session_id: Optional[str] = None,
-    title: Optional[str] = None,
+    workspace: str | None = None,
+    model: str | None = None,
+    agent: str | None = None,
+    session_id: str | None = None,
+    title: str | None = None,
     auto_approve: bool = False,
     timeout: int = 300,
-    history: Optional[list] = None,
+    history: list | None = None,
 ) -> dict:
     """
     Run `opencode run` with --format json and return structured results.
@@ -68,6 +67,11 @@ def run_opencode(
     For local Ollama models (prefix `ollama/`), bypass the OpenCode CLI and
     call the local Ollama API directly because the OpenCode CLI only
     supports the `ollama-cloud` provider.
+
+    For cloud/OpenCode models, a `session_id` should be supplied on every
+    subsequent turn to continue the same CLI session. The returned
+    `session_id` should be stored per conversation thread and passed back
+    on the next invocation.
 
     Returns:
         {
@@ -111,6 +115,8 @@ def run_opencode(
         "--agent", agent,
     ]
 
+    # Reuse an existing OpenCode CLI session when possible so the headless
+    # agent retains its own conversation context across turns.
     if session_id:
         cmd.extend(["--session", session_id, "--continue"])
 

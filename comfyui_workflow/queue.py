@@ -30,8 +30,22 @@ def queue_workflow(workflow: dict, server="http://127.0.0.1:8188") -> dict:
     return resp.json()
 
 
-if __name__ == "__main__":
+_TOOL_DISPATCH = {
+    "bash": _tool_bash,
+    "read": _tool_read,
+    "glob": _tool_glob,
+    "grep": _tool_grep,
+    "edit": _tool_edit,
+    "write": _tool_write,
+    "build_image_framework": _tool_build_image_framework,
+    "build_comfyui_workflow": _tool_build_comfyui_workflow,
+    "register_character": _tool_register_character,
+    "update_physical_description": _tool_update_physical_description,
+    "place_image_order": _tool_place_image_order,
+}
 
+
+if __name__ == "__main__":
     wf = load_workflow()
     if len(sys.argv) > 2:
         wf = patch_text_node(wf, sys.argv[1], sys.argv[2])

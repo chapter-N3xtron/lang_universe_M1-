@@ -3,7 +3,7 @@ from typing import TypedDict, Annotated, List
 import operator
 from src.opencode_agent import create_opencode_graph
 from src.research_agent import create_research_graph
-from src.uncensored_coder_agent import run_uncensored_coder
+from src.magic_coder_agent import run_magic_coder
 
 
 class State(TypedDict):
@@ -19,7 +19,7 @@ def router(state: State):
     if target == "opencode":
         return "opencode"
     if target == "uncensored-coder":
-        return "uncensored-coder"
+        return "magic-coder"
     if target == "research":
         return "research"
     if target == "jasper":
@@ -71,7 +71,7 @@ def create_chat_ui():
         result = research_app.invoke({"messages": state["messages"]})
         return {"messages": result["messages"]}
 
-    def run_uncensored_coder_node(state):
+    def run_magic_coder_node(state):
         messages = state["messages"]
         user_query = ""
         for m in reversed(messages):
@@ -90,23 +90,23 @@ def create_chat_ui():
             job_id = create_job()
             run_job(
                 job_id,
-                lambda: run_uncensored_coder(
+                lambda: run_magic_coder(
                     message=user_query,
                     history=history,
                     model=state.get("model"),
                     workspace=state.get("workspace"),
                 )["text"],
             )
-            content = f"[Uncensored Coder async job started]\n\nJob ID: {job_id}\nPoll /api/jobs/{job_id} for results."
+            content = f"[Magic Coder async job started]\n\nJob ID: {job_id}\nPoll /api/jobs/{job_id} for results."
         else:
-            result = run_uncensored_coder(
+            result = run_magic_coder(
                 message=user_query,
                 history=history,
                 model=state.get("model"),
                 workspace=state.get("workspace"),
             )
             if not result["success"]:
-                content = f"[Uncensored Coder error]\n\n{result['error'] or 'Unknown error'}"
+                content = f"[Magic Coder error]\n\n{result['error'] or 'Unknown error'}"
             else:
                 content = result["text"] or "(no response)"
         return {"messages": [{"role": "assistant", "content": content}]}
@@ -114,13 +114,13 @@ def create_chat_ui():
     graph.add_node("jasper", jasper_agent)
     graph.add_node("opencode", run_opencode)
     graph.add_node("research", run_research)
-    graph.add_node("uncensored-coder", run_uncensored_coder_node)
+    graph.add_node("magic-coder", run_magic_coder_node)
 
-    graph.add_conditional_edges(START, router, ["jasper", "opencode", "uncensored-coder", "research", END])
+    graph.add_conditional_edges(START, router, ["jasper", "opencode", "magic-coder", "research", END])
     graph.add_edge("jasper", END)
     graph.add_edge("opencode", END)
     graph.add_edge("research", END)
-    graph.add_edge("uncensored-coder", END)
+    graph.add_edge("magic-coder", END)
 
     return graph.compile()
 
@@ -142,7 +142,7 @@ def chat():
     print(f"{DARK_MODE['header']}{'=' * 70}{DARK_MODE['reset']}")
     print(f"{DARK_MODE['header']}  LangGraph Agent Chat UI - Dark Mode{DARK_MODE['reset']}")
     print(f"{DARK_MODE['header']}{'=' * 70}{DARK_MODE['reset']}")
-    print(f"{DARK_MODE['dim']}  Agents: OpenCode (coding) | Research (web scraping){DARK_MODE['reset']}")
+    print(f"{DARK_MODE['dim']}  Agents: OpenCode (coding) | Magic Coder (unrestricted coding) | Research (web scraping){DARK_MODE['reset']}")
     print(f"{DARK_MODE['dim']}  Type 'quit' to exit | 'clear' to clear history{DARK_MODE['reset']}")
     print(f"{DARK_MODE['header']}{'=' * 70}{DARK_MODE['reset']}\n")
     

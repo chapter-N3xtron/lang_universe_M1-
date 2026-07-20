@@ -5,9 +5,9 @@ A multi-agent system built with LangGraph, featuring a modern React chat UI and 
 ## Architecture
 
 - **backend/**: LangGraph agents + FastAPI server
-  - `src/chat_ui.py`: orchestrates OpenCode, Research, Jasper, and Uncensored Coder agents
+  - `src/chat_ui.py`: orchestrates OpenCode, Research, Jasper, and Magic Coder agents
   - `src/opencode_agent.py`: coding agent via Ollama Cloud
-  - `src/uncensored_coder_agent.py`: local Ollama-based uncensored coding agent with filesystem tools and image-generation framework
+  - `src/magic_coder_agent.py`: local Ollama-based magic coding agent with filesystem tools and image-generation framework
   - `src/jobs.py`: in-memory async job runner for long-running agents
   - `src/research_agent.py`: research agent via Ollama Cloud
   - `src/llm.py`: Ollama Cloud connection using `langchain-ollama`
@@ -68,19 +68,19 @@ OPENCODE_MODEL=qwen3.5:397b
 ## Agents
 
 - **OpenCode CLI**: Primary coding agent for software tasks
-- **Uncensored Coder**: Local Ollama-based agent for unrestricted coding, configuration, and creative-automation tasks
+- **Magic Coder**: Local Ollama-based agent for creating super cute and cool SFW anime-style images with a deterministic pipeline
 - **Research Agent**: Deep research using web knowledge (Firecrawl optional)
 - **Jasper**: General LangGraph assistant
 
 ## Image Generation Framework
 
-The **Uncensored Coder** agent can scaffold a complete, deterministic character + image-generation pipeline:
+The **Magic Coder** agent can scaffold a complete, deterministic character + image-generation pipeline:
 
 - `build_image_framework` — creates a reusable character sheet, prompt engine, and batch generator.
 - `build_comfyui_workflow` — creates a separate ComfyUI API workflow JSON that locks the anime checkpoint, sampler, dimensions, and seed strategy so every character shares the same style.
 - `register_character` — reads a SillyTavern `character.json` + `lorebook.json` and creates a persistent image profile in `image_profiles/<name>/profile.json`.
 - `update_physical_description` — overrides the persistent physical description used for every image of that character.
-- `place_image_order` — assembles a deterministic positive/negative prompt from the character profile and a scene order, patches the ComfyUI workflow, and saves the order artifact. Use `dry_run=true` to inspect; `dry_run=false` to queue.
+- `place_image_order` — assembles a deterministic positive/negative prompt from the character profile and a scene order, patches the ComfyUI workflow, and queues it to the local ComfyUI server immediately.
 
 ### Deterministic image order flow
 
@@ -92,12 +92,9 @@ The **Uncensored Coder** agent can scaffold a complete, deterministic character 
    > "Amber looks like: young woman in her early twenties, fit and curvy, long honey-blonde hair, warm brown eyes, fair smooth skin, 90s anime pinup expression."
    The agent writes this to `image_profiles/Amber/profile.json` and uses it for every image.
 
-3. **Place an image order**:
+3. **Place an image order** (queues immediately):
    > "Image Amber: making coffee in the kitchen, stretching and yawning, leaning against the counter, tiny white cotton tank and panties, sunlit kitchen, alone, sleepy and flirty."
-   The agent builds the prompt, patches `comfyui_workflow/workflow_api.json`, and writes the order to `image_orders/Amber/`. With `dry_run=true` you can inspect before queuing.
-
-4. **Render**:
-   Either confirm "queue it" (dry_run=false) or run `python comfyui_workflow/patch_and_queue.py "<scene>"`.
+   The agent builds the prompt, patches `comfyui_workflow/workflow_api.json`, writes the order to `image_orders/Amber/`, and POSTs the workflow to `http://127.0.0.1:8188/prompt`. No separate dry-run or confirmation step is required.
 
 ### Locked style (never changes unless you edit the workflow)
 
@@ -116,11 +113,11 @@ Image orders are parsed by a dedicated small local model. Set in `backend/.env`:
 IMAGE_ORDER_MODEL=mistral-small:22b
 ```
 
-Defaults to `mistral-small:22b`. A smaller uncensored model can be substituted (e.g. `dolphin-llama3:8b`) if VRAM is tight.
+Defaults to `mistral-small:22b`. A smaller magic model can be substituted (e.g. `dolphin-llama3:8b`) if VRAM is tight.
 
 ## Async Jobs
 
-Long-running tasks (especially **Uncensored Coder**) run as background jobs to keep the UI responsive.
+Long-running tasks (especially **Magic Coder**) run as background jobs to keep the UI responsive.
 
 - `POST /api/jobs` — start a job; returns `{ job_id, status }`
 - `GET /api/jobs/{job_id}` — poll for status/result

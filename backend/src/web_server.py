@@ -6,16 +6,17 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.chat_ui import create_chat_ui
 from src.jobs import create_job, get_job, job_to_dict, run_job
 from src.ollama_client import list_ollama_models
 from src.stt import transcribe
-from src.tts import synthesize
 
 load_dotenv()
 
@@ -108,8 +109,24 @@ def _build_invocation_input(request: ChatRequest) -> tuple[dict, list[dict]]:
     return input_state, config
 
 
+def _log_request(request: ChatRequest) -> None:
+    """Emit a concise log line for debugging thread/session continuity."""
+    import logging
+
+    logger = logging.getLogger("langgraph-chat")
+    logger.info(
+        "chat request thread_id=%s agent=%s mode=%s history_len=%d",
+        request.thread_id,
+        request.target_agent,
+        request.mode,
+        len(request.history),
+    )
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
+    _log_request(request)
+
     # If a specific model is requested, inject it into the env for this call
     # so run_opencode picks it up without mutating global state.
     import os
@@ -133,23 +150,124 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 class TTSRequest(BaseModel):
     text: str
-    voice: str = "af_heart"
+    voice: str = ""
 
 
 @app.post("/api/tts")
-def tts(request: TTSRequest) -> Response:
+async def tts(request: TTSRequest) -> Response:
+    """Synthesize speech using Kyutai TTS 1.6B."""
+    from src.kyutai_tts import get_tts_engine
+    import io
+    import wave
+    
     try:
-        audio = synthesize(request.text, voice=request.voice)
+        engine = get_tts_engine()
+        audio_array, duration = await engine.synthesize_full(request.text, voice=request.voice)
+        
+        # Convert to WAV format
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(24000)  # 24kHz
+            audio_int16 = (audio_array * 32767).astype(np.int16)
+            wav_file.writeframes(audio_int16.tobytes())
+        
+        wav_buffer.seek(0)
+        audio_bytes = wav_buffer.read()
+        
         return Response(
-            content=audio,
+            content=audio_bytes,
             media_type="audio/wav",
             headers={
                 "Content-Disposition": "inline; filename=tts.wav",
-                "Content-Length": str(len(audio)),
+                "Content-Length": str(len(audio_bytes)),
+                "X-Duration-Sec": str(duration),
             },
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class TTSStreamRequest(BaseModel):
+    text: str
+    voice: str = ""
+    chunk_size: int = 20
+
+
+@app.post("/api/tts/stream")
+async def tts_stream(request: TTSStreamRequest):
+    """Stream TTS audio chunks as they're synthesized."""
+    from src.kyutai_tts import get_tts_engine
+    import json
+    import base64
+    
+    engine = get_tts_engine()
+    
+    async def generate():
+        try:
+            async for chunk, metadata in engine.synthesize_streaming(
+                text=request.text,
+                voice=request.voice,
+                chunk_size=request.chunk_size,
+            ):
+                # Convert numpy array to base64
+                audio_b64 = base64.b64encode(chunk.tobytes()).decode()
+                
+                event_data = {
+                    "audio": audio_b64,
+                    "shape": list(chunk.shape),
+                    "dtype": str(chunk.dtype),
+                    **metadata,
+                }
+                
+                yield f"data: {json.dumps(event_data)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class VoiceCloneRequest(BaseModel):
+    name: str
+
+
+@app.get("/api/tts/voices")
+async def list_voices() -> dict:
+    """List available voice embeddings."""
+    from src.kyutai_tts import get_tts_engine
+    
+    engine = get_tts_engine()
+    voices = await engine.list_voices()
+    return {
+        "voices": voices,
+        "total": len(voices),
+    }
+
+
+@app.post("/api/tts/voices/clone")
+async def clone_voice(request: VoiceCloneRequest) -> dict:
+    """
+    Clone a voice by name from the pre-computed repository.
+    
+    Note: True voice cloning from audio samples requires the voice encoder model.
+    This endpoint selects a pre-computed voice embedding by name.
+    """
+    from src.kyutai_tts import get_tts_engine
+    
+    engine = get_tts_engine()
+    try:
+        await engine.load_voice(request.name)
+        return {"voice_id": request.name, "status": "loaded"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @app.post("/api/stt")

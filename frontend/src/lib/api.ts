@@ -89,7 +89,7 @@ export async function getAvailableModels(): Promise<ModelsResponse> {
   return res.json();
 }
 
-export async function synthesizeSpeech(text: string, voice = "af_heart"): Promise<Blob> {
+export async function synthesizeSpeech(text: string, voice = "alba"): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -102,6 +102,29 @@ export async function synthesizeSpeech(text: string, voice = "af_heart"): Promis
   }
 
   return res.blob();
+}
+
+export type VoiceInfo = {
+  id: string;
+  name: string;
+  category?: string;
+};
+
+export async function listVoices(): Promise<VoiceInfo[]> {
+  const res = await fetch(`${API_BASE}/api/tts/voices`, {
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to list voices: ${res.status} ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  return data.voices.map((v: string) => ({
+    id: v,
+    name: v.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+    category: "english",
+  }));
 }
 
 export async function transcribeAudio(audio: Blob): Promise<string> {

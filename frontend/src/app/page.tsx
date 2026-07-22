@@ -74,7 +74,10 @@ import {
   ModelInfo,
   createAgentJob,
   getAgentJob,
+  listVoices,
+  VoiceInfo,
 } from "@/lib/api";
+import { synthesizeSpeechStream } from "@/lib/tts-stream";
 import {
   Dialog,
   DialogContent,
@@ -361,6 +364,8 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
+  const [voices, setVoices] = useState<VoiceInfo[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState<string>("alba");
   const [recording, setRecording] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [activeInquiry, setActiveInquiry] = useState<Inquiry | null>(null);
@@ -376,6 +381,7 @@ export default function Home() {
   >([]);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const initialized = useRef(false);
@@ -671,6 +677,10 @@ export default function Home() {
   );
 
   const stopAudio = useCallback(() => {
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -682,24 +692,45 @@ export default function Home() {
   const playMessage = useCallback(
     async (content: string, index: number) => {
       stopAudio();
+      setSpeakingIndex(index);
       try {
-        const blob = await synthesizeSpeech(content);
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audioRef.current = audio;
-        setSpeakingIndex(index);
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          setSpeakingIndex(null);
-          audioRef.current = null;
-        };
-        await audio.play();
+        const ctx = new AudioContext({ sampleRate: 24000 });
+        audioCtxRef.current = ctx;
+        let nextTime = ctx.currentTime;
+        let lastEndTime = ctx.currentTime;
+
+        for await (const chunk of synthesizeSpeechStream(content, selectedVoice)) {
+          const bufLen = chunk.length;
+          const buffer = ctx.createBuffer(1, bufLen, 24000);
+          buffer.getChannelData(0).set(chunk);
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(ctx.destination);
+          const startTime = Math.max(ctx.currentTime, nextTime);
+          source.start(startTime);
+          lastEndTime = startTime + bufLen / 24000;
+          nextTime = lastEndTime;
+        }
+
+        await new Promise<void>((resolve) => {
+          const check = () => {
+            if (ctx.currentTime >= lastEndTime) {
+              ctx.close();
+              audioCtxRef.current = null;
+              setSpeakingIndex(null);
+              resolve();
+            } else {
+              setTimeout(check, 100);
+            }
+          };
+          check();
+        });
       } catch (err) {
         console.error("TTS failed", err);
         setSpeakingIndex(null);
       }
     },
-    [stopAudio]
+    [stopAudio, selectedVoice]
   );
 
   const stopRecording = useCallback(() => {
@@ -872,6 +903,12 @@ export default function Home() {
   useEffect(() => {
     refreshModels();
   }, [refreshModels]);
+
+  useEffect(() => {
+    listVoices()
+      .then(setVoices)
+      .catch((err) => console.error("Failed to load voices", err));
+  }, []);
 
   // Refetch available models when the user opens the model selector
   const handleModelSelectOpen = useCallback(() => {
@@ -1297,6 +1334,36 @@ export default function Home() {
                     ))}
                   </SelectContent>
                 </Select>
+
+                {voices.length > 0 && (
+                <Select
+                  value={selectedVoice}
+                  onValueChange={(v) => v && setSelectedVoice(v)}
+                >
+                  <SelectTrigger className="w-40 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
+                    <span className="flex items-center gap-2 overflow-hidden">
+                      <Volume2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                      <span className="truncate">{voices.find(v => v.id === selectedVoice)?.name ?? selectedVoice}</span>
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-h-60">
+                    {voices.map((v) => (
+                      <SelectItem
+                        key={v.id}
+                        value={v.id}
+                        className="focus:bg-zinc-800 focus:text-zinc-100"
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-heading">
+                            {v.category}
+                          </span>
+                          <span>{v.name}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                )}
               </div>
 
               {/* Right column: repo picker and live/async switch */}

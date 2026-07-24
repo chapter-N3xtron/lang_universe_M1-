@@ -165,22 +165,22 @@ function WorkspacePickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md bg-zinc-900 border-zinc-700 text-zinc-100">
+      <DialogContent className="sm:max-w-md bg-card border-border text-foreground">
         <DialogHeader>
           <DialogTitle className="font-heading tracking-wide">
             Select repo
           </DialogTitle>
-          <DialogDescription className="text-zinc-400">
+          <DialogDescription className="text-muted-foreground">
             Navigate and click a folder to select it.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-2 text-xs font-mono text-zinc-300 mb-2">
+        <div className="flex items-center gap-2 text-xs font-mono text-foreground mb-2">
           <Button
             size="sm"
             variant="ghost"
             onClick={home}
-            className="h-6 text-xs px-2 text-zinc-400 hover:bg-zinc-800"
+            className="h-6 text-xs px-2 text-muted-foreground hover:bg-secondary"
           >
             Home
           </Button>
@@ -189,7 +189,7 @@ function WorkspacePickerDialog({
             variant="ghost"
             onClick={parent}
             disabled={path === "/"}
-            className="h-6 text-xs px-2 text-zinc-400 hover:bg-zinc-800 disabled:opacity-30"
+            className="h-6 text-xs px-2 text-muted-foreground hover:bg-secondary disabled:opacity-30"
           >
             Up
           </Button>
@@ -200,22 +200,22 @@ function WorkspacePickerDialog({
           <p className="text-xs text-red-400 mb-2">{error}</p>
         )}
 
-        <div className="h-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950">
+        <div className="h-64 overflow-y-auto rounded-lg border border-border bg-background">
           {loading ? (
-            <div className="p-4 text-xs text-zinc-500">Loading…</div>
+            <div className="p-4 text-xs text-muted-foreground">Loading…</div>
           ) : entries.length === 0 ? (
-            <div className="p-4 text-xs text-zinc-500">No folders here</div>
+            <div className="p-4 text-xs text-muted-foreground">No folders here</div>
           ) : (
-            <div className="divide-y divide-zinc-800">
+            <div className="divide-y divide-border">
               {entries.map((entry) => (
                 <button
                   key={entry.path}
                   onClick={() => load(entry.path)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-secondary transition-colors"
                 >
                   <FolderOpen className="h-4 w-4 text-blue-400 shrink-0" />
                   <span className="truncate">{entry.name}</span>
-                  <ChevronRight className="h-4 w-4 text-zinc-600 ml-auto shrink-0" />
+                  <ChevronRight className="h-4 w-4 text-muted-foreground ml-auto shrink-0" />
                 </button>
               ))}
             </div>
@@ -226,7 +226,7 @@ function WorkspacePickerDialog({
           <Button
             variant="ghost"
             onClick={() => onOpenChange(false)}
-            className="text-zinc-400 hover:bg-zinc-800"
+            className="text-muted-foreground hover:bg-secondary"
           >
             Cancel
           </Button>
@@ -1020,15 +1020,15 @@ export default function Home() {
     "Agent";
 
   return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-100 font-mono">
+    <div className="flex h-screen bg-background text-foreground font-mono">
       {/* Sidebar */}
       <aside
         className={cn(
-          "flex flex-col border-r border-zinc-800 bg-zinc-900 transition-all duration-300 ease-in-out overflow-hidden",
+          "flex flex-col border-r border-border bg-card transition-all duration-300 ease-in-out overflow-hidden",
           sidebarOpen ? "w-80" : "w-0"
         )}
       >
-        <div className="flex min-w-[20rem] items-center justify-between border-b border-zinc-800 px-4 py-3">
+        <div className="flex min-w-[20rem] items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-blue-500" />
             <span className="font-heading text-sm">Chat History</span>
@@ -1063,13 +1063,13 @@ export default function Home() {
       {/* Main chat */}
       <div className="flex flex-1 flex-col">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-6 py-4 gap-4">
+        <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4 gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <Button
               size="icon"
               variant="ghost"
               onClick={() => setSidebarOpen((v) => !v)}
-              className="h-8 w-8 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              className="h-8 w-8 text-muted-foreground hover:bg-secondary hover:text-foreground"
               aria-label={sidebarOpen ? "Collapse sidebar" : "Open sidebar"}
             >
               {sidebarOpen ? (
@@ -1090,13 +1090,13 @@ export default function Home() {
                       if (e.key === "Escape") cancelTitleEdit();
                     }}
                     autoFocus
-                    className="h-7 rounded bg-zinc-800 px-2 text-sm text-zinc-100 outline-none ring-1 ring-zinc-700 focus:ring-blue-500 border-none"
+                    className="h-7 rounded bg-secondary px-2 text-sm text-foreground outline-none ring-1 ring-border focus:ring-blue-500 border-none"
                   />
                   <Button
                     size="icon"
                     variant="ghost"
                     onClick={confirmTitleEdit}
-                    className="h-7 w-7 text-emerald-400 hover:bg-zinc-800"
+                    className="h-7 w-7 text-emerald-400 hover:bg-secondary"
                   >
                     <Check className="h-4 w-4" />
                   </Button>
@@ -1104,27 +1104,27 @@ export default function Home() {
                     size="icon"
                     variant="ghost"
                     onClick={cancelTitleEdit}
-                    className="h-7 w-7 text-red-400 hover:bg-zinc-800"
+                    className="h-7 w-7 text-red-400 hover:bg-secondary"
                   >
                     <X className="h-4 w-4" />
                   </Button>
                 </>
               ) : (
                 <>
-                  <h1 className="font-heading text-lg tracking-wide text-zinc-100 truncate">
+                  <h1 className="font-heading text-lg tracking-wide text-foreground truncate">
                     {activeThread?.title ?? activeSession?.title ?? "LangGraph Agent Chat"}
                   </h1>
                   <Button
                     size="icon"
                     variant="ghost"
                     onClick={startTitleEdit}
-                    className="h-6 w-6 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                    className="h-6 w-6 text-muted-foreground hover:bg-secondary hover:text-foreground"
                   >
                     <Pencil className="h-3 w-3" />
                   </Button>
                 </>
               )}
-              <p className="text-xs text-zinc-400 whitespace-nowrap">
+              <p className="text-xs text-muted-foreground whitespace-nowrap">
                 {agentLabel}
               </p>
             </div>
@@ -1135,7 +1135,7 @@ export default function Home() {
               size="sm"
               variant="ghost"
               onClick={handleNewThread}
-              className="h-8 gap-1 text-xs text-zinc-300 hover:bg-zinc-800"
+              className="h-8 gap-1 text-xs text-foreground hover:bg-secondary"
             >
               <Plus className="h-4 w-4" /> Thread
             </Button>
@@ -1179,7 +1179,7 @@ export default function Home() {
                           {text && (
                             <MessageContent
                               markdown
-                              className="rounded-2xl px-4 py-3 text-sm bg-zinc-900 text-zinc-100 font-mono"
+                              className="rounded-2xl px-4 py-3 text-sm bg-card text-foreground font-mono"
                             >
                               {text}
                             </MessageContent>
@@ -1205,7 +1205,7 @@ export default function Home() {
                                 "flex items-center gap-1 rounded-full px-2 py-1 text-xs transition-colors",
                                 speakingIndex === idx
                                   ? "bg-blue-600 text-white"
-                                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                               )}
                               aria-label={
                                 speakingIndex === idx
@@ -1234,7 +1234,7 @@ export default function Home() {
                         "rounded-2xl px-4 py-3 text-sm font-mono",
                         msg.role === "user"
                           ? "bg-emerald-600 text-white"
-                          : "bg-zinc-900 text-zinc-100"
+                          : "bg-card text-foreground"
                       )}
                     >
                       {msg.content}
@@ -1251,7 +1251,7 @@ export default function Home() {
                   fallback="A"
                   className="h-8 w-8 bg-blue-600"
                 />
-                <MessageContent className="bg-zinc-900 text-zinc-400 text-sm px-4 py-3 rounded-2xl">
+                <MessageContent className="bg-card text-muted-foreground text-sm px-4 py-3 rounded-2xl">
                   Agent is thinking…
                 </MessageContent>
               </Message>
@@ -1272,7 +1272,7 @@ export default function Home() {
         </main>
 
         {/* Input */}
-        <footer className="border-t border-zinc-800 bg-zinc-900 px-4 py-4">
+        <footer className="border-t border-border bg-card px-4 py-4">
           <div className="mx-auto max-w-3xl">
             {/* Two-tier toolbar above input */}
             <div className="flex items-start justify-between gap-3 mb-2">
@@ -1284,24 +1284,24 @@ export default function Home() {
                   onValueChange={(v) => handleModelChange(v ?? defaultModel)}
                   onOpenChange={(open) => open && handleModelSelectOpen()}
                 >
-                    <SelectTrigger className="w-56 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
+                    <SelectTrigger className="w-56 border-border bg-secondary/50 text-foreground h-8 text-xs">
                       <span className="flex items-center gap-2 overflow-hidden">
-                        <Cpu className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                        <Cpu className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="truncate font-mono">{
                           activeModel.replace(/^ollama\//, "").replace(/^ollama-cloud\//, "") || activeModel
                         }</span>
                       </span>
                     </SelectTrigger>
-                    <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-w-sm">
+                    <SelectContent className="bg-card border-border text-foreground max-w-sm">
                       {availableModels.map((m) => (
                         <SelectItem
                           key={m.id}
                           value={m.id}
-                          className="focus:bg-zinc-800 focus:text-zinc-100 font-mono"
+                          className="focus:bg-secondary focus:text-foreground font-mono"
                           title={m.id}
                         >
                           <span className="flex items-center gap-2 truncate">
-                            <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-heading">
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-heading">
                               {m.provider}
                             </span>
                             <span className="truncate">{m.name}</span>
@@ -1316,15 +1316,15 @@ export default function Home() {
                   value={activeThread?.agent ?? "jasper"}
                   onValueChange={(v) => handleAgentChange(v as AgentType)}
                 >
-                  <SelectTrigger className="w-40 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
+                  <SelectTrigger className="w-40 border-border bg-secondary/50 text-foreground h-8 text-xs">
                     <SelectValue placeholder="Select agent" />
                   </SelectTrigger>
-                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100">
+                  <SelectContent className="bg-card border-border text-foreground">
                     {AGENT_OPTIONS.map((opt) => (
                       <SelectItem
                         key={opt.value}
                         value={opt.value}
-                        className="focus:bg-zinc-800 focus:text-zinc-100"
+                        className="focus:bg-secondary focus:text-foreground"
                       >
                         <span className="flex items-center gap-2">
                           {opt.icon}
@@ -1340,21 +1340,21 @@ export default function Home() {
                   value={selectedVoice}
                   onValueChange={(v) => v && setSelectedVoice(v)}
                 >
-                  <SelectTrigger className="w-40 border-zinc-700 bg-zinc-800/50 text-zinc-100 h-8 text-xs">
+                  <SelectTrigger className="w-40 border-border bg-secondary/50 text-foreground h-8 text-xs">
                     <span className="flex items-center gap-2 overflow-hidden">
-                      <Volume2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                      <Volume2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span className="truncate">{voices.find(v => v.id === selectedVoice)?.name ?? selectedVoice}</span>
                     </span>
                   </SelectTrigger>
-                  <SelectContent className="bg-zinc-900 border-zinc-700 text-zinc-100 max-h-60">
+                  <SelectContent className="bg-card border-border text-foreground max-h-60">
                     {voices.map((v) => (
                       <SelectItem
                         key={v.id}
                         value={v.id}
-                        className="focus:bg-zinc-800 focus:text-zinc-100"
+                        className="focus:bg-secondary focus:text-foreground"
                       >
                         <span className="flex items-center gap-2">
-                          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-heading">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-heading">
                             {v.category}
                           </span>
                           <span>{v.name}</span>
@@ -1374,16 +1374,16 @@ export default function Home() {
                     size="sm"
                     variant="ghost"
                     onClick={() => handlePickWorkspace()}
-                    className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-zinc-800 px-2"
+                    className="h-8 gap-1.5 text-xs text-foreground hover:bg-secondary px-2"
                     title="Choose repo"
                   >
-                    <FolderSearch className="h-4 w-4 text-zinc-400" />
+                    <FolderSearch className="h-4 w-4 text-muted-foreground" />
                     <span className="max-w-[24rem] truncate font-heading tracking-wide">
                       {repoName(activeThread?.workspace ?? DEFAULT_WORKSPACE)}
                     </span>
                   </Button>
 
-                  <div className="flex items-center gap-2 rounded-lg bg-zinc-800/50 px-2 py-1 border border-zinc-700">
+                  <div className="flex items-center gap-2 rounded-lg bg-secondary/50 px-2 py-1 border border-border">
                     <Switch
                       id="mode-switch"
                       checked={activeThread?.mode === "async"}
@@ -1394,13 +1394,13 @@ export default function Home() {
                     />
                     <label
                       htmlFor="mode-switch"
-                      className="text-xs text-zinc-300 cursor-pointer select-none"
+                      className="text-xs text-foreground cursor-pointer select-none"
                       title="Live: ask for permission. Async: run in background and report back."
                     >
                       {activeThread?.mode === "async" ? "Async" : "Live"}
                     </label>
                     <span title="Live: ask for permission. Async: run in background and report back.">
-                      <HelpCircle className="h-3 w-3 text-zinc-500" />
+                      <HelpCircle className="h-3 w-3 text-muted-foreground" />
                     </span>
                   </div>
                 </div>
@@ -1419,11 +1419,11 @@ export default function Home() {
               onValueChange={setInput}
               isLoading={loading}
               onSubmit={handleSubmit}
-              className="bg-zinc-950 border-zinc-800"
+              className="bg-background border-border"
             >
               <PromptInputTextarea
                 placeholder={`Message ${agentLabel}…`}
-                className="text-zinc-100 placeholder:text-zinc-500 font-mono"
+                className="text-foreground placeholder:text-muted-foreground font-mono"
                 disabled={loading}
               />
               <PromptInputActions className="justify-between">
@@ -1439,7 +1439,7 @@ export default function Home() {
                         "rounded-full",
                         recording
                           ? "bg-red-600 text-white hover:bg-red-500"
-                          : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                          : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                       )}
                     >
                       {recording ? (
@@ -1471,7 +1471,7 @@ export default function Home() {
             {micError && (
               <p className="mt-2 text-center text-xs text-red-400">{micError}</p>
             )}
-            <p className="mt-2 text-center text-xs text-zinc-500 font-heading tracking-wider">
+            <p className="mt-2 text-center text-xs text-muted-foreground font-heading tracking-wider">
               POWERED BY LANGGRAPH · OLLAMA CLOUD · AGENTS-UI-KIT
             </p>
           </div>

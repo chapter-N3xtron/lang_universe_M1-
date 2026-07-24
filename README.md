@@ -45,8 +45,16 @@ Open http://localhost:3000 in your browser.
 
 ### Voice Layer
 
-- **TTS**: assistant messages have a "Read aloud" button powered by Kokoro (`POST /api/tts`).
+- **TTS**: assistant messages have a "Read aloud" button powered by **Kyutai Pocket TTS** (`POST /api/tts` and `POST /api/tts/stream`).
+  - Streaming playback via Web Audio API with low-latency chunk scheduling.
+  - Cloned voices are stored as safetensors in `backend/voices/` and rescanned at runtime.
+  - Locked-gain normalization for cloned voices targets `-5 dBFS` with a max gain cap of `4.0x` to avoid distortion.
 - **STT**: click the microphone button to record audio; it is transcribed locally using faster-whisper (`POST /api/stt`) and sent as text.
+- **VST/AU Audio Processing**: on macOS the TTS output can be routed through external plugin effects:
+  - **BlackHole 2ch** virtual audio device
+  - **Element** (free plugin host, supports separate input/output devices)
+  - Effects chain: **Rare** (Pultec-style EQ) → **LALA** (LA-2A-style optical compressor) → optional **TAL-Reverb-4** / **OldSkoolVerb** / **Chow Matrix**
+  - Set Mac system output to BlackHole, Element input = BlackHole, Element output = Built-in speakers.
 
 ### Chat UI Components
 

@@ -4,19 +4,18 @@ version = "1.0.0"
 description = "Multi-agent system with LangGraph, Chat UI, and OpenCode CLI"
 requires-python = ">=3.10"
 dependencies = [
-    "langgraph>=0.2.0",
-    "langgraph-checkpoint-sqlite>=1.0.0",
-    "langchain>=0.3.0",
-    "langchain-core>=0.3.0",
+    "langgraph>=0.2.0,<2",
+    "langgraph-checkpoint-sqlite>=1.0.0,<4",
+    "langchain>=0.3.0,<1",
+    "langchain-core>=0.3.0,<1",
     "firecrawl-py>=1.0.0",
-    "langgraph-cli[inmem]>=0.1.0",
-    "langchain-ollama>=0.2.0",
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
+    "langchain-ollama>=0.2.0,<1",
+    "fastapi>=0.115.0,<1",
+    "uvicorn[standard]>=0.32.0,<1",
     "python-dotenv>=1.0.0",
     "kokoro>=0.7.16",
     "soundfile>=0.12.0",
-    "numpy>=1.26.0",
+    "numpy>=1.26.0,<3",
     "faster-whisper>=1.0.0",
     "python-multipart>=0.0.20",
 ]

@@ -10,6 +10,7 @@ class State(TypedDict):
     messages: Annotated[list[dict], operator.add]
     workspace: str
     mode: str
+    model: str
     code_response: str
     reasoning: str
     opencode_session_id: str
@@ -42,6 +43,7 @@ def opencode_coding_agent(state: State):
             message=user_query,
             title=user_query[:50],
             workspace=workspace,
+            model=state.get("model"),
             auto_approve=(mode == "async"),
             history=history_for_model,
             session_id=prior_session_id,

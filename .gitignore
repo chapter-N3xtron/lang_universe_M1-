@@ -64,6 +64,18 @@ image_orders/
 # misc
 .DS_Store
 *.pem
+*.pid
+*.bak
+*.restored
+*.old
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# runtime data
+backend/data/
+backend/logs/
+frontend/logs/
 
 # debug
 npm-debug.log*

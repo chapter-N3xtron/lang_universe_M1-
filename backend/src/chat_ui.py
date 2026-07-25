@@ -60,7 +60,7 @@ I can hand this off to OpenCode for repo work or Research for web tasks. Use the
     }
 
 
-def create_chat_ui():
+def create_chat_ui(checkpointer=None):
     graph = StateGraph(State)
 
     opencode_app = create_opencode_graph()
@@ -137,14 +137,9 @@ def create_chat_ui():
     graph.add_edge("research", END)
     graph.add_edge("magic-coder", END)
 
-    # SqliteSaver persists graph state per thread_id in a local SQLite file.
-    # This survives backend restarts and avoids losing conversation context.
-    import sqlite3
-
-    db_path = Path(__file__).parent.parent / "data" / "checkpoints.sqlite"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
-    checkpointer = SqliteSaver(conn)
+    # Use the provided checkpointer, or fall back to in-memory for CLI usage.
+    if checkpointer is None:
+        checkpointer = MemorySaver()
     return graph.compile(checkpointer=checkpointer)
 
 

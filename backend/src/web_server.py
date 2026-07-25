@@ -20,7 +20,6 @@ from src.stt import transcribe
 
 load_dotenv()
 
-app_graph = create_chat_ui()
 
 
 class ChatMessage(BaseModel):
@@ -46,8 +45,15 @@ class ChatResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Application lifespan hook."""
-    yield
+    """Application lifespan hook — compile the LangGraph app with SQLite persistence."""
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    db_path = Path(__file__).parent.parent / "data" / "checkpoints.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SqliteSaver.from_conn_string(str(db_path)) as checkpointer:
+        _app.state.graph = create_chat_ui(checkpointer=checkpointer)
+        yield
+    _app.state.graph = None
 
 
 app = FastAPI(
@@ -75,7 +81,7 @@ def _has_checkpoint(thread_id: str | None) -> bool:
     if not thread_id:
         return False
     try:
-        snapshot = app_graph.get_state({"configurable": {"thread_id": thread_id}})
+        snapshot = app.state.graph.get_state({"configurable": {"thread_id": thread_id}})
         return bool(snapshot and snapshot.values)
     except Exception:
         return False
@@ -130,24 +136,10 @@ def _log_request(request: ChatRequest) -> None:
 def chat(request: ChatRequest) -> ChatResponse:
     _log_request(request)
 
-    # If a specific model is requested, inject it into the env for this call
-    # so run_opencode picks it up without mutating global state.
-    import os
-
-    original_model = os.environ.get("OPENCODE_CLI_MODEL")
-    if request.model:
-        os.environ["OPENCODE_CLI_MODEL"] = request.model
-
     input_state, config = _build_invocation_input(request)
-    try:
-        result = app_graph.invoke(input_state, config=config)
-        response = result["messages"][-1]["content"]
-        session_id = result.get("opencode_session_id")
-    finally:
-        if original_model is not None:
-            os.environ["OPENCODE_CLI_MODEL"] = original_model
-        else:
-            os.environ.pop("OPENCODE_CLI_MODEL", None)
+    result = app.state.graph.invoke(input_state, config=config)
+    response = result["messages"][-1]["content"]
+    session_id = result.get("opencode_session_id")
 
     return ChatResponse(response=response, opencode_session_id=session_id)
 
@@ -383,24 +375,13 @@ def create_job_endpoint(request: ChatRequest) -> dict:
     """Start an async agent job. Returns a job ID for polling."""
     job_id = create_job()
 
-    import os
-    original_model = os.environ.get("OPENCODE_CLI_MODEL")
-    if request.model:
-        os.environ["OPENCODE_CLI_MODEL"] = request.model
-
     input_state, config = _build_invocation_input(request)
     # Force async mode for jobs.
     input_state["mode"] = "async"
 
     def job_fn() -> str:
-        try:
-            result = app_graph.invoke(input_state, config=config)
-            return result["messages"][-1]["content"]
-        finally:
-            if original_model is not None:
-                os.environ["OPENCODE_CLI_MODEL"] = original_model
-            else:
-                os.environ.pop("OPENCODE_CLI_MODEL", None)
+        result = app.state.graph.invoke(input_state, config=config)
+        return result["messages"][-1]["content"]
 
     run_job(job_id, job_fn)
     return {"job_id": job_id, "status": "pending"}

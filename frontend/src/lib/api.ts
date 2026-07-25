@@ -2,6 +2,22 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
+async function fetchWithRetry(url: string, retries = 2, delayMs = 500): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (i < retries) {
+        await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export type ApiChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -73,7 +89,7 @@ export async function sendChatMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, history, thread_id, target_agent, workspace, mode, model, opencode_session_id } as ChatRequest),
     cache: "no-store",
-    signal: AbortSignal.timeout(900000),
+    signal: AbortSignal.timeout(120000),
   });
 
   if (!res.ok) {
@@ -85,7 +101,7 @@ export async function sendChatMessage(
 }
 
 export async function getAvailableModels(): Promise<ModelsResponse> {
-  const res = await fetch(`${API_BASE}/api/models`, { cache: "no-store" });
+  const res = await fetchWithRetry(`${API_BASE}/api/models`);
   if (!res.ok) {
     throw new Error(`Failed to fetch models: ${res.status} ${res.statusText}`);
   }
@@ -114,9 +130,7 @@ export type VoiceInfo = {
 };
 
 export async function listVoices(): Promise<VoiceInfo[]> {
-  const res = await fetch(`${API_BASE}/api/tts/voices`, {
-    cache: "no-store",
-  });
+  const res = await fetchWithRetry(`${API_BASE}/api/tts/voices`);
 
   if (!res.ok) {
     throw new Error(`Failed to list voices: ${res.status} ${res.statusText}`);

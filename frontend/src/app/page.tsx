@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useBackendHealth } from "@/hooks/useBackendHealth";
 import {
   Send,
   Sparkles,
@@ -386,6 +387,8 @@ export default function Home() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const initialized = useRef(false);
+
+  const { online: backendOnline } = useBackendHealth();
 
   useEffect(() => {
     if (initialized.current) return;
@@ -1027,6 +1030,11 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-background text-foreground font-mono">
+      {!backendOnline && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-destructive/90 text-destructive-foreground px-4 py-2 text-center text-sm font-mono">
+          Backend disconnected — retrying every 10s
+        </div>
+      )}
       {/* Sidebar */}
       <aside
         className={cn(
@@ -1466,7 +1474,7 @@ export default function Home() {
                   <Button
                     size="icon"
                     onClick={handleSubmit}
-                    disabled={loading || !input.trim()}
+                    disabled={loading || !input.trim() || !backendOnline}
                     className="rounded-full bg-blue-600 hover:bg-blue-500"
                   >
                     <Send className="h-4 w-4" />

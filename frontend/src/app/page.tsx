@@ -483,91 +483,73 @@ export default function Home() {
 
   const detectInquiry = useCallback((response: string) => {
     const trimmed = response.trim();
+    const isQuestion = /\?\s*$/.test(trimmed);
     const hasCode = /```/.test(trimmed);
+    const hasOptions = /\n\s*(•|-|\d+\.)\s+/.test(trimmed);
 
-    // Only trigger inquiry if the response contains a genuine question
-    // (ends with ? and doesn't contain code blocks)
-    const hasQuestion = /\?\s*$/.test(trimmed);
-    if (!hasQuestion || hasCode) {
-      setActiveInquiry(null);
-      return;
-    }
-
-    // Extract the actual question from the response — take just the last
-    // paragraph or sentence group ending with ?, not the entire response.
-    const paragraphs = trimmed.split(/\n\n/);
-    const lastParagraph = paragraphs[paragraphs.length - 1].trim();
-    // Further refine: use only the last sentence ending with ?
-    const sentences = lastParagraph.match(/[^.!?]+[.!?]+/g) || [lastParagraph];
-    let question = sentences[sentences.length - 1].trim();
-    if (!question.endsWith("?")) {
-      question = lastParagraph; // fallback to last paragraph
-    }
-    question = question.replace(/\?\s*$/, "").trim();
-
-    // Detect type from the question text itself (not the full response)
-    const qLower = question.toLowerCase();
-    const allText = lastParagraph.toLowerCase(); // look at last paragraph for options
-
-    // Confirmation: yes/no patterns
-    if (
-      qLower.includes("yes or no") ||
-      qLower.includes("would you like") ||
-      qLower.includes("should i") ||
-      qLower.includes("do you want") ||
-      qLower.includes("are you sure")
-    ) {
-      setActiveInquiry({ id: uuidv4(), question, type: "confirmation" });
-      return;
-    }
-
-    // Scale: rating patterns
-    if (
-      qLower.includes("rate") ||
-      qLower.includes("how would you rate") ||
-      qLower.includes("on a scale")
-    ) {
-      setActiveInquiry({ id: uuidv4(), question, type: "scale" });
-      return;
-    }
-
-    // Multiple choice: bullet or numbered list in the last paragraph
-    const hasOptions = /\n\s*(•|-|\d+\.)\s+/.test(lastParagraph);
-    if (hasOptions) {
-      const optionMatches = lastParagraph.matchAll(
-        /\n\s*(?:•|-|\d+\.)\s+(.+)/g
-      );
+    if (isQuestion && !hasCode) {
+      let inquiryType: Inquiry["type"] = hasOptions ? "multipleChoice" : "text";
       const options: string[] = [];
-      for (const match of optionMatches) {
-        options.push(match[1].trim().replace(/\?$/, ""));
+
+      if (inquiryType === "multipleChoice") {
+        const optionMatches = trimmed.matchAll(
+          /\n\s*(?:•|-|\d+\.)\s+(.+)/g
+        );
+        for (const match of optionMatches) {
+          options.push(match[1].trim().replace(/\?$/, ""));
+        }
       }
+
+      if (
+        trimmed.toLowerCase().includes("yes or no") ||
+        trimmed.toLowerCase().includes("would you like")
+      ) {
+        setActiveInquiry({
+          id: uuidv4(),
+          question: trimmed.replace(/\?\s*$/, ""),
+          type: "confirmation",
+        });
+        return;
+      }
+
+      if (
+        trimmed.toLowerCase().includes("rate") ||
+        trimmed.toLowerCase().includes("how would you rate")
+      ) {
+        setActiveInquiry({
+          id: uuidv4(),
+          question: trimmed.replace(/\?\s*$/, ""),
+          type: "scale",
+        });
+        return;
+      }
+
       setActiveInquiry({
         id: uuidv4(),
-        question,
-        type: "multipleChoice",
+        question: trimmed.replace(/\?\s*$/, ""),
+        type: inquiryType,
         options: options.length > 0 ? options : undefined,
       });
-      return;
+    } else {
+      setActiveInquiry(null);
     }
-
-    // Default: text input
-    setActiveInquiry({ id: uuidv4(), question, type: "text" });
   }, []);
 
   const handleInquirySubmit = useCallback(
     (inquiryId: string, answer: string) => {
-      const question = activeInquiry?.question ?? "";
       setActiveInquiry(null);
       setInquiryHistory((prev) => [
         ...prev,
-        { question, answer, timestamp: "now" },
+        {
+          question: activeInquiry?.question ?? "",
+          answer,
+          timestamp: "now",
+        },
       ]);
-      // Send the answer with context so the agent knows what was asked
-      const contextualAnswer = `[Answering: "${question}"] ${answer}`;
-      setInput(contextualAnswer);
-      setTimeout(() => handleSubmitWithText(contextualAnswer), 0);
+      setInput(answer);
+      setTimeout(() => handleSubmitWithText(answer), 0);
     },
-    [activeInquiry, handleSubmitWithText]
+    [activeInquiry]
   );
 
   const handleInquirySkip = useCallback(() => {

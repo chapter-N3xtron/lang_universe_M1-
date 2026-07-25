@@ -6,6 +6,7 @@ from pathlib import Path
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
+from src.agent_utils import get_user_query, get_conversation_history
 from src.magic_coder_agent import run_magic_coder
 from src.opencode_agent import create_opencode_graph
 from src.research_agent import create_research_graph
@@ -45,19 +46,33 @@ def router(state: State):
 
 
 def jasper_agent(state: State):
-    """Daily-driver assistant / ticket clerk. Simple echo with routing info for now."""
-    user_messages = [m for m in state["messages"] if isinstance(m, dict) and m.get("role") == "user"]
-    user_text = user_messages[-1].get("content", "") if user_messages else ""
+    """Daily-driver assistant — uses the LLM with full conversation history."""
+    from src.llm import get_llm
 
-    content = f"""Hi, I'm Jasper.
+    messages = state["messages"]
+    history = get_conversation_history(messages)
 
-I heard: "{user_text}"
+    system_prompt = (
+        "You are Jasper, a helpful daily-driver assistant. "
+        "You can hand off tasks to OpenCode for coding/repo work, "
+        "Research for web searches, or Magic Coder for unrestricted coding. "
+        "Be concise and friendly."
+    )
 
-I can hand this off to OpenCode for repo work or Research for web tasks. Use the agent selector above to choose who should handle it."""
+    try:
+        llm = get_llm()
+        response = llm.invoke([{"role": "system", "content": system_prompt}] + history)
+        content = response.content
+    except Exception:
+        user_text = get_user_query(messages)
+        content = (
+            f"Hi, I'm Jasper.\n\n"
+            f"I heard: \"{user_text}\"\n\n"
+            f"I can hand this off to OpenCode for repo work or Research for web tasks. "
+            f"Use the agent selector above to choose who should handle it."
+        )
 
-    return {
-        "messages": [{"role": "assistant", "content": content}],
-    }
+    return {"messages": [{"role": "assistant", "content": content}]}
 
 
 def create_chat_ui(checkpointer=None):
@@ -84,20 +99,8 @@ def create_chat_ui(checkpointer=None):
 
     def run_magic_coder_node(state):
         messages = state["messages"]
-        user_query = ""
-        for m in reversed(messages):
-            if isinstance(m, dict) and m.get("role") == "user":
-                user_query = m.get("content", "")
-                break
-
-        # Pass all prior user/assistant turns as history. The graph's checkpointer
-        # already accumulated earlier messages, so this includes the full
-        # conversation including the current turn.
-        history = [
-            {"role": m.get("role"), "content": m.get("content")}
-            for m in messages
-            if isinstance(m, dict) and m.get("role") in ("user", "assistant")
-        ]
+        user_query = get_user_query(messages)
+        history = get_conversation_history(messages)
 
         mode = state.get("mode", "live")
         if mode == "async":

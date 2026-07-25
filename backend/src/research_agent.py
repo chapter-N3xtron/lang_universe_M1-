@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, Annotated, List
 import operator
 import os
+from src.agent_utils import get_user_query, get_conversation_history
 from src.llm import get_llm
 from dotenv import load_dotenv
 
@@ -16,17 +17,7 @@ class State(TypedDict):
 def research_agent(state: State):
     """Research agent - powered by GLM via LiteLLM proxy"""
     messages = state["messages"]
-    user_query = ""
-    for m in reversed(messages):
-        if isinstance(m, dict) and m.get("role") == "user":
-            user_query = m.get("content", "")
-            break
-
-    history = [
-        {"role": m.get("role"), "content": m.get("content")}
-        for m in messages
-        if isinstance(m, dict) and m.get("role") in ("user", "assistant")
-    ]
+    history = get_conversation_history(messages)
 
     llm = get_llm()
 

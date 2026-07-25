@@ -3,6 +3,7 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from src.agent_utils import get_user_query, get_conversation_history
 from src.opencode_cli import run_opencode
 
 
@@ -19,26 +20,14 @@ class State(TypedDict):
 def opencode_coding_agent(state: State):
     """OpenCode CLI agent - invokes the real opencode CLI binary."""
     messages = state["messages"]
-    user_query = ""
-    for m in reversed(messages):
-        if isinstance(m, dict) and m.get("role") == "user":
-            user_query = m.get("content", "")
-            break
+    user_query = get_user_query(messages)
 
     try:
         workspace = state.get("workspace")
         mode = state.get("mode", "live")
         prior_session_id = state.get("opencode_session_id")
 
-        # For the OpenCode CLI, the authoritative conversation memory lives in
-        # the CLI's own session store. Pass the stored session id on subsequent
-        # turns so the headless agent continues the same context. We still send
-        # the full history to the local Ollama fallback branch.
-        history_for_model = [
-            {"role": m.get("role"), "content": m.get("content")}
-            for m in messages
-            if isinstance(m, dict) and m.get("role") in ("user", "assistant")
-        ]
+        history_for_model = get_conversation_history(messages)
         result = run_opencode(
             message=user_query,
             title=user_query[:50],

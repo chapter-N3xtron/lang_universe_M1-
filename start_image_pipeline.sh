@@ -35,6 +35,7 @@ COMFYUI_DIR="$HOME/fun-multi-character-chats/ComfyUI"
 COMFYUI_PYTHON="$HOME/fun-multi-character-chats/.venv/bin/python"
 
 ELEMENT_ELS="$HOME/Documents/EQ_COMP_VERB_RACK.els"
+ELEMENT_BIN="/Applications/Element.app/Contents/MacOS/Element"
 
 AUDIO_OUTPUT_DEVICE="BlackHole 2ch"
 AUDIO_RESTORE_DEVICE="MacBook Pro Speakers"
@@ -200,8 +201,8 @@ start_element() {
   fi
 
   echo "  Launching Element with EQ_COMP_VERB_RACK.els..."
-  open -a Element "$ELEMENT_ELS" >> "$LOGDIR/element.log" 2>&1
-  sleep 3
+  "$ELEMENT_BIN" "$ELEMENT_ELS" >> "$LOGDIR/element.log" 2>&1 &
+  sleep 4
 
   if pgrep -q -f "Element.app"; then
     echo "  Element ready (Rare → LALA → reverb/delay chain)"

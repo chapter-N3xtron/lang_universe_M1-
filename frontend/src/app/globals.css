@@ -136,6 +136,10 @@
   html {
     @apply font-sans;
   }
+  ::selection {
+    background: oklch(0.55 0.18 30);
+    color: oklch(0.15 0 0);
+  }
 }
 
 .font-heading {

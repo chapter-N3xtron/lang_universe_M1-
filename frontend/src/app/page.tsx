@@ -668,7 +668,7 @@ export default function Home() {
             updateActiveThread((t) => ({ ...t, opencodeSessionId: result.opencode_session_id }));
           }
           addAssistantMessage(result.response, agent);
-          detectInquiry(response);
+          detectInquiry(result.response);
         }
       } catch (err) {
         addAssistantMessage(

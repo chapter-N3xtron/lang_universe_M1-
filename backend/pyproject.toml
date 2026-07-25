@@ -5,6 +5,7 @@ description = "Multi-agent system with LangGraph, Chat UI, and OpenCode CLI"
 requires-python = ">=3.10"
 dependencies = [
     "langgraph>=0.2.0",
+    "langgraph-checkpoint-sqlite>=1.0.0",
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
     "firecrawl-py>=1.0.0",

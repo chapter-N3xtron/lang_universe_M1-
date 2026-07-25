@@ -1,7 +1,9 @@
 import operator
 from typing import Annotated, TypedDict
 
-from langgraph.checkpoint.memory import MemorySaver
+from pathlib import Path
+
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from src.magic_coder_agent import run_magic_coder
@@ -135,9 +137,14 @@ def create_chat_ui():
     graph.add_edge("research", END)
     graph.add_edge("magic-coder", END)
 
-    # MemorySaver keeps graph state per thread_id in RAM. For production,
-    # swap this for a Postgres or Redis checkpointer without changing graph code.
-    checkpointer = MemorySaver()
+    # SqliteSaver persists graph state per thread_id in a local SQLite file.
+    # This survives backend restarts and avoids losing conversation context.
+    import sqlite3
+
+    db_path = Path(__file__).parent.parent / "data" / "checkpoints.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
     return graph.compile(checkpointer=checkpointer)
 
 

@@ -36,10 +36,12 @@ class ChatRequest(BaseModel):
     target_agent: str = "opencode"
     mode: str = "live"
     model: str = None
+    opencode_session_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     response: str
+    opencode_session_id: str | None = None
 
 
 @asynccontextmanager
@@ -105,6 +107,7 @@ def _build_invocation_input(request: ChatRequest) -> tuple[dict, list[dict]]:
         "target_agent": request.target_agent,
         "mode": request.mode,
         "model": request.model,
+        "opencode_session_id": request.opencode_session_id,
     }
     return input_state, config
 
@@ -139,13 +142,14 @@ def chat(request: ChatRequest) -> ChatResponse:
     try:
         result = app_graph.invoke(input_state, config=config)
         response = result["messages"][-1]["content"]
+        session_id = result.get("opencode_session_id")
     finally:
         if original_model is not None:
             os.environ["OPENCODE_CLI_MODEL"] = original_model
         else:
             os.environ.pop("OPENCODE_CLI_MODEL", None)
 
-    return ChatResponse(response=response)
+    return ChatResponse(response=response, opencode_session_id=session_id)
 
 
 class TTSRequest(BaseModel):

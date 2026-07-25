@@ -51,6 +51,7 @@ export type ChatThread = {
   messages: ChatMessage[]
   createdAt: Date
   updatedAt: Date
+  opencodeSessionId?: string | null
 }
 
 export type ChatSession = {

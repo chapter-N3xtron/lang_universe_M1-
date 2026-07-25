@@ -307,6 +307,7 @@ function createThread(
     messages: [makeWelcomeMessage(agent)],
     createdAt: now,
     updatedAt: now,
+    opencodeSessionId: undefined,
   };
 }
 
@@ -640,7 +641,8 @@ export default function Home() {
             activeThread.agent,
             activeThread.workspace,
             activeThread.model,
-            threadId
+            threadId,
+            activeThread.opencodeSessionId
           );
           const placeholderId = uuidv4();
           addAssistantMessage(
@@ -652,16 +654,20 @@ export default function Home() {
             { jobId: job_id, placeholderId: prev.length > 0 ? prev[prev.length - 1].placeholderId : placeholderId },
           ]);
         } else {
-          const response = await sendChatMessage(
+          const result = await sendChatMessage(
             text,
             [],
             activeThread.agent,
             activeThread.workspace,
             activeThread.mode,
             activeThread.model,
-            threadId
+            threadId,
+            activeThread.opencodeSessionId
           );
-          addAssistantMessage(response, agent);
+          if (result.opencode_session_id) {
+            updateActiveThread((t) => ({ ...t, opencodeSessionId: result.opencode_session_id }));
+          }
+          addAssistantMessage(result.response, agent);
           detectInquiry(response);
         }
       } catch (err) {

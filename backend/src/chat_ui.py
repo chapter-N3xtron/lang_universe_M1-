@@ -75,7 +75,8 @@ def jasper_agent(state: State):
     return {"messages": [{"role": "assistant", "content": content}]}
 
 
-def create_chat_ui(checkpointer=None):
+def create_chat_ui():
+    """Build the multi-agent StateGraph. Caller compiles with their own checkpointer."""
     graph = StateGraph(State)
 
     opencode_app = create_opencode_graph()
@@ -140,10 +141,9 @@ def create_chat_ui(checkpointer=None):
     graph.add_edge("research", END)
     graph.add_edge("magic-coder", END)
 
-    # Use the provided checkpointer, or fall back to in-memory for CLI usage.
-    if checkpointer is None:
-        checkpointer = MemorySaver()
-    return graph.compile(checkpointer=checkpointer)
+    # Return the uncompiled graph. The caller (langgraph dev or our FastAPI
+    # server) compiles it with the appropriate checkpointer.
+    return graph
 
 
 def chat():

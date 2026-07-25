@@ -51,7 +51,7 @@ async def lifespan(_app: FastAPI):
     db_path = Path(__file__).parent.parent / "data" / "checkpoints.sqlite"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with SqliteSaver.from_conn_string(str(db_path)) as checkpointer:
-        _app.state.graph = create_chat_ui(checkpointer=checkpointer)
+        _app.state.graph = create_chat_ui().compile(checkpointer=checkpointer)
         yield
     _app.state.graph = None
 

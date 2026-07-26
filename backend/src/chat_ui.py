@@ -4,10 +4,10 @@ from typing import Annotated, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from src.agent_utils import get_user_query, get_conversation_history
+from src.agent_utils import get_conversation_history
 from src.jasper_agent import create_jasper_graph
 from src.llm import get_llm
-from src.magic_coder_agent import run_magic_coder
+from src.magic_coder_graph import create_magic_coder_graph
 from src.opencode_agent import create_opencode_graph
 from src.research_agent import create_research_graph
 
@@ -123,6 +123,7 @@ def create_chat_ui():
     jasper_app = create_jasper_graph()
     opencode_app = create_opencode_graph()
     research_app = create_research_graph()
+    magic_coder_app = create_magic_coder_graph()
 
     def run_jasper(state):
         result = jasper_app.invoke({"messages": state["messages"]})
@@ -145,36 +146,13 @@ def create_chat_ui():
         return {"messages": result["messages"]}
 
     def run_magic_coder_node(state):
-        messages = state["messages"]
-        user_query = get_user_query(messages)
-        history = get_conversation_history(messages)
-
-        mode = state.get("mode", "live")
-        if mode == "async":
-            from src.jobs import create_job, run_job
-            job_id = create_job()
-            run_job(
-                job_id,
-                lambda: run_magic_coder(
-                    message=user_query,
-                    history=history,
-                    model=state.get("model"),
-                    workspace=state.get("workspace"),
-                )["text"],
-            )
-            content = f"[Magic Coder async job started]\n\nJob ID: {job_id}\nPoll /api/jobs/{job_id} for results."
-        else:
-            result = run_magic_coder(
-                message=user_query,
-                history=history,
-                model=state.get("model"),
-                workspace=state.get("workspace"),
-            )
-            if not result["success"]:
-                content = f"[Magic Coder error]\n\n{result['error'] or 'Unknown error'}"
-            else:
-                content = result["text"] or "(no response)"
-        return {"messages": [{"role": "assistant", "content": content}]}
+        result = magic_coder_app.invoke({
+            "messages": state["messages"],
+            "workspace": state.get("workspace"),
+            "mode": state.get("mode", "live"),
+            "model": state.get("model"),
+        })
+        return {"messages": result["messages"]}
 
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("approval", approval_node)

@@ -37,6 +37,7 @@
 
 ### Phase 3 — Human-in-the-loop (done)
 ### Phase 4 — Jasper compiled sub-graph (done)
+### Phase 5 — Magic Coder compiled sub-graph (done)
 - Approval node with `interrupt()` added to graph
 - 3 interrupt tests pass; supervisor + memory tests adapted
 - **Fix for tests:** `target_agent` bypasses approval node (no interrupt)
@@ -113,7 +114,8 @@ cd backend && ./venv/bin/uvicorn src.web_server:app --port 8000
 | `backend/src/opencode_agent.py` | OpenCode sub-graph (already compiled) |
 | `backend/src/research_agent.py` | Research sub-graph (already compiled) |
 | `backend/src/jasper_agent.py` | Jasper compiled sub-graph (Phase 4 done) |
-| `backend/src/magic_coder_agent.py` | Magic Coder (inline, needs sub-graph conversion) |
+| `backend/src/magic_coder_agent.py` | Magic Coder agent (tools + run_magic_coder entry point) |
+| `backend/src/magic_coder_graph.py` | Magic Coder compiled sub-graph (Phase 5 done) |
 | `backend/src/llm.py` | LLM factory (ChatOllama) |
 | `backend/src/web_server.py` | FastAPI sidecar (TTS/STT/FS only) |
 | `backend/langgraph.json` | Graph entry point for `langgraph dev` |
@@ -124,9 +126,8 @@ cd backend && ./venv/bin/uvicorn src.web_server:app --port 8000
 
 ## Next Steps (in order)
 
-1. **Phase 5** — Convert Magic Coder to compiled sub-graph (hardest, 13 tools, do incrementally)
-3. **Phase 6** — Wire TTS/STT (hook exists, just needs connection)
-4. **Phase 7** — Add selectors to Agent Chat UI
-5. **Phase 8** — Visual dashboard (agent badges, handoff cards)
-6. **Phase 9** — OpenCode streaming (deferred, highest risk)
-7. **Phase 10** — Update `start_image_pipeline.sh`
+1. **Phase 6** — Wire TTS/STT (hook exists, just needs connection)
+2. **Phase 7** — Add selectors to Agent Chat UI
+3. **Phase 8** — Visual dashboard (agent badges, handoff cards)
+4. **Phase 9** — OpenCode streaming (deferred, highest risk)
+5. **Phase 10** — Update `start_image_pipeline.sh`

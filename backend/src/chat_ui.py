@@ -72,6 +72,17 @@ def supervisor_node(state: State):
     messages = state["messages"]
     history = get_conversation_history(messages)
 
+    # If a specialist already responded this turn (last message is from an
+    # assistant), the supervisor's job is done — end the turn instead of
+    # re-routing and creating an approval loop.
+    if history and history[-1]["role"] == "assistant":
+        return {
+            "pending_approval": False,
+            "pending_agent": "",
+            "active_agent": "",
+            "decision_log": [{"decision": "done", "reason": "Specialist already responded"}],
+        }
+
     try:
         llm = get_llm()
         response = llm.invoke([{"role": "system", "content": SUPERVISOR_PROMPT}] + history)
@@ -79,12 +90,16 @@ def supervisor_node(state: State):
     except Exception:
         decision = "jasper"
 
+    # Fallback: never end the graph without producing a response.
+    # If the LLM says "done" or returns an unrecognized name, default to jasper
+    # so the user always gets a reply.
     if decision == "done" or decision == "":
-        return {"pending_approval": False}
+        decision = "jasper"
 
     node_name = AGENT_ROUTING.get(decision)
     if node_name is None:
-        return {"active_agent": "", "pending_approval": False}
+        decision = "jasper"
+        node_name = "jasper"
 
     return Command(
         goto="approval",
@@ -96,14 +111,37 @@ def supervisor_node(state: State):
     )
 
 
+def _is_approved(resume_value) -> bool:
+    """Handle both the new HITL Decision dict and the legacy boolean resume."""
+    if isinstance(resume_value, dict):
+        if "decisions" in resume_value:
+            decisions = resume_value["decisions"]
+            if isinstance(decisions, list):
+                return any(isinstance(d, dict) and d.get("type") == "approve" for d in decisions)
+        return resume_value.get("type") == "approve"
+    if isinstance(resume_value, list):
+        return any(isinstance(d, dict) and d.get("type") == "approve" for d in resume_value)
+    return bool(resume_value)
+
+
 def approval_node(state: State):
     agent = state.get("pending_agent", "")
     approved = interrupt({
-        "question": f"Route to {agent} agent?",
-        "agent": agent,
-        "reason": f"Supervisor decided: {agent}",
+        "action_requests": [
+            {
+                "name": f"route_to_{agent}",
+                "args": {"agent": agent},
+                "description": f"Route this conversation to the {agent} agent?",
+            }
+        ],
+        "review_configs": [
+            {
+                "action_name": f"route_to_{agent}",
+                "allowed_decisions": ["approve", "reject"],
+            }
+        ],
     })
-    if not approved:
+    if not _is_approved(approved):
         return {"pending_approval": False, "pending_agent": ""}
     node_name = AGENT_ROUTING.get(agent, "jasper")
     return Command(

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from src.chat_ui import create_chat_ui
 from src.jobs import create_job, get_job, job_to_dict, run_job
 from src.ollama_client import list_ollama_models
-from src.stt import transcribe
+from src.stt import transcribe, debug_decode
 
 load_dotenv()
 
@@ -274,6 +274,19 @@ def stt(audio: UploadFile) -> dict:
         return {"transcript": text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/stt/debug")
+def stt_debug(audio: UploadFile) -> dict:
+    info = {
+        "content_type": audio.content_type,
+        "filename": audio.filename,
+        "headers": dict(audio.headers),
+    }
+    audio_bytes = audio.file.read()
+    result = debug_decode(audio_bytes)
+    info.update(result)
+    return info
 
 
 class FSListResponse(BaseModel):

@@ -1,0 +1,115 @@
+# Anime Character Test Image Framework Configuration
+
+image:
+  default_width: 512
+  default_height: 512
+  formats:
+    - png
+    - jpg
+    - webp
+  quality: 95
+
+character:
+  default_hair_colors:
+    - "#FFB6C1"  # Light pink
+    - "#87CEEB"  # Sky blue
+    - "#DDA0DD"  # Plum
+    - "#FFD700"  # Gold
+    - "#9370DB"  # Medium purple
+  default_eye_colors:
+    - "#4169E1"  # Royal blue
+    - "#32CD32"  # Lime green
+    - "#FF69B4"  # Hot pink
+    - "#FFA500"  # Orange
+  default_skin_tones:
+    - "#FFE4C4"  # Bisque
+    - "#FFDAB9"  # Peach puff
+    - "#F5DEB3"  # Wheat
+
+expressions:
+  - name: happy
+    mouth_curve: 0.3
+    eye_openness: 0.8
+    blush: true
+  - name: sad
+    mouth_curve: -0.2
+    eye_openness: 0.6
+    blush: false
+  - name: surprised
+    mouth_curve: 0.1
+    eye_openness: 1.0
+    blush: true
+  - name: neutral
+    mouth_curve: 0.0
+    eye_openness: 0.7
+    blush: false
+  - name: angry
+    mouth_curve: -0.3
+    eye_openness: 0.5
+    blush: false
+
+accessories:
+  - name: bow
+    position: head
+    colors:
+      - "#FF1493"
+      - "#4169E1"
+      - "#FFD700"
+  - name: glasses
+    position: face
+    colors:
+      - "#000000"
+      - "#8B4513"
+      - "#C0C0C0"
+  - name: cat_ears
+    position: head
+    colors:
+      - "#FFB6C1"
+      - "#8B4513"
+      - "#000000"
+
+poses:
+  - name: front
+    head_rotation: 0
+    body_angle: 0
+  - name: three_quarter
+    head_rotation: 15
+    body_angle: 30
+  - name: profile
+    head_rotation: 90
+    body_angle: 90
+
+output:
+  base_dir: images
+  generated_subdir: generated
+  processed_subdir: processed
+  templates_subdir: templates
+
+processing:
+  resize:
+    enabled: true
+    sizes:
+      - name: thumbnail
+        width: 128
+        height: 128
+      - name: medium
+        width: 256
+        height: 256
+      - name: large
+        width: 1024
+        height: 1024
+  filters:
+    - name: grayscale
+      enabled: false
+    - name: sepia
+      enabled: false
+    - name: blur
+      enabled: false
+      radius: 2
+    - name: sharpen
+      enabled: true
+
+batch:
+  enabled: true
+  max_workers: 4
+  generate_all_combinations: false

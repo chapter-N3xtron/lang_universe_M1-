@@ -71,11 +71,16 @@ def test_supervisor_routes_to_research():
             config=config,
         )
 
-    assert result["active_agent"] == "research"
+    # target_agent=research routes directly (bypasses approval), produces a response,
+    # then supervisor re-runs and ends the turn (active_agent cleared).
     assert len(result["handoff_history"]) >= 1
     assert result["handoff_history"][0]["to"] == "research"
     assert len(result["decision_log"]) >= 1
     assert "research" in result["decision_log"][0]["decision"]
+    # Specialist should have produced an assistant message
+    msgs = result.get("messages", [])
+    assert len(msgs) >= 2, "Expected user + assistant messages"
+    assert msgs[-1]["role"] == "assistant"
 
 
 def test_supervisor_audit_trail():
@@ -190,7 +195,9 @@ def test_thread_isolation():
     assert "phrase-a" not in b
 
 
-def test_supervisor_ends_turn():
+def test_supervisor_done_falls_back_to_jasper():
+    """When the supervisor LLM returns 'done', the graph should fall back to
+    routing to jasper (via approval) instead of ending silently with no response."""
     mock_llm = _create_mock_llm([_make_llm_response("done")])
 
     _clear_src_modules()
@@ -210,5 +217,6 @@ def test_supervisor_ends_turn():
             config=config,
         )
 
-    assert result.get("active_agent", "") == ""
-    assert result.get("pending_approval", False) is False
+    # "done" now falls back to jasper → routes through approval → pending_approval=True
+    assert result.get("pending_agent", "") == "jasper"
+    assert result.get("pending_approval", False) is True

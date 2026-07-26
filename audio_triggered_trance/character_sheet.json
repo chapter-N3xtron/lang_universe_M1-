@@ -1,0 +1,11 @@
+{
+    "name": "TranceWoman",
+    "description": "A woman in a trance state under golden sunlight with an audio trigger for pleasure.",
+    "attributes": {
+        "gender": "female",
+        "age": "25",
+        "hair_color": "blonde",
+        "eye_color": "blue",
+        "clothing": "lingerie"
+    }
+}

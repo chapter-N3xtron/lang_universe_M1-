@@ -1,0 +1,43 @@
+{
+  "name": "TranceWoman",
+  "source": "/Users/chaptercaptaingeneral/fun-multi-character-chats/characters/TranceWoman",
+  "personality_summary": "",
+  "scenario": "",
+  "physical_description": "A woman in a trance state under golden sunlight with an audio trigger for pleasure.",
+  "structured_traits": {
+    "identity": {
+      "age_range": "early twenties",
+      "gender": "female",
+      "height": "average",
+      "ethnicity": "caucasian"
+    },
+    "body_type": "slim curvy",
+    "hair": {
+      "color": "brown",
+      "style": "long wavy",
+      "length": "long"
+    },
+    "eyes": {
+      "color": "blue",
+      "makeup": "natural"
+    },
+    "skin": {
+      "tone": "fair",
+      "texture": "smooth"
+    },
+    "face": [
+      "big expressive eyes",
+      "soft features",
+      "flirty confident expression"
+    ],
+    "default_outfit": "casual revealing outfit",
+    "explicit_traits": []
+  },
+  "lore_entries": [
+    {
+      "keys": [],
+      "content": ""
+    }
+  ],
+  "tags": []
+}

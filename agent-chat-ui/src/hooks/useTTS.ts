@@ -3,6 +3,22 @@
 import { useCallback, useRef, useState } from "react";
 
 const TTS_API_BASE = "http://127.0.0.1:8000";
+const TTS_SAMPLE_RATE = 24000;
+
+function resample(audio: Float32Array, srcRate: number, dstRate: number): Float32Array {
+  if (srcRate === dstRate) return audio;
+  const ratio = srcRate / dstRate;
+  const dstLength = Math.round(audio.length / ratio);
+  const result = new Float32Array(dstLength);
+  for (let i = 0; i < dstLength; i++) {
+    const srcIdx = i * ratio;
+    const lo = Math.floor(srcIdx);
+    const hi = Math.min(lo + 1, audio.length - 1);
+    const frac = srcIdx - lo;
+    result[i] = audio[lo] + (audio[hi] - audio[lo]) * frac;
+  }
+  return result;
+}
 
 export type VoiceInfo = {
   id: string;
@@ -43,8 +59,9 @@ export function useTTS() {
         const reader = res.body?.getReader();
         if (!reader) throw new Error("No response body");
 
-        const ctx = new AudioContext({ sampleRate: 24000 });
+        const ctx = new AudioContext();
         audioCtxRef.current = ctx;
+        const deviceRate = ctx.sampleRate;
 
         const decoder = new TextDecoder();
         let buffer = "";
@@ -67,8 +84,9 @@ export function useTTS() {
               c.charCodeAt(0)
             );
             const floatArr = new Float32Array(bytes.buffer).slice();
-            const audioBuffer = ctx.createBuffer(1, floatArr.length, 24000);
-            audioBuffer.getChannelData(0).set(floatArr);
+            const resampled = resample(floatArr, TTS_SAMPLE_RATE, deviceRate);
+            const audioBuffer = ctx.createBuffer(1, resampled.length, deviceRate);
+            audioBuffer.getChannelData(0).set(resampled);
 
             const source = ctx.createBufferSource();
             source.buffer = audioBuffer;

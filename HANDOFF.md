@@ -179,6 +179,77 @@ Update deployment/startup script for current architecture.
 - **`agent-chat-ui/src/components/thread/index.tsx`** — Added a Voice selector dropdown in the footer controls (between Model and the Mic/Send row). Fetches available voices from `GET /api/tts/voices` on mount. The selected voice is passed to `speak()` when the Volume2 button is clicked — previously hardcoded to `"alba"`.
 - **Voices available:** local (`David_Suzuki`, `Juno_2`, `Lorde`, `Murrow_1`, `Murrow_2`, `Rogers`, `Rogers_2`, `Rogers_3`) + remote Kyutai defaults (`alba`, `pavo`, `tango`, `whispering`, etc.).
 - **Next:** Per-agent voice defaults once the user understands the voice landscape.
+
+---
+
+# Voice Layer Audit (2026-07-26)
+
+> Consolidated audit of the TTS + STT voice layer. All findings verified against authoritative documentation (Kyutai Pocket TTS API reference, faster-whisper source + docs, MDN AudioContext docs) plus reading the full source of every file in the voice data path: `useTTS.ts`, `useSTT.ts`, `shared.tsx`, `ai.tsx`, `index.tsx`, `kyutai_tts.py`, `stt.py`, `web_server.py`.
+
+## Priority legend
+- **P0** — blocks core functionality or risks data corruption/crash
+- **P1** — UX-breaking, user-reported
+- **P2** — code hygiene
+
+## Bug V1 — AudioContext sample-rate coercion breaks TTS playback (P0) — ✅ Fixed
+**Source:** MDN AudioContext docs + `agent-chat-ui/src/hooks/useTTS.ts:46,70`
+**Root cause:** `new AudioContext({ sampleRate: 24000 })` — per MDN, if 24000 Hz isn't supported by the output device, the browser either throws `NotSupportedError` or silently coerces to the device's native rate (typically 44100 or 48000 Hz on macOS). When `start_image_pipeline.sh` routes audio through BlackHole 2ch (which runs at 48000 Hz), Chrome coerces the AudioContext to 48000 Hz. Then `ctx.createBuffer(1, floatArr.length, 24000)` at line 70 creates a buffer at 24000 Hz but plays it through a 48000 Hz context — the buffer plays at wrong speed/pitch unless the browser resamples. Behavior is browser-dependent and a likely root cause of "TTS button no longer responding" reports.
+**Fix:** Removed `{ sampleRate: 24000 }` from AudioContext constructor — defaults to device rate. Added `resample()` helper that linearly interpolates float32 chunks from 24000 Hz → `ctx.sampleRate` before creating the AudioBuffer. AudioBuffer is now created at `ctx.sampleRate` instead of hardcoded 24000.
+**Verification:** Open browser console, run `new AudioContext({ sampleRate: 24000 }).sampleRate` — if it returns anything other than 24000, the coercion is happening.
+
+## Bug V2 — TTS model is not thread-safe (P0) — ✅ Fixed
+**Source:** Kyutai Pocket TTS README/docs + `backend/src/kyutai_tts.py:285-292`
+**Root cause:** Kyutai docs state the model is **not thread-safe** — "separate model instances should be used for concurrent generation" and `torch.set_num_threads(1)`. The backend uses a single shared `_tts_engine` singleton. If two TTS requests hit `/api/tts/stream` concurrently (e.g. user clicks Volume2 on a second message while the first is still playing, or two browser tabs), they share one `TTSModel` and the `generate_audio_stream` calls interleave → corrupted audio or a crash. The frontend's `useTTS.ts:27` calls `stop()` before `speak()` which aborts the prior *fetch* via AbortController, but the *backend generator* keeps synthesizing into the queue for the aborted request — then the next request's producer thread mutates shared model state.
+**Fix:** Added `asyncio.Lock()` (`_tts_lock`) at module level. Wrapped both `synthesize_streaming` and `synthesize_full` with `async with _tts_lock:` so only one generation runs at a time. Concurrent requests wait for the lock.
+**Verification:** Open two browser tabs, click Volume2 on both within 1 second — without the lock, audio corrupts or the engine crashes; with the lock, the second request waits and plays cleanly after the first finishes.
+
+## Bug V3 — TTS speak-aloud button has no playing/stop state (P1)
+**Source:** `agent-chat-ui/src/components/thread/messages/shared.tsx:200-209`, `agent-chat-ui/src/components/thread/index.tsx:193,482`, `agent-chat-ui/src/hooks/useTTS.ts:103`
+**Root cause:** `CommandBar` always renders `Volume2` and calls `onSpeak` on click. The `useTTS()` hook exposes a `speaking` boolean and `stop()` function, but `index.tsx:193` only destructures `{ speak, stop: stopTts }` — `speaking` is never read. `stopTts` is only called in `handleSubmit` (line 254), never wired to the Volume2 button. Clicking during playback calls `speak()` which internally calls `stop()` then restarts — feels broken. Also the button is `disabled={isLoading}` so during graph streaming it's unclickable.
+**Effect (reported by user):** "the text-to-speech playback button is no longer responding."
+**Solution:** Thread `speaking` + a per-message "currently speaking message id" down from `index.tsx` → `AssistantMessage` → `CommandBar`:
+1. `index.tsx`: track `speakingMessageIdRef` (which message ID was last spoken). Pass `isSpeaking={speaking && speakingMessageIdRef.current === message.id}` and `onSpeak` (which calls `stop()` if `isSpeaking`, else `speak()`) to `AssistantMessage`.
+2. `AssistantMessage` (`ai.tsx`): accept `isSpeaking?: boolean` prop, pass to `CommandBar`.
+3. `CommandBar` (`shared.tsx`): accept `isSpeaking?: boolean`. If `isSpeaking`, render `<Square className="size-4" />` with `tooltip="Stop playback"` and call `onSpeak` (wired to `stop()`). Otherwise keep `Volume2` + `tooltip="Read aloud"`.
+4. Do NOT disable the button while `isLoading` — TTS playback is independent of graph streaming. Guard on `contentString.length === 0` instead.
+**Verification:** Click Volume2 → audio plays, icon changes to stop. Click again → audio stops, icon reverts to Volume2. During graph streaming, button remains clickable.
+**Test coverage:** No Playwright test currently exercises the TTS button. `tests/ui-controls.spec.ts` only checks the Voice/Send buttons in the footer are visible — does not click the Volume2 button on AI messages or assert the playing/stop state.
+
+## Bug V4 — Voice selector dropdown fails silently if sidecar is down (P1)
+**Source:** `agent-chat-ui/src/components/thread/index.tsx:170-179`
+**Root cause:** The voice selector fetches `GET /api/tts/voices` on mount. The `.catch(() => {})` swallows any error (sidecar down, network failure, non-200 response). The dropdown silently renders with no options — the user sees a "Voice" label and a "Default" placeholder but an empty dropdown when clicked. No toast, no error UI, no fallback. Same pattern at line 169 for the models fetch.
+**Effect (reported by user):** "there is a issue with the voice selector that's been added." When the sidecar (port 8000) is not running or `/api/tts/voices` returns an error, the voice dropdown appears broken with no explanation.
+**Solution:**
+1. Replace the silent `.catch(() => {})` with a toast: `toast.error("Could not load voices", { description: "TTS sidecar at http://127.0.0.1:8000 may not be running." })`.
+2. If `voiceOptions` is empty, render the dropdown as disabled with a tooltip "No voices available (TTS sidecar not running)" rather than an empty clickable dropdown.
+3. Rename "Default" placeholder to "Auto" to match the agent selector's convention and avoid implying there's a voice named "Default".
+4. Apply the same fix to the models fetch at line 169.
+**Verification:** Stop the sidecar (`lsof -ti:8000 | xargs kill`), refresh the page, click Voice dropdown — should show a toast and a disabled dropdown with tooltip, not an empty clickable dropdown.
+**Test coverage:** `tests/ui-controls.spec.ts:44` ("model dropdown renders with options") mocks `/api/models` so it never exercises the real failure path. No test mocks `/api/tts/voices` at all, and no test asserts the voice dropdown's behavior when the sidecar is down.
+
+## Bug V5 — Dead code in `_normalize_chunk` (P2)
+**Source:** `backend/src/kyutai_tts.py:35-44`
+**Root cause:** `_normalize_chunk` has duplicate code after a `return` — lines 41-44 are unreachable (dead). Copy-paste artifact. Doesn't affect behavior but is a code-smell that suggests the function was edited carelessly.
+**Solution:** Delete lines 41-44.
+
+## Recommended fix order
+1. ~~**V1 (P0)** — AudioContext sample rate.~~ ✅ Fixed
+2. ~~**V2 (P0)** — TTS thread-safety lock.~~ ✅ Fixed
+3. **V3 (P1)** — TTS button playing/stop state (user-reported).
+4. **V4 (P1)** — Voice selector silent failure (user-reported).
+5. **V5 (P2)** — Dead code cleanup.
+
+## What was verified against docs
+- **Kyutai Pocket TTS API reference** (sample rate 24000 Hz, `generate_audio_stream` is official, voice embedding path format, not-thread-safe warning) — via fetch of `kyutai-labs.github.io/pocket-tts/API%20Reference/python-api/` + HuggingFace model card.
+- **faster-whisper source + docs** (constructor signature, transcribe audio format, segments iteration, lru_cache thread-safety) — via fetch of `github.com/SYSTRAN/faster-whisper` + readthedocs. All four usages in `backend/src/stt.py` confirmed correct.
+- **MDN AudioContext constructor docs** (sampleRate coercion behavior, NotSupportedError) — via webfetch of `developer.mozilla.org/en-US/docs/Web/API/AudioContext/AudioContext`.
+
+## What was NOT verified (needs runtime testing)
+- Whether the BlackHole → Element → speakers chain actually carries TTS audio (would need to listen).
+- Whether 24000 Hz coercion is actually happening on this specific macOS setup (would need `new AudioContext({ sampleRate: 24000 }).sampleRate` in browser console).
+- Whether concurrent TTS requests actually corrupt audio (would need two rapid Volume2 clicks).
+
+---
 - `start_image_pipeline.sh` rewritten: langgraph dev (port 8123) added as a core blocking service; frontend fixed to `cd "$ROOT/agent-chat-ui"`, `pnpm` (was `npm`), port 3001 (was 3000); production build with auto-rebuild detection replaces `npm run dev`.
 - **Auto-rebuild:** `start_frontend` compares newest `.ts`/`.tsx` mtime in `src/` against `.next/BUILD_ID` mtime. If source is newer (or BUILD_ID missing), runs `pnpm build`; otherwise serves the cached build. User (or coding agent) never thinks about builds — first launch builds, subsequent launches are instant, source changes trigger automatic rebuild on next launch.
 - **Reordered start:** core services (langgraph 8123 → sidecar 8000 → UI 3001) start blocking first so chat is usable in ~15s. Heavy services (Ollama, ComfyUI, Element, audio routing) start in a backgrounded subshell with `set +e` so their failure doesn't bring down the core.
@@ -330,10 +401,10 @@ cd agent-chat-ui && pnpm build && pnpm start -p 3001
 
 ## Next Steps (in order)
 
-1. **Phase 8** — Visual dashboard (agent badges, handoff cards)
-2. **Phase 9** — OpenCode streaming (deferred, highest risk)
-3. **Sidecar cleanup** — Strip dead code from `web_server.py`
-4. **Repo picker bug** — see "Bug: Repo selector only captures folder name, not absolute path" section above
+1. **Voice layer bugs V1-V5** — see "Voice Layer Audit" section above. Fix in priority order (V1 P0, V2 P0, V3 P1, V4 P1, V5 P2).
+2. **Phase 8** — Visual dashboard (agent badges, handoff cards)
+3. **Phase 9** — OpenCode streaming (deferred, highest risk)
+4. **Sidecar cleanup** — Strip dead code from `web_server.py`
 
 ---
 

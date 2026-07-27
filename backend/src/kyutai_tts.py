@@ -174,41 +174,42 @@ class PocketTTSEngine:
         text: str,
         voice: str = "",
     ) -> tuple[np.ndarray, float]:
-        self._load_model()
-        logger.info(f"Synthesizing: '{text[:50]}...' voice={voice or 'default'}")
+        async with _tts_lock:
+            self._load_model()
+            logger.info(f"Synthesizing: '{text[:50]}...' voice={voice or 'default'}")
 
-        try:
-            states = await self._get_states(text, voice)
-            text_str, _ = prepare_text_prompt(
-                text,
-                pad_with_spaces_for_short_inputs=False,
-                remove_semicolons=False,
-            )
+            try:
+                states = await self._get_states(text, voice)
+                text_str, _ = prepare_text_prompt(
+                    text,
+                    pad_with_spaces_for_short_inputs=False,
+                    remove_semicolons=False,
+                )
 
-            with torch.no_grad():
-                result = self._model.generate_audio(states, text_str)
+                with torch.no_grad():
+                    result = self._model.generate_audio(states, text_str)
 
-            if hasattr(result, "audio"):
-                audio = result.audio.cpu().numpy()
-            elif isinstance(result, torch.Tensor):
-                audio = result.cpu().numpy()
-            else:
-                audio = np.array([])
+                if hasattr(result, "audio"):
+                    audio = result.audio.cpu().numpy()
+                elif isinstance(result, torch.Tensor):
+                    audio = result.cpu().numpy()
+                else:
+                    audio = np.array([])
 
-            if audio.dtype != np.float32:
-                audio = audio.astype(np.float32)
+                if audio.dtype != np.float32:
+                    audio = audio.astype(np.float32)
 
-            audio = _fade_out(audio)
+                audio = _fade_out(audio)
 
-            duration = len(audio) / 24000 if len(audio) > 0 else 0.0
-            logger.info(f"Generated {duration:.2f}s")
-            return audio, duration
+                duration = len(audio) / 24000 if len(audio) > 0 else 0.0
+                logger.info(f"Generated {duration:.2f}s")
+                return audio, duration
 
-        except Exception as e:
-            logger.error(f"TTS synthesis failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return np.zeros(24000, dtype=np.float32), 1.0
+            except Exception as e:
+                logger.error(f"TTS synthesis failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return np.zeros(24000, dtype=np.float32), 1.0
 
     async def synthesize_streaming(
         self,
@@ -217,11 +218,12 @@ class PocketTTSEngine:
         chunk_size: int = 20,
     ) -> AsyncGenerator[tuple[np.ndarray, dict], None]:
         """Synthesize audio and yield chunks as they're decoded."""
-        self._load_model()
-        logger.info(f"Streaming: '{text[:50]}...' voice={voice or 'default'}")
+        async with _tts_lock:
+            self._load_model()
+            logger.info(f"Streaming: '{text[:50]}...' voice={voice or 'default'}")
 
-        states = await self._get_states(text, voice)
-        text_str, _ = prepare_text_prompt(
+            states = await self._get_states(text, voice)
+            text_str, _ = prepare_text_prompt(
             text,
             pad_with_spaces_for_short_inputs=False,
             remove_semicolons=False,
@@ -283,6 +285,7 @@ class PocketTTSEngine:
 
 
 _tts_engine: Optional[PocketTTSEngine] = None
+_tts_lock = asyncio.Lock()
 
 
 def get_tts_engine() -> PocketTTSEngine:

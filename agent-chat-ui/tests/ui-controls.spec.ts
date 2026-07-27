@@ -91,12 +91,42 @@ test.describe("UI controls render and respond", () => {
   test("Voice and Send buttons visible", async ({ page }) => {
     await page.goto("/");
 
-    const voiceBtn = page.getByText("Voice");
+    const voiceBtn = page.locator('button[title*="Hold to record"]');
     await expect(voiceBtn).toBeVisible({ timeout: 10000 });
 
     const sendBtn = page.getByText("Send");
     await expect(sendBtn).toBeVisible();
     await expect(sendBtn).toBeDisabled();
+  });
+
+  test("voice selector renders with options", async ({ page }) => {
+    await page.route("http://127.0.0.1:8000/api/tts/voices", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          voices: ["alba", "pavo", "tango", "whispering"],
+          total: 4,
+        }),
+      });
+    });
+
+    await page.goto("/");
+
+    const trigger = page.locator('button[aria-label="Select voice"]');
+    await expect(trigger).toBeVisible({ timeout: 10000 });
+    await expect(trigger).toHaveText("Default");
+
+    await trigger.click();
+    const dropdown = page.locator('[data-slot="select-content"]');
+    await expect(dropdown).toBeVisible();
+
+    await expect(dropdown.getByText("Alba")).toBeVisible();
+    await expect(dropdown.getByText("Pavo")).toBeVisible();
+    await expect(dropdown.getByText("Tango")).toBeVisible();
+    await expect(dropdown.getByText("Whispering")).toBeVisible();
+
+    await dropdown.getByText("Alba").click();
+    await expect(trigger).toHaveText("Alba");
   });
 
   test("textarea accepts input and enables Send", async ({ page }) => {

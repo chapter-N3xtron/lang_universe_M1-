@@ -154,6 +154,8 @@ export function Thread() {
   const [selectedWorkspace, setSelectedWorkspace] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([{ value: "", label: "Default" }]);
+  const [selectedVoice, setSelectedVoice] = useState<string>("");
+  const [voiceOptions, setVoiceOptions] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     fetch("http://127.0.0.1:8000/api/models")
       .then((r) => r.json())
@@ -163,6 +165,16 @@ export function Thread() {
           options.push({ value: m.id, label: m.name });
         }
         setModelOptions(options);
+      })
+      .catch(() => {});
+    fetch("http://127.0.0.1:8000/api/tts/voices")
+      .then((r) => r.json())
+      .then((data: { voices: string[] }) => {
+        const options = data.voices.map((v: string) => ({
+          id: v,
+          name: v.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase()),
+        }));
+        setVoiceOptions(options);
       })
       .catch(() => {});
   }, []);
@@ -467,7 +479,7 @@ export function Thread() {
                           message={message}
                           isLoading={isLoading}
                           handleRegenerate={handleRegenerate}
-                          onSpeak={() => speak(getContentString(message.content))}
+                          onSpeak={() => speak(getContentString(message.content), selectedVoice || undefined)}
                         />
                       ),
                     )}
@@ -572,20 +584,23 @@ export function Thread() {
                           <button
                             type="button"
                             onClick={async () => {
-                              if (typeof window === "undefined" || !("showDirectoryPicker" in (window as any))) {
-                                toast.error("Not supported in this browser. Use Chrome or Edge.");
-                                return;
-                              }
                               try {
-                                const dirHandle = await (window as any).showDirectoryPicker();
-                                setSelectedWorkspace(dirHandle.name);
-                              } catch { /* user cancelled */ }
+                                const res = await fetch("http://127.0.0.1:8000/api/fs/pick-folder");
+                                const data = await res.json();
+                                if (!data.cancelled && data.path) {
+                                  setSelectedWorkspace(data.path);
+                                }
+                              } catch {
+                                toast.error("Could not open folder picker.");
+                              }
                             }}
                             className="flex cursor-pointer items-center gap-1.5"
                           >
                             <Folder className="size-4 text-gray-600" />
                             <span className="text-xs text-gray-600">
-                              {selectedWorkspace || "Repo selector"}
+                              {selectedWorkspace
+                                ? selectedWorkspace.split("/").pop() || selectedWorkspace
+                                : "Repo selector"}
                             </span>
                           </button>
                         </div>
@@ -627,6 +642,27 @@ export function Thread() {
                                 {modelOptions.map((opt) => (
                                   <SelectItem key={opt.value || "default"} value={opt.value}>
                                     {opt.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-gray-600">Voice</span>
+                            <Select
+                              value={selectedVoice}
+                              onValueChange={setSelectedVoice}
+                            >
+                              <SelectTrigger
+                                className="h-7 w-[112px] text-xs"
+                                aria-label="Select voice"
+                              >
+                                <SelectValue placeholder="Default" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {voiceOptions.map((opt) => (
+                                  <SelectItem key={opt.id} value={opt.id}>
+                                    {opt.name}
                                   </SelectItem>
                                 ))}
                               </SelectContent>

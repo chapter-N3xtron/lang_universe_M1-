@@ -99,10 +99,11 @@ Update deployment/startup script for current architecture.
 
 **33/33 backend tests, 9/9 Playwright tests passing.**
 
-**Known issue — UI is slow:**
-- Loading/rendering feels sluggish. Likely causes: (1) stale `.next` cache requiring `rm -rf .next && pnpm dev`, (2) leftover process on port 3001 causing EADDRINUSE / contention, (3) 8 large local ollama models consuming RAM/VRAM.
-- Recommended fix: `kill $(lsof -t -i:3001)`, `rm -rf .next`, `pnpm dev --port 3001`.
-- Also: the FastAPI sidecar (port 8000) and LangGraph dev server (port 8123) both load ollama model metadata on every `/api/models` request — if lag coincides with model list usage, consider caching.
+**Known issue — UI is slow (resolved by Phase 10 launcher fix):**
+- The deeper root cause was the broken launcher: `start_image_pipeline.sh` pointed at a deleted `frontend/` directory (line 287), used `npm` instead of `pnpm`, ran in dev mode (3-4s on-demand compile per route) instead of production, and never started the LangGraph graph server on port 8123. The UI was slow because it was either compiling on every request (dev mode) or timing out on graph requests.
+- **Fixed in Phase 10:** launcher rewritten to serve the production build (`pnpm build` + `pnpm start -p 3001`), start langgraph on 8123 as a core blocking service, and auto-rebuild when source changes. Measured: UI cold load 18ms, warm 2ms (was 3.4s cold / 80ms warm).
+- Stale `.next` cache can still cause 404 JS chunk errors in dev mode — `rm -rf agent-chat-ui/.next` if that recurs.
+- The FastAPI sidecar (port 8000) and LangGraph dev server (port 8123) both load ollama model metadata on every `/api/models` request — if lag coincides with model list usage, consider caching.
 
 **Theme decisions:**
 - `next-themes@0.4.6` declared in `package.json` but not imported anywhere
@@ -130,6 +131,19 @@ Update deployment/startup script for current architecture.
 
 **If the error recurs:** check whether `/_next/static/chunks/main-app.js` returns 200 or 404. 404 = stale cache. 200 = real bundler issue.
 
+### Bug: Repo selector only captures folder name, not absolute path (2026-07-26) — ✅ Fixed
+**Fix:** Replaced `window.showDirectoryPicker()` (which only exposes `dirHandle.name`) with a fetch to `GET /api/fs/pick-folder` on the sidecar (port 8000). That endpoint runs AppleScript's native `choose folder` dialog, which **returns the real absolute POSIX path**. The full path is stored in `selectedWorkspace` and passed to the backend as `workspace`. The button label shows only the folder name (last path segment) for clean display.
+**Root cause:** `agent-chat-ui/src/components/thread/index.tsx:577-578` — the repo selector used `window.showDirectoryPicker()` and stored `dirHandle.name` in `selectedWorkspace`. The File System Access API deliberately exposes only the folder's display name (e.g. `"my-repo"`), not its absolute filesystem path, for security reasons. That bare name was then sent to the backend as `workspace`, which requires an absolute path.
+**Effect before fix:** Clicking "Repo selector", picking a folder, and sending a message to OpenCode did not actually point OpenCode at the selected repo. The workspace value was effectively useless.
+**Known good:** When `workspace` is left empty, `run_opencode` falls back to `_default_workspace()` (`opencode_cli.py:34-36`) which is `OPENCODE_WORKSPACE` env var or the backend's CWD — so the backend already has a sane default path. The bug only manifests when the user picks a folder.
+**Test coverage:** `tests/ui-controls.spec.ts:63` ("repo selector button renders") only asserts the button renders and the folder icon is visible — it does NOT exercise the workspace value flow. No test currently catches this bug.
+
+### Bug: Repo picker button shows full path, should show only folder name (2026-07-26)
+**Status:** Not fixed — documented for next agent.
+**Root cause:** `agent-chat-ui/src/components/thread/index.tsx:601-603` — the button label uses `selectedWorkspace.split("/").pop() || selectedWorkspace` to extract the folder name, but when `selectedWorkspace` is the full path (e.g. `/Users/me/projects/my-repo`), the split/pop may not reliably strip to just the folder name across all scenarios. The user reports seeing the full absolute path displayed on the button instead of just the folder name.
+**Expected:** Button should show only `my-repo`, not `/Users/me/projects/my-repo`.
+**Suggested fix:** Extract the folder name from the path using a more robust method (e.g. `Path.basename` on the backend side or a dedicated display-name state).
+
 ### STT Debug Endpoint (added during implementation)
 `POST /api/stt/debug` — returns `content_type`, `filename`, `headers`, `input_size`, `input_first_bytes` (hex), `input_last_bytes` (hex), `ffmpeg_version`, `ffmpeg_returncode`, `ffmpeg_stdout_size`, `ffmpeg_stderr`, and on success: `decoded_shape`/`decoded_min`/`decoded_max`/`decoded_mean`.
 
@@ -148,7 +162,7 @@ Update deployment/startup script for current architecture.
 - `backend/src/chat_ui.py` — added `_is_approved(resume_value)` helper to handle both the new HITL Decision dict (`{"type": "approve"}`) and the legacy boolean resume (`True`/`False`) for backward compat with tests.
 - `backend/tests/test_interrupts.py` — updated `test_interrupt_fires_on_handoff` to assert new schema; added `test_interrupt_approval_proceeds_via_decision_dict`, `test_interrupt_rejection_stops_via_decision_dict`, `test_supervisor_fallback_to_jasper_on_done`, `test_supervisor_fallback_on_unrecognized_agent`.
 - `backend/tests/test_supervisor.py` — renamed `test_supervisor_ends_turn` → `test_supervisor_done_falls_back_to_jasper`; updated `test_supervisor_routes_to_research` to assert message production instead of `active_agent` persistence (supervisor now clears `active_agent` when ending turn).
-- **21/21 backend tests pass.** Frontend typecheck passes. End-to-end verified via langgraph dev API.
+- **33/33 backend tests pass.** Frontend typecheck passes. End-to-end verified via langgraph dev API.
 
 ### Phase 6.3 — ✅ DONE (2026-07-26) — UI fixes (push-to-talk, TTS button, duplicate keys)
 - `agent-chat-ui/src/hooks/useSTT.ts` — re-added `stopRequestedRef` to handle the race where `onMouseUp` fires while `getUserMedia` is still acquiring. `stopRecording` now sets `stopRequestedRef = true` when `isAcquiring`, and `startRecording` checks it after the stream resolves — bails without starting the recorder if stop was requested. Eliminates orphan recorders and empty-blob second presses.
@@ -159,7 +173,19 @@ Update deployment/startup script for current architecture.
 
 ### Phase 8 — ⬜ Not Started
 ### Phase 9 — ⬜ Not Started (deferred, highest risk)
-### Phase 10 — ⬜ Not Started
+### Phase 10 — ✅ Complete (2026-07-26)
+
+### Voice picker — ✅ Done (2026-07-26)
+- **`agent-chat-ui/src/components/thread/index.tsx`** — Added a Voice selector dropdown in the footer controls (between Model and the Mic/Send row). Fetches available voices from `GET /api/tts/voices` on mount. The selected voice is passed to `speak()` when the Volume2 button is clicked — previously hardcoded to `"alba"`.
+- **Voices available:** local (`David_Suzuki`, `Juno_2`, `Lorde`, `Murrow_1`, `Murrow_2`, `Rogers`, `Rogers_2`, `Rogers_3`) + remote Kyutai defaults (`alba`, `pavo`, `tango`, `whispering`, etc.).
+- **Next:** Per-agent voice defaults once the user understands the voice landscape.
+- `start_image_pipeline.sh` rewritten: langgraph dev (port 8123) added as a core blocking service; frontend fixed to `cd "$ROOT/agent-chat-ui"`, `pnpm` (was `npm`), port 3001 (was 3000); production build with auto-rebuild detection replaces `npm run dev`.
+- **Auto-rebuild:** `start_frontend` compares newest `.ts`/`.tsx` mtime in `src/` against `.next/BUILD_ID` mtime. If source is newer (or BUILD_ID missing), runs `pnpm build`; otherwise serves the cached build. User (or coding agent) never thinks about builds — first launch builds, subsequent launches are instant, source changes trigger automatic rebuild on next launch.
+- **Reordered start:** core services (langgraph 8123 → sidecar 8000 → UI 3001) start blocking first so chat is usable in ~15s. Heavy services (Ollama, ComfyUI, Element, audio routing) start in a backgrounded subshell with `set +e` so their failure doesn't bring down the core.
+- `Multi Agent System.app` bundle verified end-to-end: double-clicking it (or running its `Contents/MacOS/launch` shim) starts everything, no terminal touched.
+- Measured: UI cold load 18ms, warm 2ms (production `next start`); was 3.4s cold / 80ms warm with dev mode.
+- **33/33 backend tests, 9/9 Playwright tests still passing.** Playwright UI tests ~2-4x faster (200-540ms vs 700-1000ms) because they hit the production server.
+- **Note:** `pnpm dev` (dev mode with HMR) is still available for the coding agent's editing workflow — `cd agent-chat-ui && pnpm dev --port 3001`. The launcher uses `pnpm start` (production) for the end user.
 
 ---
 
@@ -226,15 +252,33 @@ cd agent-chat-ui && npx playwright test
 
 ## Running Services
 
+### End-user launch (recommended)
+
+Double-click `Multi Agent System.app` in Finder, or from the repo root:
+
 ```bash
-# Start langgraph dev
+./start_image_pipeline.sh start    # core services block, heavy services in background
+./start_image_pipeline.sh stop
+./start_image_pipeline.sh status
+./start_image_pipeline.sh restart
+```
+
+This starts core services (langgraph 8123, sidecar 8000, UI 3001 — production build with auto-rebuild) then heavy services (Ollama, ComfyUI, Element, audio routing) in parallel non-blocking.
+
+### Manual / development
+
+```bash
+# Start langgraph dev (graph server) — the actual backend the UI talks to
 cd backend && nohup ./venv/bin/langgraph dev --port 8123 --no-browser &
 
-# Start Agent Chat UI
+# Start FastAPI sidecar (TTS/STT/models list — has dead code, see cleanup section)
+cd backend && ./venv/bin/uvicorn src.web_server:app --port 8000
+
+# Start Agent Chat UI — dev mode with HMR (for editing UI code)
 cd agent-chat-ui && pnpm dev --port 3001
 
-# Start FastAPI sidecar (TTS/STT — has dead code, see cleanup section)
-cd backend && ./venv/bin/uvicorn src.web_server:app --port 8000
+# Or serve the production build directly (what the launcher uses)
+cd agent-chat-ui && pnpm build && pnpm start -p 3001
 ```
 
 ## Key Files
@@ -287,10 +331,9 @@ cd backend && ./venv/bin/uvicorn src.web_server:app --port 8000
 ## Next Steps (in order)
 
 1. **Phase 8** — Visual dashboard (agent badges, handoff cards)
-2. **Phase 8** — Visual dashboard (agent badges, handoff cards)
-3. **Phase 9** — OpenCode streaming (deferred, highest risk)
-4. **Phase 10** — Update `start_image_pipeline.sh`
-5. **Sidecar cleanup** — Strip dead code from `web_server.py`
+2. **Phase 9** — OpenCode streaming (deferred, highest risk)
+3. **Sidecar cleanup** — Strip dead code from `web_server.py`
+4. **Repo picker bug** — see "Bug: Repo selector only captures folder name, not absolute path" section above
 
 ---
 

@@ -15,7 +15,7 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: "pnpm dev --port 3001",
+    command: "pnpm start -p 3001",
     url: "http://127.0.0.1:3001",
     reuseExistingServer: true,
   },

@@ -1,4 +1,8 @@
+import asyncio
+import json
 import operator
+import os
+from pathlib import Path
 from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -24,6 +28,19 @@ class State(TypedDict):
     decision_log: Annotated[list[dict], operator.add]
     pending_approval: bool
     pending_agent: str
+    todos: list[dict]
+
+
+TODOS_FILE = os.getenv("TODOS_FILE", str(Path(__file__).resolve().parent.parent.parent / "todos.json"))
+
+
+def _load_todos() -> list[dict]:
+    try:
+        with open(TODOS_FILE) as f:
+            data = json.load(f)
+            return data.get("sections", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
 
 
 AGENT_ROUTING = {
@@ -55,6 +72,7 @@ Reply with ONLY the specialist name (jasper, opencode, research, magic-coder) or
 
 
 def supervisor_node(state: State):
+    todos_data = _load_todos()
     target = (state.get("target_agent") or "").lower()
     if target in AGENT_ROUTING:
         node_name = AGENT_ROUTING[target]
@@ -66,6 +84,7 @@ def supervisor_node(state: State):
                 "handoff_history": [{"from": "supervisor", "to": target, "reason": f"User requested {target}"}],
                 "decision_log": [{"decision": f"route_to_{target}", "reason": f"User set target_agent={target}"}],
                 "pending_approval": False,
+                "todos": todos_data,
             },
         )
 
@@ -81,6 +100,7 @@ def supervisor_node(state: State):
             "pending_agent": "",
             "active_agent": "",
             "decision_log": [{"decision": "done", "reason": "Specialist already responded"}],
+            "todos": todos_data,
         }
 
     try:
@@ -107,6 +127,7 @@ def supervisor_node(state: State):
             "pending_agent": decision,
             "pending_approval": True,
             "decision_log": [{"decision": f"route_to_{decision}", "reason": f"LLM decided: {decision}"}],
+            "todos": todos_data,
         },
     )
 
@@ -163,15 +184,16 @@ def create_chat_ui():
     research_app = create_research_graph()
     magic_coder_app = create_magic_coder_graph()
 
-    def run_jasper(state):
-        result = jasper_app.invoke({"messages": state["messages"]})
+    async def run_jasper(state):
+        result = await jasper_app.ainvoke({"messages": state["messages"], "todos": state.get("todos", [])})
         return {"messages": result["messages"]}
 
-    def run_opencode(state):
-        result = opencode_app.invoke({
+    async def run_opencode(state):
+        result = await opencode_app.ainvoke({
             "messages": state["messages"],
             "workspace": state.get("workspace"),
             "mode": state.get("mode", "live"),
+            "model": state.get("model"),
             "opencode_session_id": state.get("opencode_session_id"),
         })
         return {
@@ -179,12 +201,12 @@ def create_chat_ui():
             "opencode_session_id": result.get("opencode_session_id"),
         }
 
-    def run_research(state):
-        result = research_app.invoke({"messages": state["messages"]})
+    async def run_research(state):
+        result = await research_app.ainvoke({"messages": state["messages"]})
         return {"messages": result["messages"]}
 
-    def run_magic_coder_node(state):
-        result = magic_coder_app.invoke({
+    async def run_magic_coder_node(state):
+        result = await magic_coder_app.ainvoke({
             "messages": state["messages"],
             "workspace": state.get("workspace"),
             "mode": state.get("mode", "live"),
@@ -207,7 +229,7 @@ def create_chat_ui():
     return graph
 
 
-def chat():
+async def chat():
     app = create_chat_ui()
     messages = []
 
@@ -246,7 +268,7 @@ def chat():
             continue
 
         messages.append({"role": "user", "content": user_input})
-        result = app.invoke({"messages": messages})
+        result = await app.ainvoke({"messages": messages})
 
         assistant_msg = result["messages"][-1]["content"]
         active = result.get("active_agent", "unknown")
@@ -255,4 +277,4 @@ def chat():
 
 
 if __name__ == "__main__":
-    chat()
+    asyncio.run(chat())

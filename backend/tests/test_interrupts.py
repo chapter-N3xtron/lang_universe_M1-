@@ -1,5 +1,6 @@
 """Tests for human-in-the-loop interrupts in the supervisor graph."""
 
+import asyncio
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -45,7 +46,7 @@ def test_interrupt_fires_on_handoff():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-fires"}}
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "Research the latest AI news"}],
                 "workspace": "/tmp",
@@ -54,7 +55,7 @@ def test_interrupt_fires_on_handoff():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
     state = app.get_state(config)
     assert state is not None
@@ -84,7 +85,7 @@ def test_interrupt_approval_proceeds():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-approve"}}
 
-        app.invoke(
+        asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "Research the latest AI news"}],
                 "workspace": "/tmp",
@@ -93,9 +94,9 @@ def test_interrupt_approval_proceeds():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
-        result = app.invoke(Command(resume=True), config=config)
+        result = asyncio.run(app.ainvoke(Command(resume=True), config=config))
 
     assert len(result.get("handoff_history", [])) >= 1
     assert result["handoff_history"][0]["to"] == "research"
@@ -119,7 +120,7 @@ def test_interrupt_approval_proceeds_via_decision_dict():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-approve-dict"}}
 
-        app.invoke(
+        asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "Research the latest AI news"}],
                 "workspace": "/tmp",
@@ -128,12 +129,12 @@ def test_interrupt_approval_proceeds_via_decision_dict():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             Command(resume=[{"type": "approve"}]),
             config=config,
-        )
+        ))
 
     assert len(result.get("handoff_history", [])) >= 1
     assert result["handoff_history"][0]["to"] == "research"
@@ -150,7 +151,7 @@ def test_interrupt_rejection_stops():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-reject"}}
 
-        app.invoke(
+        asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "Research the latest AI news"}],
                 "workspace": "/tmp",
@@ -159,9 +160,9 @@ def test_interrupt_rejection_stops():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
-        result = app.invoke(Command(resume=False), config=config)
+        result = asyncio.run(app.ainvoke(Command(resume=False), config=config))
 
     assert result.get("active_agent", "") == ""
     assert result.get("pending_approval", False) is False
@@ -178,7 +179,7 @@ def test_interrupt_rejection_stops_via_decision_dict():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-reject-dict"}}
 
-        app.invoke(
+        asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "Research the latest AI news"}],
                 "workspace": "/tmp",
@@ -187,12 +188,12 @@ def test_interrupt_rejection_stops_via_decision_dict():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             Command(resume=[{"type": "reject", "message": "no thanks"}]),
             config=config,
-        )
+        ))
 
     assert result.get("active_agent", "") == ""
     assert result.get("pending_approval", False) is False
@@ -214,7 +215,7 @@ def test_supervisor_fallback_to_jasper_on_done():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-fallback-jasper"}}
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "hello"}],
                 "workspace": "/tmp",
@@ -223,7 +224,7 @@ def test_supervisor_fallback_to_jasper_on_done():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
     # Should route through approval → jasper, producing an assistant message
     msgs = result.get("messages", [])
@@ -244,7 +245,7 @@ def test_supervisor_fallback_on_unrecognized_agent():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-fallback-unrecognized"}}
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "hello"}],
                 "workspace": "/tmp",
@@ -253,7 +254,7 @@ def test_supervisor_fallback_on_unrecognized_agent():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
     # Should fall back to jasper, producing a message
     msgs = result.get("messages", [])

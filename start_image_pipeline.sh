@@ -5,8 +5,9 @@
 #   Ollama     :11434   local LLM host (required for Magic Coder)
 #   ComfyUI    :8188    image renderer (optional)
 #   Element    GUI      VST/AU plugin host (Rare → LALA → reverb/delay)
-#   Backend    :8000    FastAPI LangGraph agent server
-#   Frontend   :3000    Next.js chat UI
+#   LangGraph  :8123    supervisor graph server (core — UI talks to this)
+#   Backend    :8000    FastAPI sidecar (TTS/STT/models list)
+#   Frontend   :3001    Next.js chat UI (production build, served by next start)
 #
 # Audio chain (macOS only):
 #   System output → BlackHole 2ch → Element → Built-in speakers
@@ -28,8 +29,9 @@ PIDDIR="$ROOT/.pids"
 
 OLLAMA_PORT=11434
 COMFYUI_PORT=8188
+LANGGRAPH_PORT=8123
 BACKEND_PORT=8000
-FRONTEND_PORT=3000
+FRONTEND_PORT=3001
 
 COMFYUI_DIR="$HOME/fun-multi-character-chats/ComfyUI"
 COMFYUI_PYTHON="$HOME/fun-multi-character-chats/.venv/bin/python"
@@ -227,6 +229,52 @@ status_element() {
   fi
 }
 
+# ── langgraph ──────────────────────────────────────────────────────────
+
+start_langgraph() {
+  if _port_listening "$LANGGRAPH_PORT"; then
+    echo "  LangGraph already running on :$LANGGRAPH_PORT"
+    return 0
+  fi
+
+  _ensure_dirs
+  echo "  Starting LangGraph (graph server)..."
+  cd "$ROOT/backend"
+  nohup ./venv/bin/langgraph dev --port "$LANGGRAPH_PORT" --no-browser >> "$LOGDIR/langgraph.log" 2>&1 &
+  echo $! > "$PIDDIR/langgraph.pid"
+  disown
+
+  if _wait_for_port "$LANGGRAPH_PORT" 30; then
+    echo "  LangGraph ready on http://127.0.0.1:$LANGGRAPH_PORT"
+  else
+    echo "  LangGraph failed to start — check $LOGDIR/langgraph.log"
+    return 1
+  fi
+}
+
+stop_langgraph() {
+  if [ -f "$PIDDIR/langgraph.pid" ]; then
+    local pid
+    pid=$(cat "$PIDDIR/langgraph.pid")
+    if _pid_alive "$pid"; then
+      kill "$pid" 2>/dev/null
+      echo "  LangGraph (pid $pid) stopped"
+    fi
+    rm -f "$PIDDIR/langgraph.pid"
+  fi
+  lsof -ti:"$LANGGRAPH_PORT" 2>/dev/null | xargs kill 2>/dev/null || true
+}
+
+status_langgraph() {
+  if _port_listening "$LANGGRAPH_PORT"; then
+    local pid
+    pid=$(cat "$PIDDIR/langgraph.pid" 2>/dev/null || echo "?")
+    echo "  LangGraph :$LANGGRAPH_PORT  ✓  (pid $pid)"
+  else
+    echo "  LangGraph :$LANGGRAPH_PORT  ✗  not running"
+  fi
+}
+
 # ── backend ────────────────────────────────────────────────────────────
 
 start_backend() {
@@ -283,9 +331,37 @@ start_frontend() {
   fi
 
   _ensure_dirs
-  echo "  Starting frontend..."
-  cd "$ROOT/frontend"
-  nohup npm run dev >> "$LOGDIR/frontend.log" 2>&1 &
+  cd "$ROOT/agent-chat-ui"
+
+  # Auto-rebuild: rebuild the production bundle if .next/BUILD_ID is missing
+  # or any source file (.ts/.tsx) is newer than the last build. This lets the
+  # user (or their coding agent) edit UI code and have the next launch pick up
+  # the changes automatically — no manual `pnpm build` step required.
+  local needs_build=0
+  if [ ! -f ".next/BUILD_ID" ]; then
+    needs_build=1
+  else
+    local build_mtime newest_src
+    build_mtime=$(stat -f %m .next/BUILD_ID 2>/dev/null || echo 0)
+    newest_src=$(find src -type f \( -name '*.ts' -o -name '*.tsx' \) -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1)
+    newest_src=${newest_src:-0}
+    if [ "$newest_src" -gt "$build_mtime" ]; then
+      needs_build=1
+    fi
+  fi
+
+  if [ "$needs_build" = "1" ]; then
+    echo "  Building frontend (production)..."
+    pnpm build >> "$LOGDIR/frontend-build.log" 2>&1 || {
+      echo "  Frontend build failed — check $LOGDIR/frontend-build.log"
+      return 1
+    }
+  else
+    echo "  Using cached build (.next/BUILD_ID up to date)"
+  fi
+
+  echo "  Starting frontend (production server)..."
+  nohup pnpm start -p "$FRONTEND_PORT" >> "$LOGDIR/frontend.log" 2>&1 &
   echo $! > "$PIDDIR/frontend.pid"
   disown
 
@@ -327,43 +403,57 @@ case "${1:-}" in
     echo "Starting multi-agent system..."
     echo ""
 
-    # 1. Audio routing — must happen before Element so it picks up the correct device
-    echo "── Audio chain ──"
-    _set_audio_output "$AUDIO_OUTPUT_DEVICE"
+    # ── Core services (blocking) — chat is unusable without these ──
+    # Start langgraph + sidecar + frontend first; the user gets a working
+    # chat in ~5-15s instead of waiting on Ollama/ComfyUI/Element.
+
+    echo "── LangGraph (graph server, port $LANGGRAPH_PORT) ──"
+    start_langgraph
     echo ""
 
-    # 2. Ollama — needed for Magic Coder local models
-    echo "── Ollama ──"
-    start_ollama
-    echo ""
-
-    # 3. ComfyUI — optional image renderer
-    echo "── ComfyUI ──"
-    start_comfyui
-    echo ""
-
-    # 4. Element — VST plugin host (loads after audio routing is set)
-    echo "── Element ──"
-    start_element
-    echo ""
-
-    # 5. Backend
-    echo "── Backend ──"
+    echo "── Backend (sidecar, port $BACKEND_PORT) ──"
     start_backend
     echo ""
 
-    # 6. Frontend
-    echo "── Frontend ──"
+    echo "── Frontend (UI, port $FRONTEND_PORT) ──"
     start_frontend
     echo ""
 
+    # ── Heavy services (parallel, non-blocking) — chat works without these ──
+    # Ollama is needed for Magic Coder, ComfyUI for image rendering, Element
+    # for the audio chain. If they fail, the core chat still works. Use
+    # `set +e` so a failing start_* doesn't kill the script.
+    set +e
+    (
+      echo "── Ollama (background) ──"
+      start_ollama
+      echo ""
+
+      echo "── ComfyUI (background) ──"
+      start_comfyui
+      echo ""
+
+      # Audio routing must happen before Element so it picks up the correct device
+      echo "── Audio chain ──"
+      _set_audio_output "$AUDIO_OUTPUT_DEVICE"
+      echo ""
+
+      echo "── Element (VST host, background) ──"
+      start_element
+      echo ""
+    ) &
+    HEAVY_PID=$!
+    disown $HEAVY_PID 2>/dev/null || true
+    set -e
+
     echo "────────────────────────────────────────"
     echo "Multi-agent system ready."
-    echo "  Frontend: http://localhost:$FRONTEND_PORT"
-    echo "  Backend:  http://127.0.0.1:$BACKEND_PORT"
-    echo "  ComfyUI:  http://127.0.0.1:$COMFYUI_PORT"
-    echo "  Ollama:   http://127.0.0.1:$OLLAMA_PORT"
-    echo "  Audio:    System output → BlackHole 2ch → Element → Speakers"
+    echo "  Frontend:  http://localhost:$FRONTEND_PORT"
+    echo "  LangGraph: http://127.0.0.1:$LANGGRAPH_PORT"
+    echo "  Backend:   http://127.0.0.1:$BACKEND_PORT"
+    echo "  ComfyUI:   http://127.0.0.1:$COMFYUI_PORT  (starting in background)"
+    echo "  Ollama:    http://127.0.0.1:$OLLAMA_PORT   (starting in background)"
+    echo "  Audio:     System output → BlackHole 2ch → Element → Speakers (background)"
     echo "────────────────────────────────────────"
     ;;
 
@@ -376,6 +466,9 @@ case "${1:-}" in
 
     echo "── Backend ──"
     stop_backend
+
+    echo "── LangGraph ──"
+    stop_langgraph
 
     echo "── Element ──"
     stop_element
@@ -401,12 +494,15 @@ case "${1:-}" in
     echo "── Audio ──"
     echo "  Output: $(SwitchAudioSource -t output -c 2>/dev/null || echo 'unknown')"
     echo ""
-    echo "── Services ──"
+    echo "── Core services ──"
+    status_langgraph
+    status_backend
+    status_frontend
+    echo ""
+    echo "── Heavy services ──"
     status_ollama
     status_comfyui
     status_element
-    status_backend
-    status_frontend
     ;;
 
   restart)

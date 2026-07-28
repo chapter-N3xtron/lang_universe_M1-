@@ -1,10 +1,11 @@
 import operator
 from typing import Annotated, TypedDict
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from src.agent_utils import get_user_query, get_conversation_history
-from src.opencode_cli import run_opencode
+from src.opencode_cli import run_opencode, run_opencode_stream
 
 
 class State(TypedDict):
@@ -17,8 +18,8 @@ class State(TypedDict):
     opencode_session_id: str
 
 
-def opencode_coding_agent(state: State):
-    """OpenCode CLI agent - invokes the real opencode CLI binary."""
+async def opencode_coding_agent(state: State):
+    """OpenCode CLI agent — invokes the real opencode CLI binary, streaming."""
     messages = state["messages"]
     user_query = get_user_query(messages)
 
@@ -28,7 +29,14 @@ def opencode_coding_agent(state: State):
         prior_session_id = state.get("opencode_session_id")
 
         history_for_model = get_conversation_history(messages)
-        result = run_opencode(
+        writer = get_stream_writer()
+        text_parts: list[str] = []
+        found_session_id: str | None = None
+        artifacts: list[str] = []
+
+        writer({"type": "status", "content": "running"})
+
+        async for event in run_opencode_stream(
             message=user_query,
             title=user_query[:50],
             workspace=workspace,
@@ -36,29 +44,47 @@ def opencode_coding_agent(state: State):
             auto_approve=(mode == "async"),
             history=history_for_model,
             session_id=prior_session_id,
-        )
+        ):
+            if not event.get("type"):
+                continue
 
-        if not result["success"]:
-            content = f"""[OpenCode CLI error]
+            if event["type"] == "text":
+                chunk = event.get("text", "")
+                text_parts.append(chunk)
+                writer({"type": "text", "content": chunk})
+            elif event["type"] == "complete":
+                found_session_id = event.get("session_id") or prior_session_id
+                artifacts = event.get("artifacts", [])
+            elif event["type"] == "error":
+                content = f"""[OpenCode CLI error]
 
-{result['error'] or 'Unknown error'}
+{event.get('error', 'Unknown error')}
 
-Session: {result.get('session_id') or 'none'}
+Session: {found_session_id or 'none'}
 """
-        else:
-            content = result["text"] or "(OpenCode CLI completed with no text output)"
-            if result.get("artifacts"):
-                content += "\n\n---\n\n**Tool outputs:**\n"
-                for artifact in result["artifacts"]:
-                    content += f"- `{artifact}`\n"
-            if result.get("session_id"):
-                content += f"\n_OpenCode session: {result['session_id']}_"
+                writer({"type": "error", "content": content})
+                return {
+                    "messages": [{"role": "assistant", "content": content}],
+                    "code_response": content,
+                    "reasoning": "error",
+                    "opencode_session_id": found_session_id or prior_session_id,
+                }
+
+        writer({"type": "complete", "content": ""})
+
+        content = "".join(text_parts) or "(OpenCode CLI completed with no text output)"
+        if artifacts:
+            content += "\n\n---\n\n**Tool outputs:**\n"
+            for artifact in artifacts:
+                content += f"- `{artifact}`\n"
+        if found_session_id:
+            content += f"\n_OpenCode session: {found_session_id}_"
 
         return {
             "messages": [{"role": "assistant", "content": content}],
             "code_response": content,
-            "reasoning": f"opencode run session={result.get('session_id')}",
-            "opencode_session_id": result.get("session_id") or prior_session_id,
+            "reasoning": f"opencode run session={found_session_id}",
+            "opencode_session_id": found_session_id or prior_session_id,
         }
     except Exception as e:
         error_msg = f"""[OpenCode CLI Agent]

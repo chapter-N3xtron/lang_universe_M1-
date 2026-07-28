@@ -57,7 +57,7 @@ export function HumanMessage({
       { messages: [newMessage] },
       {
         checkpoint: parentCheckpoint,
-        streamMode: ["values"],
+        streamMode: ["messages"],
         streamSubgraphs: true,
         streamResumable: true,
         optimisticValues: (prev) => {

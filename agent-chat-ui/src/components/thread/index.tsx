@@ -19,6 +19,8 @@ import { LangGraphLogoSVG } from "../icons/langgraph";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import {
   ArrowDown,
+  List,
+  ListX,
   LoaderCircle,
   PanelRightOpen,
   PanelRightClose,
@@ -51,6 +53,8 @@ interface ModelOption {
 }
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
+import { TodoList } from "./todos";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
@@ -145,6 +149,10 @@ export function Thread() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
+  const [todosOpen, setTodosOpen] = useQueryState(
+    "todosOpen",
+    parseAsBoolean.withDefault(false),
+  );
   const [hideToolCalls, setHideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
@@ -153,22 +161,36 @@ export function Thread() {
   const [selectedAgent, setSelectedAgent] = useState<string>("");
   const [selectedWorkspace, setSelectedWorkspace] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
-  const [modelOptions, setModelOptions] = useState<ModelOption[]>([{ value: "", label: "Default" }]);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([{ value: "", label: "Auto" }]);
+  const [modelsLoadError, setModelsLoadError] = useState(false);
+  const [voicesLoadError, setVoicesLoadError] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState<string>("");
   const [voiceOptions, setVoiceOptions] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     fetch("http://127.0.0.1:8000/api/models")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data: { default: string; models: { id: string; name: string; provider: string }[] }) => {
-        const options: ModelOption[] = [{ value: "", label: "Default" }];
+        const options: ModelOption[] = [{ value: "", label: "Auto" }];
         for (const m of data.models) {
           options.push({ value: m.id, label: m.name });
         }
         setModelOptions(options);
       })
-      .catch(() => {});
+      .catch((err) => {
+        setModelsLoadError(true);
+        toast.error("Could not load models", {
+          description: "Model sidecar at http://127.0.0.1:8000 may not be running.",
+        });
+        console.error("[Models] failed to load:", err);
+      });
     fetch("http://127.0.0.1:8000/api/tts/voices")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data: { voices: string[] }) => {
         const options = data.voices.map((v: string) => ({
           id: v,
@@ -176,7 +198,13 @@ export function Thread() {
         }));
         setVoiceOptions(options);
       })
-      .catch(() => {});
+      .catch((err) => {
+        setVoicesLoadError(true);
+        toast.error("Could not load voices", {
+          description: "TTS sidecar at http://127.0.0.1:8000 may not be running.",
+        });
+        console.error("[Voices] failed to load:", err);
+      });
   }, []);
   const {
     contentBlocks,
@@ -190,8 +218,9 @@ export function Thread() {
   } = useFileUpload();
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-  const { speak, stop: stopTts } = useTTS();
+  const { speak, stop: stopTts, speaking } = useTTS();
   const { startRecording, stopRecording, isRecording, isProcessing } = useSTT();
+  const speakingMessageIdRef = useRef<string | undefined>(undefined);
 
   const stream = useStreamContext();
   const messages = stream.messages;
@@ -279,7 +308,7 @@ export function Thread() {
         model: selectedModel || undefined,
       },
       {
-        streamMode: ["values"],
+        streamMode: ["messages"],
         streamSubgraphs: true,
         streamResumable: true,
         optimisticValues: (prev) => ({
@@ -309,7 +338,7 @@ export function Thread() {
     setFirstTokenReceived(false);
     stream.submit(undefined, {
       checkpoint: parentCheckpoint,
-      streamMode: ["values"],
+      streamMode: ["messages"],
       streamSubgraphs: true,
       streamResumable: true,
     });
@@ -347,6 +376,23 @@ export function Thread() {
         </motion.div>
       </div>
 
+      <motion.div
+        className="absolute right-0 top-0 z-20 hidden h-full lg:flex"
+        animate={{
+          x: isLargeScreen ? (todosOpen ? 0 : 300) : (todosOpen ? 0 : 300),
+        }}
+        initial={{ x: 300 }}
+        transition={
+          isLargeScreen
+            ? { type: "spring", stiffness: 300, damping: 30 }
+            : { duration: 0 }
+        }
+      >
+        <div className="h-full overflow-hidden border-l bg-background" style={{ width: 300 }}>
+          <TodoList />
+        </div>
+      </motion.div>
+
       <div
         className={cn(
           "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
@@ -358,14 +404,9 @@ export function Thread() {
             "relative flex min-w-0 flex-1 flex-col overflow-hidden",
             !chatStarted && "grid-rows-[1fr]",
           )}
-          layout={isLargeScreen}
+
           animate={{
             marginLeft: chatHistoryOpen ? (isLargeScreen ? 300 : 0) : 0,
-            width: chatHistoryOpen
-              ? isLargeScreen
-                ? "calc(100% - 300px)"
-                : "100%"
-              : "100%",
           }}
           transition={
             isLargeScreen
@@ -391,6 +432,20 @@ export function Thread() {
                 )}
               </div>
               <div className="absolute top-2 right-4 flex items-center">
+                <TooltipIconButton
+                  size="lg"
+                  className="p-4"
+                  tooltip={todosOpen ? "Close todos" : "Show todos"}
+                  variant="ghost"
+                  onClick={() => setTodosOpen((p) => !p)}
+                >
+                  {todosOpen ? (
+                    <ListX className="size-5" />
+                  ) : (
+                    <List className="size-5" />
+                  )}
+                </TooltipIconButton>
+                <ThemeToggle />
                 <OpenGitHubRepo />
               </div>
             </div>
@@ -437,6 +492,26 @@ export function Thread() {
 
               <div className="flex items-center gap-4">
                 <div className="flex items-center">
+                  {stream.values?.opencode_status && (
+                    <span className="mr-2 flex items-center gap-1.5 rounded-full bg-red-900/30 px-2.5 py-0.5 text-xs text-red-300">
+                      <span className="inline-block size-1.5 animate-pulse rounded-full bg-red-400" />
+                      OC: {stream.values.opencode_status}
+                    </span>
+                  )}
+                  <TooltipIconButton
+                    size="lg"
+                    className="p-4"
+                    tooltip={todosOpen ? "Close todos" : "Show todos"}
+                    variant="ghost"
+                    onClick={() => setTodosOpen((p) => !p)}
+                  >
+                    {todosOpen ? (
+                      <ListX className="size-5" />
+                    ) : (
+                      <List className="size-5" />
+                    )}
+                  </TooltipIconButton>
+                  <ThemeToggle />
                   <OpenGitHubRepo />
                 </div>
                 <TooltipIconButton
@@ -479,7 +554,15 @@ export function Thread() {
                           message={message}
                           isLoading={isLoading}
                           handleRegenerate={handleRegenerate}
-                          onSpeak={() => speak(getContentString(message.content), selectedVoice || undefined)}
+                          isSpeaking={speaking && speakingMessageIdRef.current === message.id}
+                          onSpeak={() => {
+                            if (speaking && speakingMessageIdRef.current === message.id) {
+                              stopTts();
+                            } else {
+                              speakingMessageIdRef.current = message.id;
+                              speak(getContentString(message.content), selectedVoice || undefined);
+                            }
+                          }}
                         />
                       ),
                     )}
@@ -599,7 +682,7 @@ export function Thread() {
                             <Folder className="size-4 text-gray-600" />
                             <span className="text-xs text-gray-600">
                               {selectedWorkspace
-                                ? selectedWorkspace.split("/").pop() || selectedWorkspace
+                                ? selectedWorkspace.replace(/\/+$/, "").split("/").pop() || selectedWorkspace
                                 : "Repo selector"}
                             </span>
                           </button>
@@ -628,45 +711,75 @@ export function Thread() {
                           </div>
                           <div className="flex items-center gap-1">
                             <span className="text-xs text-gray-600">Model</span>
-                            <Select
-                              value={selectedModel}
-                              onValueChange={setSelectedModel}
-                            >
-                              <SelectTrigger
-                                className="h-7 w-[128px] text-xs"
-                                aria-label="Select model"
-                              >
-                                <SelectValue placeholder="Default" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {modelOptions.map((opt) => (
-                                  <SelectItem key={opt.value || "default"} value={opt.value}>
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Select
+                                      value={selectedModel}
+                                      onValueChange={setSelectedModel}
+                                      disabled={modelsLoadError}
+                                    >
+                                      <SelectTrigger
+                                        className="h-7 w-[128px] text-xs"
+                                        aria-label="Select model"
+                                      >
+                                        <SelectValue placeholder="Auto" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {modelOptions.map((opt) => (
+                                          <SelectItem key={opt.value || "auto"} value={opt.value}>
+                                            {opt.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </span>
+                                </TooltipTrigger>
+                                {(modelsLoadError || selectedModel === "") && (
+                                  <TooltipContent side="top">
+                                    {modelsLoadError
+                                      ? "No models available (sidecar may not be running)"
+                                      : "Auto: uses agent default (glm-5.2 for chat, qwen3.5:397b for coding)"}
+                                  </TooltipContent>
+                                )}
+                              </Tooltip>
+                            </TooltipProvider>
                           </div>
                           <div className="flex items-center gap-1">
                             <span className="text-xs text-gray-600">Voice</span>
-                            <Select
-                              value={selectedVoice}
-                              onValueChange={setSelectedVoice}
-                            >
-                              <SelectTrigger
-                                className="h-7 w-[112px] text-xs"
-                                aria-label="Select voice"
-                              >
-                                <SelectValue placeholder="Default" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {voiceOptions.map((opt) => (
-                                  <SelectItem key={opt.id} value={opt.id}>
-                                    {opt.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Select
+                                      value={selectedVoice}
+                                      onValueChange={setSelectedVoice}
+                                      disabled={voicesLoadError || voiceOptions.length === 0}
+                                    >
+                                      <SelectTrigger
+                                        className="h-7 w-[112px] text-xs"
+                                        aria-label="Select voice"
+                                      >
+                                        <SelectValue placeholder="Auto" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {voiceOptions.map((opt) => (
+                                          <SelectItem key={opt.id} value={opt.id}>
+                                            {opt.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </span>
+                                </TooltipTrigger>
+                                {(voicesLoadError || voiceOptions.length === 0) && (
+                                  <TooltipContent side="top">
+                                    No voices available (TTS sidecar may not be running)
+                                  </TooltipContent>
+                                )}
+                              </Tooltip>
+                            </TooltipProvider>
                           </div>
                           <div className="mt-0.5 flex items-center gap-1.5">
                             <button

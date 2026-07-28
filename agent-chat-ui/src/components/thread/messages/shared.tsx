@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Volume2,
+  Square,
 } from "lucide-react";
 import { TooltipIconButton } from "../tooltip-icon-button";
 import { AnimatePresence, motion } from "framer-motion";
@@ -126,6 +127,7 @@ export function CommandBar({
   handleRegenerate,
   isLoading,
   onSpeak,
+  isSpeaking,
 }: {
   content: string;
   isHumanMessage?: boolean;
@@ -136,6 +138,7 @@ export function CommandBar({
   handleRegenerate?: () => void;
   isLoading: boolean;
   onSpeak?: () => void;
+  isSpeaking?: boolean;
 }) {
   if (isHumanMessage && isAiMessage) {
     throw new Error(
@@ -199,12 +202,16 @@ export function CommandBar({
       />
       {isAiMessage && onSpeak && (
         <TooltipIconButton
-          disabled={isLoading}
-          tooltip="Read aloud"
+          disabled={!content || content.length === 0}
+          tooltip={isSpeaking ? "Stop playback" : "Read aloud"}
           variant="ghost"
           onClick={onSpeak}
         >
-          <Volume2 className="size-4" />
+          {isSpeaking ? (
+            <Square className="size-4" />
+          ) : (
+            <Volume2 className="size-4" />
+          )}
         </TooltipIconButton>
       )}
       {isAiMessage && !!handleRegenerate && (

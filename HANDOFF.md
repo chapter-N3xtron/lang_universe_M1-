@@ -250,6 +250,84 @@ Update deployment/startup script for current architecture.
 - Whether concurrent TTS requests actually corrupt audio (would need two rapid Volume2 clicks).
 
 ---
+
+## Voice Layer Fixes (2026-07-27)
+
+All remaining voice-layer bugs from the audit have been fixed:
+
+- **V3 (P1) — TTS button play/stop state** ✅ Fixed
+  - `agent-chat-ui/src/components/thread/index.tsx` now tracks `speakingMessageIdRef` and passes `isSpeaking` to `AssistantMessage`.
+  - `agent-chat-ui/src/components/thread/messages/ai.tsx` forwards `isSpeaking` to `CommandBar`.
+  - `agent-chat-ui/src/components/thread/messages/shared.tsx` renders a stop square icon and `"Stop playback"` tooltip when `isSpeaking` is true; otherwise shows `Volume2` + `"Read aloud"`. Button is disabled only when content is empty, not during graph streaming.
+  - Verified via new Playwright test `tests/tts.spec.ts`.
+
+- **V4 (P1) — Voice/model selector silent failure** ✅ Fixed
+  - `agent-chat-ui/src/components/thread/index.tsx` now surfaces `toast.error()` when `/api/models` or `/api/tts/voices` fail.
+  - Dropdowns are disabled when options are empty, with a tooltip explaining the sidecar may not be running.
+  - Placeholder renamed from `"Default"` to `"Auto"` to match the agent selector convention.
+
+- **V5 (P2) — Dead code in `_normalize_chunk`** ✅ Fixed
+  - Removed unreachable duplicate normalization code after the `return` statement in `backend/src/kyutai_tts.py:35-44`.
+
+### Test updates
+- `agent-chat-ui/tests/ui-controls.spec.ts`: mocks `/threads/search` so the app renders without a real LangGraph server; updates model/voice selector placeholder assertions to `"Auto"`.
+- `agent-chat-ui/tests/tts.spec.ts`: new Playwright test that mocks the LangGraph stream and TTS SSE endpoint, sends a message, and asserts the Volume2 button toggles to stop and back.
+- `agent-chat-ui/playwright.config.ts`: webServer now uses `pnpm start -p 3001` to serve the production build, matching the launcher configuration in Phase 10.
+
+### Verification
+- `backend/tests/`: 33/33 passing.
+- `agent-chat-ui/tests/ui-controls.spec.ts`: 8/8 passing.
+- `agent-chat-ui/tests/tts.spec.ts`: 1/1 passing.
+- `agent-chat-ui/tests/phase2.spec.ts`: 1/2 passing (`thread persistence` still depends on a real LangGraph server; pre-existing limitation noted in Current Status).
+
+---
+
+## TTS Debugging Log (2026-07-26)
+
+> Chronological record of every attempt to fix TTS playback in the UI. The backend endpoint (`POST /api/tts/stream`) has been confirmed working (200 OK, SSE audio data) throughout. All failures are in the frontend `useTTS.ts` AudioContext pipeline.
+
+### Attempt 1 — AudioContext created after `await fetch()` (FAILED)
+**Hypothesis:** Browsers suspend AudioContexts created outside a user gesture. The `new AudioContext()` was after `await fetch()`, so the browser saw it as non-user-initiated.
+**Fix:** Moved `new AudioContext()` before the `await fetch()` so it's created synchronously during the click handler.
+**Result:** Still no audio. Console showed `AudioBufferSourceNode is not useful when context is closed` — the context was being closed by a different `speak()` call's `finally` block.
+
+### Attempt 2 — `finally` block closed shared ref instead of local ctx (FAILED)
+**Hypothesis:** The `finally` block did `audioCtxRef.current?.close()` — a shared ref that gets overwritten by every `speak()` call. When two TTS requests overlapped, the second request's `finally` would close the first request's AudioContext.
+**Fix:** Changed `finally` to close the local `ctx` variable instead of the shared ref, and only clear the ref if it still points to the same context.
+**Result:** Still no audio. Console showed `InvalidStateError: Cannot close a closed AudioContext` — `stop()` was closing the context, then `finally` tried to close it again.
+
+### Attempt 3 — Wrapped `ctx.close()` in try/catch (FAILED)
+**Hypothesis:** The double-close error was a promise rejection that try/catch would catch.
+**Fix:** Wrapped `ctx.close()` in `try { ctx.close(); } catch {}`.
+**Result:** Still the same `InvalidStateError`. Root cause: `AudioContext.close()` returns a **Promise** in Chrome, and `try/catch` doesn't catch unhandled promise rejections. The error was escaping.
+
+### Attempt 4 — Check `ctx.state !== "closed"` before closing + `.catch(() => {})` on the promise (CURRENT)
+**Hypothesis:** The durable fix is to check the context state before closing in both `stop()` and the `finally` block, and handle the promise rejection properly.
+**Fix applied to `useTTS.ts`:**
+- `stop()` (line 34-39): `if (audioCtxRef.current && audioCtxRef.current.state !== "closed") { audioCtxRef.current.close().catch(() => {}); }`
+- `finally` block (line 125-131): `if (ctx.state !== "closed") { ctx.close().catch(() => {}); }`
+**Result:** Pending user verification. Console should show `[TTS] AudioContext state: running sampleRate: 44100` followed by `[TTS] playback done, chunks: N duration: X.Xs` with no `InvalidStateError`.
+
+### Other changes made during debugging
+- **`shared.tsx:202`** — Volume2 button was `disabled={isLoading}`, making it unclickable during graph streaming. Changed to `disabled={!content || content.length === 0}` so TTS is independent of graph state.
+- **`useTTS.ts:55-57`** — Added `ctx.resume()` fallback for browsers that suspend AudioContexts despite being created in a click handler (Brave's stricter autoplay policy).
+- **`useTTS.ts:58,110`** — Added `console.log` diagnostics: `[TTS] AudioContext state: running sampleRate: 44100` and `[TTS] playback done, chunks: N duration: X.Xs`.
+
+### Current state of `useTTS.ts` (after all fixes)
+- AudioContext created synchronously before any `await` (user-gesture-initiated) ✅
+- `ctx.resume()` fallback if suspended ✅
+- `stop()` checks `state !== "closed"` before closing ✅
+- `finally` block checks `state !== "closed"` before closing ✅
+- Both `.close()` calls handle the promise with `.catch(() => {})` ✅
+- Volume2 button not disabled during graph streaming ✅
+- Console diagnostics for debugging ✅
+
+### What still needs fixing (separate from playback)
+- ~~**V3 (P1)** — TTS button has no playing/stop state~~ ✅ Fixed — see "Voice Layer Fixes (2026-07-27)".
+- ~~**V4 (P1)** — Voice selector silent failure (`.catch(() => {})` swallows errors)~~ ✅ Fixed — see "Voice Layer Fixes (2026-07-27)".
+- ~~**V5 (P2)** — Dead code in `_normalize_chunk` (`kyutai_tts.py:41-44`)~~ ✅ Fixed — see "Voice Layer Fixes (2026-07-27)".
+
+---
 - `start_image_pipeline.sh` rewritten: langgraph dev (port 8123) added as a core blocking service; frontend fixed to `cd "$ROOT/agent-chat-ui"`, `pnpm` (was `npm`), port 3001 (was 3000); production build with auto-rebuild detection replaces `npm run dev`.
 - **Auto-rebuild:** `start_frontend` compares newest `.ts`/`.tsx` mtime in `src/` against `.next/BUILD_ID` mtime. If source is newer (or BUILD_ID missing), runs `pnpm build`; otherwise serves the cached build. User (or coding agent) never thinks about builds — first launch builds, subsequent launches are instant, source changes trigger automatic rebuild on next launch.
 - **Reordered start:** core services (langgraph 8123 → sidecar 8000 → UI 3001) start blocking first so chat is usable in ~15s. Heavy services (Ollama, ComfyUI, Element, audio routing) start in a backgrounded subshell with `set +e` so their failure doesn't bring down the core.
@@ -399,12 +477,101 @@ cd agent-chat-ui && pnpm build && pnpm start -p 3001
 - CORS middleware
 - Imports: `transcribe` from `src.stt`, `get_tts_engine` from `src.kyutai_tts`
 
+### Sidecar Cleanup — ✅ Complete (2026-07-27)
+`backend/src/web_server.py` rewritten as a single-responsibility, stateless bridge. It no longer compiles or owns any LangGraph graph — that lives on `langgraph dev` (port 8123), matching the Agent Chat UI architecture (the UI is a client to a LangGraph server).
+
+**Final route table (6 routes):**
+- `GET /health` → `{"status":"ok"}`
+- `POST /api/tts/stream` → Kyutai TTS SSE streaming (unchanged response contract)
+- `GET /api/tts/voices` → `{"voices":[...],"total":N}`
+- `POST /api/stt` → faster-whisper transcription (`UploadFile` → `{"transcript":...}`)
+- `GET /api/models` → cloud default + local Ollama tags (model dropdown)
+- `GET /api/fs/pick-folder` → native macOS folder picker, returns absolute POSIX path (repo picker)
+
+**Removed (now return 404):** `/api/chat`, `/api/tts` (non-stream), `/api/tts/voices/clone`, `/api/stt/debug`, `/api/fs/home`, `/api/fs/list`, `/api/jobs`, `/api/jobs/{id}`, the `lifespan` graph compilation, the `ChatMessage`/`ChatRequest`/`ChatResponse`/`TTSRequest`/`VoiceCloneRequest`/`FSListResponse`/`JobResponse` models, the `_has_checkpoint`/`_build_invocation_input`/`_log_request` helpers, and the `create_chat_ui`/`jobs`/`debug_decode` imports.
+
+**CORS hardened:** the previous `allow_origins=["*"]` + `allow_credentials=True` is explicitly disallowed by the FastAPI CORS docs. Replaced with an explicit allowlist read from `SIDECAR_ALLOWED_ORIGINS` (default `http://localhost:3001,http://127.0.0.1:3001`), `allow_methods=["GET","POST","OPTIONS"]`, `allow_headers=["*"]`.
+
+**Files unchanged:** `backend/src/stt.py` (`debug_decode()` kept as a module-level diagnostic; only the import removed), `backend/src/kyutai_tts.py` (already correct per Pocket TTS docs + thread-safety lock), `backend/src/jobs.py` and `backend/src/ollama_client.py` (files kept; only `web_server.py` drops the unused imports).
+
+**Sources:** Agent Chat UI README (UI is a LangGraph server client); FastAPI Lifespan Events (lifespan = shared app resources, not a shadow graph); FastAPI CORS docs (wildcard + credentials invalid); faster-whisper README (`transcribe()` API); Pocket TTS Python API reference (`generate_audio_stream`, 24 kHz, not thread-safe).
+
+**Verification (2026-07-27):**
+- Route smoke: `from src.web_server import app` → exactly the 6 routes + `/`, `/docs`, `/openapi.json`, `/redoc`.
+- Live smoke: `/health` 200, `/api/models` returns list, `/api/tts/voices` returns list, `/api/chat` 404, `/api/jobs` 404, `/api/tts` 404, `/api/fs/home` 404, `/api/stt/debug` 404.
+- CORS: allowed origin echoes `access-control-allow-origin`; disallowed origin returns none.
+- Backend tests: 33/33 passing.
+- Frontend build: passes.
+- Playwright: 11/11 passing (ui-controls 8, tts 1, phase2 2).
+
+### phase2.spec.ts — ✅ Fixed (2026-07-27)
+Both phase2 tests now select the **Jasper** agent before sending (per Phase 3, `target_agent` bypasses the approval interrupt), so the first turn produces an assistant reply instead of an Agent-Inbox "Approve/Reject" card. Keeps them real end-to-end against the running LangGraph server with real persistence. Both pass (5.3s, 5.4s).
+
 ## Next Steps (in order)
 
-1. **Voice layer bugs V1-V5** — see "Voice Layer Audit" section above. Fix in priority order (V1 P0, V2 P0, V3 P1, V4 P1, V5 P2).
+1. ~~**Voice layer bugs V1-V5**~~ ✅ All fixed — see "Voice Layer Audit" and "Voice Layer Fixes (2026-07-27)".
 2. **Phase 8** — Visual dashboard (agent badges, handoff cards)
 3. **Phase 9** — OpenCode streaming (deferred, highest risk)
-4. **Sidecar cleanup** — Strip dead code from `web_server.py`
+4. ~~**Sidecar cleanup**~~ ✅ Complete — see "Sidecar Cleanup — ✅ Complete (2026-07-27)" above.
+
+---
+
+## Performance / UI Lag Fix Plan (2026-07-27)
+
+### Validation of prior analysis
+
+The plan below was validated against the actual codebase by reading every file involved. Key findings:
+
+- **`active_agent`, `handoff_history`, `decision_log`** — ZERO runtime reads in any UI component. Only appear as type defs in `Stream.tsx:32-34,48-50`. Set by backend (`chat_ui.py`) but never consumed by frontend. Safe to ignore for stream mode changes.
+
+- **`streamMode: ["values"]` → `["messages"]`** — The SDK docs confirm `["values"]` returns full state per step, while `["messages"]` returns LLM message chunks. No UI code reads `stream.values` directly (only `stream.messages`, `stream.interrupt`, `stream.isLoading`, `stream.error`). The `useStream` hook handles both modes generically — mode is per-submit (not hook-level), and `SubmitOptions` (line 904 in SDK types) explicitly supports per-call mode switching.
+
+- **`streamSubgraphs: true`** — Must be KEPT per LangChain forum posts: the SDK's `MessageTupleManager` needs it to properly route message chunks from subgraph LLM calls. Without it, subgraph message accumulation breaks.
+
+- **`tool-calls.tsx` `let` variables** — Confirmed `let parsedContent: any`, `let isJsonContent = false` at lines 71-72. Required due to try/catch assignment pattern. Wrapping in `useMemo` needs a single-expression return (destructured object/tuple).
+
+- **Already running production build** — Process is `next-server` (production server binary), not `next dev`. The "switch to prod" suggestion from the original GLM analysis was based on a false premise and is REMOVED.
+
+- **`React.memo` on `AssistantMessage` is INEFFECTIVE** — The component reads `useStreamContext()` (line 122 of `ai.tsx`), so React context re-renders bypass prop memoization entirely. SKIPPED.
+
+### Execution Plan (phased by risk)
+
+#### Phase 1 — Leak Fixes (isolated, no UI surface change)
+
+| # | File | Lines | Change |
+|---|---|---|---|
+| 1 | `useTTS.ts` | 34-41, 115-122 | Store `setInterval` in a ref. Clear it in `stop()` alongside the `AbortController` abort. Add `useEffect` cleanup that calls `stop()` on unmount. |
+| 2 | `useSTT.ts` | 11-25 | Add `useEffect` cleanup that stops `MediaRecorder` (if recording) and calls `cachedStreamRef.current?.getTracks().forEach(t => t.stop())` on unmount. |
+
+#### Phase 2 — Single-line Performance Wins
+
+| # | File | Lines | Change |
+|---|---|---|---|
+| 3 | `index.tsx` | 382 | Remove `layout={isLargeScreen}` from the `<motion.div>` streaming container — the `animate` prop already handles marginLeft/width changes; `layout` adds redundant layout measurement overhead on every stream tick. |
+| 4 | `index.tsx` (×2), `human.tsx` | 303, 333, 60 | Change `streamMode: ["values"]` → `["messages"]`. **Keep `streamSubgraphs: true`.** This stops the server from re-sending the full state (messages + ui + handoff_history + decision_log) on every token — instead sending incremental message chunks. |
+| 5 | `tool-calls.tsx` | 71-86 | Wrap `JSON.parse()`/`JSON.stringify()` of tool results in `useMemo`. These recompute on every parent render with no memoization. Refactor the `let` variables into a single-expression return. |
+
+#### Phase 3 — UI Polish
+
+| # | File | Lines | Change |
+|---|---|---|---|
+| 6 | `index.tsx` | 660-691 | Show tooltip on Model `Select` when `selectedModel === ""` (Auto): `"Auto: uses agent default (glm-5.2 for chat, qwen3.5:397b for coding)"`. The tooltip infrastructure already exists (lines 685-689) — currently only shows on error. Extend to always show on "Auto". |
+
+#### Phase 4 — Runtime (manual, no code)
+
+| # | Action |
+|---|---|
+| 7 | Stop ComfyUI (`main.py --port 8188`, ~560 MB RSS) if not actively generating images |
+| 8 | Consider lazy-loading the TTS model in the sidecar (`web_server`, ~2.8 GB across two Python processes) instead of loading at startup |
+
+### Items Explicitly Skipped
+
+| Item | Reason |
+|---|---|
+| ~~Switch to production build~~ | Already running `next-server` (production binary). False premise from original analysis. |
+| ~~Memoize `AssistantMessage` with `React.memo`~~ | **Ineffective.** Component reads `useStreamContext()` (ai.tsx:122), so context re-renders bypass prop memo. Would need to decouple context reads from rendering first. |
+| ~~Drop `streamSubgraphs: true`~~ | SDK's `MessageTupleManager` needs it for subgraph message routing per LangChain forum posts. |
+| ~~Virtualize message list~~ | High complexity — breaks TTS (scrolled-off messages unmount mid-playback), loading state, interrupt rendering. Deferred to separate task. |
 
 ---
 
@@ -578,3 +745,226 @@ These gaps were resolved by testing against a real browser recording:
 1. ~~**Never seen the actual CURRENT error message**~~ — **SEEN:** `ffmpeg failed: [in#0 @ 0x145613880] 0x00 at pos 36 (0x24) invalid as first byte of an EBML number / Error opening input: End of file`. The version-string error was indeed from an earlier code revision.
 2. ~~**Never captured a real browser blob**~~ — **CAPTURED:** 36 bytes, just the EBML header (`1a45dfa3...`), no audio data. Confirmed H7.
 3. ~~**Never checked `UploadFile.content_type` from a real browser request**~~ — **VERIFIED:** `audio/webm` from Chrome. Backend pipeline handles it correctly (synthetic WebM transcribes fine).
+
+---
+
+## Persistent Todo List with Model Attribution (2026-07-27)
+
+### Goal
+
+A single source of truth for project task tracking. OpenCode Desktop (external app running various models) writes a master `todos.json` file on disk. The LangGraph graph mirrors it into state so Jasper has awareness and can answer questions about it. The UI displays it in a persistent right-side sidebar panel.
+
+### Design decisions (locked)
+
+- **Master file:** `todos.json` at repo root — the durable source of truth on disk.
+- **Protocol doc:** `AGENTS.md` at repo root — OpenCode Desktop reads this to learn the schema and rules.
+- **Model ID format:** Full provider-prefixed ID (e.g. `ollama-cloud/glm-5.2`, `ollama/qwen3:32b`, `anthropic/claude-sonnet-4.5`). OpenCode Desktop self-reports — it knows its own model; no backend lookup.
+- **Section-level attribution:** `planned_by_model` — what model authored that plan section. Set once at creation, never modified.
+- **Todo-level attribution:** `completed_by_model` — what model was running when the work was done. Set when the todo is marked completed.
+- **UI placement:** Right sidebar with a header toggle button (mirrors the existing left chat-history sidebar pattern). Toggled via nuqs `todosOpen` query param.
+- **Read path (UI):** Frontend polls `GET /api/todos` on the FastAPI sidecar every 3 seconds. This avoids reverting `streamMode` to `["values"]`/`["updates"]` — the `["messages"]` perf win from the Performance / UI Lag Fix Plan stays intact.
+- **Read path (Jasper awareness):** The LangGraph supervisor reads `todos.json` at the start of each turn and places it into state. The `run_jasper` wrapper passes `todos` into the Jasper subgraph. Jasper's system prompt injects the todo data as context so the user can ask "what's the status of the perf fixes?" / "which model completed the TTS leak fix?" and get accurate answers.
+- **Durability:** `langgraph dev` uses a persistent file-based checkpointer (`backend/.langgraph_api/*.pckl`), so state survives restarts. The disk file is the master; the state is a per-turn mirror.
+
+### Why not pure LangGraph state (without the file)?
+
+OpenCode Desktop is an external application that edits files on disk. It cannot directly mutate LangGraph state (which lives in pickle files managed by the running `langgraph dev` process). The file is the bridge: OpenCode Desktop writes it; the graph reads it each turn and syncs it into state.
+
+### Why not pure file polling (without state)?
+
+If todos lived only in the file and the UI polled it, Jasper would have no awareness of the todo list when responding. Putting todos into state (mirrored from the file) gives Jasper context-awareness — the user can ask Jasper questions about the todo list and get accurate answers, not hallucinations.
+
+---
+
+### `todos.json` schema (master file, repo root)
+
+```json
+{
+  "version": 1,
+  "updated_at": "2026-07-27T22:00:00Z",
+  "updated_by": "opencode-desktop",
+  "sections": [
+    {
+      "id": "kebab-case-id",
+      "title": "Human-readable section title",
+      "created_at": "ISO-8601",
+      "planned_by_model": "ollama-cloud/glm-5.2",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "kebab-case-id",
+          "content": "What needs to be done",
+          "status": "pending|in_progress|completed",
+          "agent": "opencode|jasper|research|magic-coder|null",
+          "completed_by_model": "ollama-cloud/glm-5.2|null",
+          "completed_at": "ISO-8601|null",
+          "notes": "brief summary of what was done"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Two attribution layers:**
+- `planned_by_model` (section-level) — set once when a section is created; records what model authored that plan section.
+- `completed_by_model` (todo-level) — set when a todo is marked completed; records what model was running when the work was done.
+
+---
+
+### `AGENTS.md` contents (repo root)
+
+Protocol document OpenCode Desktop reads on startup. Contains:
+
+```markdown
+# Agent Protocol — Todo List
+
+## Location
+- Master file: `todos.json` (repo root, this directory)
+- This is the single source of truth for project task tracking.
+
+## Schema
+[full field-by-field table with types and descriptions — see todos.json schema above]
+
+## Rules
+
+### Adding a new plan section
+When you create a new set of related todos:
+1. Append a new object to `sections[]`
+2. Set `planned_by_model` to your current full model ID (e.g. "ollama-cloud/glm-5.2")
+3. Set `planned_by_agent` to "opencode-desktop"
+4. Generate a unique kebab-case `id` and an ISO-8601 `created_at` timestamp
+5. Every todo starts as `status: "pending"`, `completed_by_model: null`, `completed_at: null`
+
+### Completing a todo
+When you finish work on a todo:
+1. Set `status` to "completed"
+2. Set `completed_by_model` to your current full model ID
+3. Set `completed_at` to the current ISO-8601 timestamp
+4. Update `notes` with a brief summary of what was done
+5. Bump top-level `updated_at` and `updated_by`
+
+### Marking a todo in_progress
+1. Set `status` to "in_progress"
+2. Bump top-level `updated_at`
+
+### Never
+- Delete a completed todo (preserve the audit trail)
+- Modify `planned_by_model` after section creation
+- Reorder completed todos above pending ones
+- Edit `todos.json` for any purpose other than task tracking
+
+## Worked example
+[full JSON example showing add-section + complete-todo flow with model attribution]
+```
+
+---
+
+### Execution Plan
+
+#### Phase 1 — Todo JSON Schema + Seed File + Protocol Doc
+
+| # | File | Lines | Change |
+|---|---|---|---|
+| 1 | `todos.json` (new, repo root) | — | Create. Parse HANDOFF.md into sections: (a) "Original Plan (Phases 0-10)" — Phases 0–10 as todos, most marked completed; (b) "Performance / UI Lag Fix Plan" (lines 519–576) — all 6 code changes marked completed with model attribution (`ollama-cloud/glm-5.2`), the 2 runtime items (ComfyUI, TTS lazy-load) as pending; (c) "Persistent Todo List" — the current work, marked in_progress. |
+| 2 | `AGENTS.md` (new, repo root) | — | Create. Protocol instructions for OpenCode Desktop: schema, add-section/complete-todo/in_progress rules, model attribution requirements, "never" rules, worked example. |
+
+#### Phase 2 — Backend: FastAPI endpoint
+
+| # | File | Change |
+|---|---|---|
+| 3 | `backend/src/web_server.py` | Add `GET /api/todos` endpoint. Reads `todos.json` from repo root (path configurable via `TODOS_FILE` env var, default `../todos.json` relative to backend). Returns JSON as-is. If file missing, returns `{"version": 1, "sections": []}`. No LangGraph state involvement on the read path. |
+
+#### Phase 3 — Backend: LangGraph state mirror + Jasper awareness
+
+| # | File | Lines | Change |
+|---|---|---|---|
+| 4 | `backend/src/chat_ui.py` | 15–26 | Add `todos: list[dict]` to the `State` TypedDict. Uses a **replace-reducer** (not `operator.add`) — the whole list is overwritten each turn so state always mirrors the file. |
+| 4 | `backend/src/chat_ui.py` | top of file | Add `_load_todos()` helper: reads `todos.json` from repo root, returns `sections` list. Handles `FileNotFoundError`/`JSONDecodeError` by returning `[]`. |
+| 4 | `backend/src/chat_ui.py` | 57–111 | In `supervisor_node`, call `_load_todos()` at the top and include `"todos": <file sections>` in every `Command`/dict return (all 3 return paths: lines 61–70, 79–84, 104–111). This ensures state mirrors the file at the start of each turn, picking up any edits OpenCode Desktop made between turns. |
+| 5 | `backend/src/chat_ui.py` | 166–168 | Modify `run_jasper` wrapper to pass `todos` from parent state into the Jasper subgraph: `jasper_app.invoke({"messages": state["messages"], "todos": state.get("todos", [])})`. |
+| 6 | `backend/src/jasper_agent.py` | 9–11 | Add `todos: list[dict]` to the subgraph `State` TypedDict (received from parent, read-only). |
+| 6 | `backend/src/jasper_agent.py` | 14–23 | Add `_format_todos_for_prompt(todos)` helper that formats the sections/todos as a readable checklist with status markers (○ ◉ ✓) and model attribution. Modify `jasper_agent` to inject the formatted todos into the system prompt: "You have access to the project's current todo list. When the user asks about task status, what's been done, what model did what, or what's pending, answer from the todo data below." followed by `CURRENT TODO LIST:\n<formatted todos>`. |
+
+**`_format_todos_for_prompt` reference implementation:**
+```python
+def _format_todos_for_prompt(todos):
+    if not todos:
+        return "No todos currently tracked."
+    lines = []
+    for section in todos:
+        lines.append(f"## {section['title']} (planned by {section.get('planned_by_model', 'unknown')})")
+        for t in section.get("todos", []):
+            mark = {"pending": "○", "in_progress": "◉", "completed": "✓"}.get(t["status"], "○")
+            model = f" [done by {t['completed_by_model']}]" if t.get("completed_by_model") else ""
+            lines.append(f"  {mark} {t['content']}{model}")
+    return "\n".join(lines)
+```
+
+**Note on prompt size:** The todo list could grow large over time. For now the HANDOFF seed has ~20 todos, which is fine. If it grows large later, truncate `_format_todos_for_prompt` to pending + in_progress + recently-completed. Not implementing truncation now.
+
+#### Phase 4 — Frontend: Todo types + sidebar panel
+
+| # | File | Lines | Change |
+|---|---|---|---|
+| 7 | `agent-chat-ui/src/lib/types/todo.ts` (new) | — | Create. `TodoStatus = "pending" \| "in_progress" \| "completed"`. `Todo` interface (id, content, status, agent, completed_by_model, completed_at, notes). `TodoSection` interface (id, title, created_at, planned_by_model, planned_by_agent, todos). `TodoFile` interface (version, updated_at, updated_by, sections). |
+| 8 | `agent-chat-ui/src/components/thread/todos/index.tsx` (new) | — | Create. Right-side sidebar panel mirroring the left chat-history sidebar pattern (`index.tsx:346–369`). Contains: `TodoList` (progress bar: completed/total, percentage), `TodoItem` (status icons ○ ◉ ✓, color coding gray/amber/green, animate-pulse on in_progress, agent + model attribution display), `ProgressBar`. Fetches `GET /api/todos` every 3 seconds via polling (preserves the `["messages"]` streamMode perf win — no streamMode revert needed). |
+| 9 | `agent-chat-ui/src/components/thread/index.tsx` | header | Add a toggle button in the header (next to the chat-history toggle) that shows/hides the todos sidebar. Use `useQueryState("todosOpen", { defaultValue: false })` via nuqs (same pattern as `chatHistoryOpen`). |
+| 9 | `agent-chat-ui/src/components/thread/index.tsx` | right side | Add the todos sidebar as a right-side `motion.div` (mirroring lines 346–369 but on the right). Animate width/x based on `todosOpen` state. |
+| 10 | `agent-chat-ui/src/providers/Stream.tsx` | 29–58 | Add `todos?: TodoSection[]` to `StateType` and `UpdateType` (so the agent-inbox StateView auto-renders it and the type round-trip works). Import the `TodoSection` type from `lib/types/todo`. |
+
+#### Phase 5 — Tests + verification
+
+| # | Action |
+|---|---|
+| 11 | Restart LangGraph + Backend + Frontend (leave ComfyUI off). Run `backend/`: `python -m pytest tests/ -v`. Run `agent-chat-ui/`: `pnpm exec playwright test`. Run `agent-chat-ui/`: `npx tsc --noEmit`. All must pass. |
+
+---
+
+### What stays unchanged (perf wins from Performance / UI Lag Fix Plan preserved)
+
+- `streamMode: ["messages"]` — no revert to `["values"]`/`["updates"]`. The UI reads todos via HTTP polling, not the stream.
+- `streamSubgraphs: true` — kept.
+- `layout` prop removal on `<motion.div>` — kept.
+- TTS/STT leak fixes (`useTTS.ts`, `useSTT.ts`) — kept.
+- `useMemo` in `tool-calls.tsx` — kept.
+- Model tooltip on Auto selection — kept.
+
+---
+
+### Files touched (summary)
+
+| # | File | Action |
+|---|---|---|
+| 1 | `todos.json` (new, repo root) | Create — seed from HANDOFF.md |
+| 2 | `AGENTS.md` (new, repo root) | Create — protocol for OpenCode Desktop |
+| 3 | `backend/src/web_server.py` | Modify — add `GET /api/todos` |
+| 4 | `backend/src/chat_ui.py` | Modify — add `todos` to State, `_load_todos()`, supervisor reads file each turn, `run_jasper` passes todos through |
+| 5 | `backend/src/jasper_agent.py` | Modify — add `todos` to subgraph State, `_format_todos_for_prompt()`, inject todos into system prompt |
+| 6 | `agent-chat-ui/src/lib/types/todo.ts` (new) | Create — Todo types |
+| 7 | `agent-chat-ui/src/components/thread/todos/index.tsx` (new) | Create — right sidebar panel + TodoList + TodoItem + ProgressBar |
+| 8 | `agent-chat-ui/src/components/thread/index.tsx` | Modify — add right sidebar + header toggle button |
+| 9 | `agent-chat-ui/src/providers/Stream.tsx` | Modify — add `todos` to StateType/UpdateType |
+
+---
+
+### Seed data: parsing HANDOFF.md into todos.json
+
+The seed `todos.json` will contain 3 sections:
+
+**Section 1: "Original Plan (Phases 0-10)"**
+- `planned_by_model`: `"unknown"` (pre-dates this system)
+- `planned_by_agent`: `"seed-from-handoff"`
+- 11 todos (Phase 0 through Phase 10), most marked `completed` with `completed_by_model: "unknown"`.
+
+**Section 2: "Performance / UI Lag Fix Plan"** (HANDOFF.md lines 519–576)
+- `planned_by_model`: `"ollama-cloud/glm-5.2"`
+- `planned_by_agent`: `"opencode-desktop"`
+- 8 todos: 6 code changes marked `completed` (with `completed_by_model: "ollama-cloud/glm-5.2"`), 2 runtime items (ComfyUI, TTS lazy-load) marked `pending`.
+
+**Section 3: "Persistent Todo List"**
+- `planned_by_model`: `"ollama-cloud/glm-5.2"`
+- `planned_by_agent`: `"opencode-desktop"`
+- The todo-list feature work itself, marked `in_progress`.
+
+---

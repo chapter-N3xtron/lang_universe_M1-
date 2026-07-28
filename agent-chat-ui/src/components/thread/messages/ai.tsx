@@ -104,11 +104,13 @@ export function AssistantMessage({
   isLoading,
   handleRegenerate,
   onSpeak,
+  isSpeaking,
 }: {
   message: Message | undefined;
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
   onSpeak?: () => void;
+  isSpeaking?: boolean;
 }) {
   const content = message?.content ?? [];
   const contentString = getContentString(content);
@@ -211,6 +213,7 @@ export function AssistantMessage({
                 isAiMessage={true}
                 handleRegenerate={() => handleRegenerate(parentCheckpoint)}
                 onSpeak={onSpeak}
+                isSpeaking={isSpeaking}
               />
             </div>
           </>

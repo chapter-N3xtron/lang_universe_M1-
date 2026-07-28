@@ -13,6 +13,7 @@ The supervisor node uses Command for routing.  Specialist nodes use static
 edges back to supervisor.  This is the documented pattern.
 """
 
+import asyncio
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -60,7 +61,7 @@ def test_supervisor_routes_to_research():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-route-research"}}
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "Research the latest AI news"}],
                 "workspace": "/tmp",
@@ -69,7 +70,7 @@ def test_supervisor_routes_to_research():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
     # target_agent=research routes directly (bypasses approval), produces a response,
     # then supervisor re-runs and ends the turn (active_agent cleared).
@@ -95,7 +96,7 @@ def test_supervisor_audit_trail():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-audit-trail"}}
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "Research AI, then write code"}],
                 "workspace": "/tmp",
@@ -104,7 +105,7 @@ def test_supervisor_audit_trail():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
     assert len(result["handoff_history"]) >= 1
     assert result["handoff_history"][0]["to"] == "research"
@@ -126,7 +127,7 @@ def test_state_accumulation_across_turns():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-accumulation"}}
 
-        app.invoke(
+        asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "turn one"}],
                 "workspace": "/tmp",
@@ -135,9 +136,9 @@ def test_state_accumulation_across_turns():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "turn two"}],
                 "workspace": "/tmp",
@@ -146,7 +147,7 @@ def test_state_accumulation_across_turns():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
     contents = [m["content"] for m in result["messages"]]
     assert "turn one" in contents
@@ -173,7 +174,7 @@ def test_thread_isolation():
 
         def run_turns(thread_id: str, phrase: str):
             config = {"configurable": {"thread_id": thread_id}}
-            app.invoke(
+            asyncio.run(app.ainvoke(
                 {
                     "messages": [{"role": "user", "content": phrase}],
                     "workspace": "/tmp",
@@ -182,7 +183,7 @@ def test_thread_isolation():
                     "model": None,
                 },
                 config=config,
-            )
+            ))
             snapshot = app.get_state(config)
             return [m["content"] for m in snapshot.values["messages"]]
 
@@ -206,7 +207,7 @@ def test_supervisor_done_falls_back_to_jasper():
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-end-turn"}}
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "Hello"}],
                 "workspace": "/tmp",
@@ -215,7 +216,7 @@ def test_supervisor_done_falls_back_to_jasper():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
     # "done" now falls back to jasper → routes through approval → pending_approval=True
     assert result.get("pending_agent", "") == "jasper"

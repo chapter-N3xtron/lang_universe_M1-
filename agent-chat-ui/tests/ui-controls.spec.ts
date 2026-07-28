@@ -3,6 +3,13 @@ import { test, expect } from "@playwright/test";
 test.describe("UI controls render and respond", () => {
 
   test.beforeEach(async ({ page }) => {
+    // LangGraph SDK polls threads on mount; mock it so the Suspense layout resolves.
+    await page.route("http://127.0.0.1:8123/threads/search", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([]),
+      });
+    });
     await page.route("http://127.0.0.1:8000/api/models", async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -47,7 +54,7 @@ test.describe("UI controls render and respond", () => {
     const trigger = page.locator('button[aria-label="Select model"]');
     await expect(trigger).toBeVisible({ timeout: 10000 });
 
-    await expect(trigger).toHaveText("Default");
+    await expect(trigger).toHaveText("Auto");
 
     await trigger.click();
     const dropdown = page.locator('[data-slot="select-content"]');
@@ -114,7 +121,7 @@ test.describe("UI controls render and respond", () => {
 
     const trigger = page.locator('button[aria-label="Select voice"]');
     await expect(trigger).toBeVisible({ timeout: 10000 });
-    await expect(trigger).toHaveText("Default");
+    await expect(trigger).toHaveText("Auto");
 
     await trigger.click();
     const dropdown = page.locator('[data-slot="select-content"]');

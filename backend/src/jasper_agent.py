@@ -9,17 +9,38 @@ from src.llm import get_llm
 class State(TypedDict):
     messages: Annotated[list[dict], operator.add]
     jasper_response: str
+    todos: list[dict]
+
+
+def _format_todos_for_prompt(todos: list[dict]) -> str:
+    if not todos:
+        return "No todos currently tracked."
+    lines = []
+    for section in todos:
+        model = section.get("planned_by_model", "unknown")
+        lines.append(f"## {section['title']} (planned by {model})")
+        for t in section.get("todos", []):
+            mark = {"pending": "○", "in_progress": "◉", "completed": "✓"}.get(t["status"], "○")
+            model_tag = f" [done by {t['completed_by_model']}]" if t.get("completed_by_model") else ""
+            lines.append(f"  {mark} {t['content']}{model_tag}")
+    return "\n".join(lines)
 
 
 def jasper_agent(state: State):
     messages = state["messages"]
     history = get_conversation_history(messages)
+    todos_data = state.get("todos", [])
+    formatted_todos = _format_todos_for_prompt(todos_data)
 
     system_prompt = (
         "You are Jasper, a helpful daily-driver assistant. "
         "You can hand off tasks to OpenCode for coding/repo work, "
         "Research for web searches, or Magic Coder for unrestricted coding. "
-        "Be concise and friendly."
+        "Be concise and friendly.\n\n"
+        "You have access to the project's current todo list. "
+        "When the user asks about task status, what's been done, what model did what, "
+        "or what's pending, answer from the todo data below.\n\n"
+        f"CURRENT TODO LIST:\n{formatted_todos}"
     )
 
     try:

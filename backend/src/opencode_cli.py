@@ -1,5 +1,6 @@
 """Real OpenCode CLI integration via `opencode run --format json`."""
 
+import asyncio
 import json
 import os
 import shutil
@@ -210,3 +211,156 @@ def run_opencode(
         "events": events,
         "error": error,
     }
+
+
+async def run_opencode_stream(
+    message: str,
+    workspace: str | None = None,
+    model: str | None = None,
+    agent: str | None = None,
+    session_id: str | None = None,
+    title: str | None = None,
+    auto_approve: bool = False,
+    timeout: int = 300,
+    history: list | None = None,
+) -> dict:
+    """
+    Async streaming variant of run_opencode.
+
+    Yields parsed JSONL events as they arrive from the subprocess stdout.
+    For local Ollama models, falls back to sync chat_ollama and yields
+    a single text event followed by a complete event.
+
+    Yields:
+        dict with at least a ``type`` key:
+        - {"type": "text", "text": str, "session_id": str | None}
+        - {"type": "complete", "text": str, "session_id": str | None, "artifacts": list[str]}
+        - {"type": "error", "error": str}
+    """
+    model = model or _default_model()
+
+    if _is_local_ollama_model(model):
+        result = chat_ollama(
+            message=message,
+            model=model,
+            history=history,
+            timeout=timeout,
+        )
+        if result.get("text"):
+            yield {"type": "text", "text": result["text"], "session_id": None}
+        if result["success"]:
+            yield {"type": "complete", "text": result.get("text", ""), "session_id": None, "artifacts": []}
+        else:
+            yield {"type": "error", "error": result.get("error", "Ollama call failed")}
+        return
+
+    binary = _find_opencode_binary()
+    workspace = workspace or _default_workspace()
+    agent = agent or _default_agent()
+
+    cmd = [
+        binary,
+        "run",
+        message,
+        "--format", "json",
+        "--dir", workspace,
+        "--model", model,
+        "--agent", agent,
+    ]
+
+    if session_id:
+        cmd.extend(["--session", session_id, "--continue"])
+
+    if title:
+        cmd.extend(["--title", title])
+
+    if auto_approve:
+        cmd.append("--auto")
+
+    env = os.environ.copy()
+    opencode_bin_dir = str(Path(binary).parent)
+    if opencode_bin_dir not in env.get("PATH", ""):
+        env["PATH"] = f"{opencode_bin_dir}:{env.get('PATH', '')}"
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=workspace,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except Exception as e:
+        yield {"type": "error", "error": f"Failed to start opencode: {e}"}
+        return
+
+    if proc.stdout is None:
+        yield {"type": "error", "error": "No stdout from opencode subprocess"}
+        return
+
+    assert proc.stderr is not None
+
+    text_parts: list[str] = []
+    artifacts: list[str] = []
+    found_session_id: str | None = None
+    stderr_lines: list[str] = []
+
+    async def _read_stderr():
+        async for line in proc.stderr:
+            stderr_lines.append(line.decode("utf-8", errors="replace"))
+
+    stderr_task = asyncio.create_task(_read_stderr())
+
+    try:
+        async for line_byte in proc.stdout:
+            line = line_byte.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                if "Full output saved to:" in line:
+                    path = line.split("Full output saved to:", 1)[1].strip()
+                    artifacts.append(path)
+                continue
+
+            sid = event.get("sessionID") or event.get("session_id")
+            if sid:
+                found_session_id = sid
+
+            if event.get("type") == "text":
+                part = event.get("part", {})
+                t = part.get("text") if isinstance(part, dict) else None
+                if t:
+                    text_parts.append(t)
+                    yield {
+                        "type": "text",
+                        "text": t,
+                        "session_id": found_session_id,
+                    }
+    except asyncio.TimeoutError:
+        proc.kill()
+        yield {
+            "type": "error",
+            "error": f"opencode run timed out after {timeout}s",
+        }
+        return
+
+    await stderr_task
+    await proc.wait()
+
+    full_text = "\n\n".join(text_parts)
+    error = None
+    if proc.returncode and proc.returncode != 0:
+        err_tail = "".join(stderr_lines)[-2000:] if stderr_lines else ""
+        error = f"opencode exited with code {proc.returncode}. stderr: {err_tail}"
+
+    if error:
+        yield {"type": "error", "error": error}
+    else:
+        yield {
+            "type": "complete",
+            "text": full_text,
+            "session_id": found_session_id,
+            "artifacts": artifacts,
+        }

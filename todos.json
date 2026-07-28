@@ -1,0 +1,583 @@
+{
+  "version": 1,
+  "updated_at": "2026-07-28T04:30:00Z",
+  "updated_by": "opencode-desktop",
+  "sections": [
+    {
+      "id": "original-plan-phases-0-10",
+      "title": "Original Plan (Phases 0-10)",
+      "created_at": "2026-07-27T00:00:00Z",
+      "planned_by_model": "unknown",
+      "planned_by_agent": "seed-from-handoff",
+      "todos": [
+        {
+          "id": "phase-0-setup-env",
+          "content": "Phase 0: Set up project skeleton (backend + frontend + config)",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T00:30:00Z",
+          "notes": "Initial project scaffolding"
+        },
+        {
+          "id": "phase-1-workflow-state",
+          "content": "Phase 1: Workflow state — supervisor, routing, approval loop",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T01:00:00Z",
+          "notes": "Core graph structure with approval HITL"
+        },
+        {
+          "id": "phase-2-open-code-node",
+          "content": "Phase 2: OpenCode agent node — sandboxed coding agent",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T01:30:00Z",
+          "notes": "OpenCode subgraph with file operations"
+        },
+        {
+          "id": "phase-3-research-node",
+          "content": "Phase 3: Research agent node — web search + document analysis",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T02:00:00Z",
+          "notes": "Research subgraph with web fetch capabilities"
+        },
+        {
+          "id": "phase-4-tts-stt",
+          "content": "Phase 4: TTS (Kyutai Pocket) + STT (faster-whisper) integration",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T02:30:00Z",
+          "notes": "Voice I/O via FastAPI sidecar endpoints"
+        },
+        {
+          "id": "phase-5-models-list",
+          "content": "Phase 5: Model list — Ollama discovery + cloud default",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T03:00:00Z",
+          "notes": "Ollama model listing endpoint"
+        },
+        {
+          "id": "phase-6-stream-mode",
+          "content": "Phase 6: streamMode: [\"messages\"] — replace full state with message-only streaming",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T03:30:00Z",
+          "notes": "Perf optimization: message-only streaming"
+        },
+        {
+          "id": "phase-7-magic-coder",
+          "content": "Phase 7: Magic Coder agent node — image gen, ComfyUI, creative work",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T04:00:00Z",
+          "notes": "Magic Coder subgraph with ComfyUI integration"
+        },
+        {
+          "id": "phase-8-frontend-polish",
+          "content": "Phase 8: Frontend polish — thread management, chat history sidebar, UX",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T04:30:00Z",
+          "notes": "Thread management, history sidebar, UX improvements"
+        },
+        {
+          "id": "phase-9-websocket",
+          "content": "Phase 9: WebSocket streaming + UI artifacts system",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T05:00:00Z",
+          "notes": "WebSocket streaming and artifact rendering"
+        },
+        {
+          "id": "phase-10-refinement",
+          "content": "Phase 10: Final refinement — error handling, polish, production readiness",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "unknown",
+          "completed_at": "2026-07-27T05:30:00Z",
+          "notes": "Final polish and error handling improvements"
+        }
+      ]
+    },
+    {
+      "id": "performance-ui-lag-fix",
+      "title": "Performance / UI Lag Fix Plan",
+      "created_at": "2026-07-27T12:00:00Z",
+      "planned_by_model": "ollama-cloud/glm-5.2",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "stream-messages-mode",
+          "content": "Switch to streamMode: [\"messages\"] to avoid full state serialization",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T14:00:00Z",
+          "notes": "Changed from default to messages-only streaming"
+        },
+        {
+          "id": "remove-layout-prop",
+          "content": "Remove layout prop from motion.div to stop GPU re-layout per frame",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T14:05:00Z",
+          "notes": "Removed layout prop causing GPU re-layout"
+        },
+        {
+          "id": "usememo-tool-calls",
+          "content": "Wrap tool-calls.tsx in useMemo to avoid re-renders",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T14:10:00Z",
+          "notes": "useMemo optimization applied"
+        },
+        {
+          "id": "fix-tts-stt-leaks",
+          "content": "Fix TTS/STT hook cleanup and leak issues (useTTS.ts, useSTT.ts)",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T14:15:00Z",
+          "notes": "Memory leak fixes in voice hooks"
+        },
+        {
+          "id": "tooltip-model-info",
+          "content": "Add tooltip to Auto model selection showing what model is used",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T14:20:00Z",
+          "notes": "Tooltip added to model selector"
+        },
+        {
+          "id": "model-default-env",
+          "content": "Default model from env var OPENCODE_CLI_MODEL for Ollama",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T14:25:00Z",
+          "notes": "Environment variable fallback for model"
+        },
+        {
+          "id": "comfyui-off-default",
+          "content": "ComfyUI off by default — only enable when needed",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Avoid loading ComfyUI models on startup"
+        },
+        {
+          "id": "tts-lazy-load",
+          "content": "Lazy-load TTS engine — don't init on sidecar startup",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Defer TTS engine initialization until first request"
+        }
+      ]
+    },
+    {
+      "id": "persistent-todo-list",
+      "title": "Persistent Todo List",
+      "created_at": "2026-07-27T22:00:00Z",
+      "planned_by_model": "ollama-cloud/glm-5.2",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "create-todos-json",
+          "content": "Create todos.json seed file at repo root",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T22:30:00Z",
+          "notes": "Seed with 3 sections from HANDOFF.md"
+        },
+        {
+          "id": "create-agents-md",
+          "content": "Create AGENTS.md protocol document at repo root",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T22:30:00Z",
+          "notes": "Protocol schema and rules for OpenCode Desktop"
+        },
+        {
+          "id": "add-todos-api-endpoint",
+          "content": "Add GET /api/todos endpoint to FastAPI sidecar (web_server.py)",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T22:35:00Z",
+          "notes": "HTTP polling endpoint for UI to read todos"
+        },
+        {
+          "id": "mirror-todos-in-state",
+          "content": "Mirror todos.json into LangGraph State — add todos field, _load_todos(), supervisor reads file each turn",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T22:40:00Z",
+          "notes": "State mirror: file is master, state is per-turn copy"
+        },
+        {
+          "id": "jasper-todos-awareness",
+          "content": "Give Jasper awareness of todos — pass into subgraph, inject into system prompt",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T22:45:00Z",
+          "notes": "Jasper can answer Q&A about todo list"
+        },
+        {
+          "id": "frontend-todo-types",
+          "content": "Create frontend Todo types (lib/types/todo.ts)",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T22:50:00Z",
+          "notes": "TypeScript interfaces for Todo, TodoSection, TodoFile"
+        },
+        {
+          "id": "frontend-todo-sidebar",
+          "content": "Create right-side todo sidebar panel with polling, progress bar, status icons",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T22:55:00Z",
+          "notes": "UI component with 3s polling, status display"
+        },
+        {
+          "id": "frontend-todo-toggle",
+          "content": "Add todo sidebar toggle button in header + right-side motion.div in thread/index.tsx",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T23:00:00Z",
+          "notes": "Mirror left chat-history sidebar pattern on right"
+        },
+        {
+          "id": "verify-all-tests-pass",
+          "content": "Run all tests (pytest, playwright, tsc) and verify everything passes",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-27T23:30:00Z",
+          "notes": "33 pytest, 11 Playwright, tsc clean — all passing"
+        }
+      ]
+    },
+    {
+      "id": "opencode-ui-two-way-comms",
+      "title": "OpenCode Agent ↔ UI Two-Way Communication (Level 1)",
+      "created_at": "2026-07-28T00:00:00Z",
+      "planned_by_model": "deepseek-v4-flash-free",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "opencode-async-stream-cli",
+          "content": "Add async run_opencode_stream() to backend/src/opencode_cli.py using asyncio.create_subprocess_exec + async line iteration of JSONL. Yield parsed events as they arrive. Keep sync run_opencode() for backward compat.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T00:35:00Z",
+          "notes": "Added async def run_opencode_stream() at line 215 in opencode_cli.py"
+        },
+        {
+          "id": "opencode-async-node-streamwriter",
+          "content": "Make opencode_coding_agent async in backend/src/opencode_agent.py. Replace blocking call with async for event in run_opencode_stream(). Use get_stream_writer() to emit {type:opencode_status, step, tool} progress events and {type:opencode_text, text} deltas. Accumulate full text for final return message.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T00:40:00Z",
+          "notes": "Async opencode_coding_agent with get_stream_writer() custom events"
+        },
+        {
+          "id": "opencode-fix-model-forwarding",
+          "content": "In backend/src/chat_ui.py run_opencode wrapper: forward state['model'] into subgraph. Switch .invoke() to await .ainvoke(). Make run_opencode async def.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T01:45:00Z",
+          "notes": "Forwarded model, made run_opencode async, updated chat() to asyncio.run, fixed test to use ainvoke"
+        },
+        {
+          "id": "opencode-frontend-status-handler",
+          "content": "In agent-chat-ui/src/providers/Stream.tsx, extend onCustomEvent to handle opencode_status and opencode_text events. Add opencode_status?: string to StateType.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T00:45:00Z",
+          "notes": "Extended onCustomEvent, added opencode_status to StateType/UpdateType/CustomEventType"
+        },
+        {
+          "id": "opencode-frontend-status-indicator",
+          "content": "In agent-chat-ui/src/components/thread/index.tsx, add OpenCodeStatus badge reading stream.values.opencode_status.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T00:48:00Z",
+          "notes": "Added status badge in active-chat header showing OC: status"
+        },
+        {
+          "id": "opencode-stream-test",
+          "content": "Add backend/tests/test_opencode_stream.py with mock subprocess emitting JSONL lines. Verify run_opencode_stream yields events in order.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T02:10:00Z",
+          "notes": "3 tests: text + complete events, empty line skipping, error handling"
+        }
+      ]
+    },
+    {
+      "id": "simple-dark-mode",
+      "title": "Simple Dark Mode for Agent Chat UI",
+      "created_at": "2026-07-28T00:00:00Z",
+      "planned_by_model": "deepseek-v4-flash-free",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "darkmode-theme-provider",
+          "content": "Add ThemeProvider to layout.tsx with attribute='class' defaultTheme='system'",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T00:50:00Z",
+          "notes": "Wrapped children with ThemeProvider in layout.tsx"
+        },
+        {
+          "id": "darkmode-toggle-component",
+          "content": "Create theme-toggle.tsx component cycling light->dark->system",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T00:55:00Z",
+          "notes": "Created ThemeToggle with Sun/Moon/Monitor icons"
+        },
+        {
+          "id": "darkmode-toggle-placement",
+          "content": "Place ThemeToggle in both pre-chat and active-chat headers next to GitHub icon and todos toggle",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T01:00:00Z",
+          "notes": "Added to both header bars"
+        }
+      ]
+    },
+    {
+      "id": "tent-poles-memory-layer",
+      "title": "Tent Poles — Memory Layer with Tools + Dashboard",
+      "created_at": "2026-07-28T04:00:00Z",
+      "planned_by_model": "deepseek-v4-flash-free",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "tp-concept-design",
+          "content": "Design and document the Tent Poles memory layer: collaborative context compaction where Jasper proposes key load-bearing points (tent poles), user reviews/prioritizes, approved tent poles replace old messages. Concept doc with data structure, flow, storage, tools, UI, and open questions.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T04:00:00Z",
+          "notes": "Concept designed. Tent poles = structural key points (decisions, facts, preferences, open questions, constraints). User co-creates and prioritizes. Replaces narrative summarization with collaborative context curation."
+        },
+        {
+          "id": "tp-storage-layer",
+          "content": "Choose and implement storage layer for tent poles. Option A: JSON file + sidecar endpoint (like todos.json pattern, proven, survives restarts). Option B: LangGraph Store with semantic search (proper integration, cross-thread, but dev server Store is in-memory with hot-reload issue). QUESTION: Which storage approach?",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Open question: JSON file vs LangGraph Store. JSON is safer given hot-reload persistence issue. Store is better long-term for cross-thread semantic search. Consider JSON now, migrate to Store for production."
+        },
+        {
+          "id": "tp-react-loop",
+          "content": "Convert Jasper from single-node plain LLM call to ReAct agent loop with ToolNode. Required for tent pole tools AND for the search/code-viz tools. Steps: define @tool functions, bind_tools on LLM, add ToolNode, conditional edge (tool_calls → ToolNode, else END), bridge message formats at subgraph boundary. This is foundational — enables all tool-using features.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Infrastructure change. Same ReAct pattern needed for search tools (Tavily/Exa) and code viz tools (Tree-sitter/Code2flow/Mermaid). Build once, reuse for all tools."
+        },
+        {
+          "id": "tp-tool-definitions",
+          "content": "Define LangChain @tool functions for tent pole management: propose_tent_poles (Jasper identifies from conversation, presents for review), set_tent_pole (add with priority), update_tent_pole (edit/reprioritize), remove_tent_pole (drop), get_tent_poles (read current set). Tools read/write storage layer.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "propose_tent_poles is the collaborative moment — Jasper reviews conversation, extracts load-bearing points, user reviews. Other tools maintain tent poles as conversation evolves."
+        },
+        {
+          "id": "tp-dashboard-ui",
+          "content": "Build tent poles dashboard UI. QUESTION: Where should it live? Option A: third sidebar panel or tab in existing right sidebar (consistent with todo pattern). Option B: collapsible horizontal bar above chat (always visible, limited space). Option C: separate /dashboard route (most powerful, context switch). Option D: artifact panel (reuses existing, tied to messages). Also needs: pending review indicator, inline edit, drag-to-reorder, approve/reject buttons.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Open question: dashboard location. Consider: right sidebar already has Todos — could add Tent Poles as a second tab. Horizontal bar is always visible but cramped. Separate page is powerful but disconnected from chat."
+        },
+        {
+          "id": "tp-scoping-thread-vs-global",
+          "content": "Decide: Are tent poles per-thread or global? Per-thread means each conversation has its own set. Global means tent poles persist across conversations building a knowledge base over time. QUESTION: Which scope? Hybrid possible — global tent poles with per-thread overrides.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Open question: scope. Global enables cross-conversation memory (user preferences, project facts). Per-thread keeps conversations independent. Hybrid: global facts + per-thread decisions."
+        },
+        {
+          "id": "tp-trigger-logic",
+          "content": "Implement trigger logic for tent pole proposal. QUESTION: When should Jasper offer? Automatic at threshold (20+ messages)? Jasper notices it's losing track? User-triggered + auto-offer? User-triggered only? User said Jasper should ask and invite review — collaborative, not silent.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Open question: trigger. User intent: 'Jasper will ask and invite the user to review the summary to support shared understanding.'倾向于自动提议 + 用户可随时触发."
+        },
+        {
+          "id": "tp-context-compaction",
+          "content": "Implement context compaction: after user approves tent poles, replace old messages with tent poles as structured context block + keep recent 6-8 exchanges. Add trim_history() to agent_utils.py using langchain_core trim_messages with count_tokens_approximately, strategy='last'. Per-agent max_tokens: Jasper 4000, OpenCode 8000, Research 6000, Supervisor 2000.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Fixes context window overflow that causes Jasper to lose memory. trim_messages from LangGraph docs. Per-agent limits let each agent choose its memory budget."
+        },
+        {
+          "id": "tp-hot-reload-fix",
+          "content": "Stop LangGraph dev server hot-reload from killing in-memory checkpoints. Add --no-reload flag or configure in langgraph.json. Dev server uses langgraph_runtime_inmem._persistence with periodic flush to .langgraph_api/*.pckl. Hot-reload stops flush loop, loses unsaved checkpoints. Logs show '3 changes detected' every 10 seconds.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Root cause of Jasper losing memory mid-conversation. The dev server hot-reloads on file changes, wiping in-memory checkpoints before they're flushed to disk."
+        },
+        {
+          "id": "tp-search-tools-integration",
+          "content": "Wire search tool for Jasper (Tavily+Jina or Exa — pending user decision). Needs ReAct loop from tp-react-loop. Candidates researched: Tavily (iterative /research, spam filter, langchain-tavily), Exa (neural, docs/code focus, powers Cursor, langchain-exa), Jina Reader (URL→markdown, free tier). QUESTION: Tavily+Jina or Exa?",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "User requested pros/cons for Tavily+Jina vs Exa. Both presented. Decision pending. Search tool is separate from tent poles but shares the ReAct infrastructure."
+        },
+        {
+          "id": "tp-code-viz-tools-integration",
+          "content": "Wire code visualization tools for Jasper (Tree-sitter+Code2flow+Mermaid or CodeBoarding — pending user decision). Needs ReAct loop. Candidates: Tree-sitter (AST, MIT), Code2flow (call graphs, MIT), Mermaid (LLM-generated diagrams), CodeBoarding (agent-native, 2.4k stars). QUESTION: Which combo?",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "User requested pros/cons. All presented. Decision pending. Shares ReAct infrastructure with tent poles and search tools."
+        }
+      ]
+    },
+    {
+      "id": "ui-performance-fixes",
+      "title": "UI Performance — Slow/Freeze Diagnosis and Fix Plan",
+      "created_at": "2026-07-28T04:30:00Z",
+      "planned_by_model": "deepseek-v4-flash-free",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "ui-perf-diagnosis",
+          "content": "Diagnose and document root causes of UI slowness and freezing during agent responses. Three root causes identified: (1) No throttle on stream state updates — every LLM token triggers immediate React re-render. (2) MarkdownText re-parses entire accumulated content on every render — ReactMarkdown with remarkGfm + remarkMath + rehypeKatex is expensive per render. (3) onCustomEvent handler adds 'custom' to streamMode for ALL requests including Jasper — server sends custom events even when no agent emits them, adding SSE overhead.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T04:30:00Z",
+          "notes": "Root causes found via LangGraph SDK source code analysis. StreamManager (manager.js) processes every token: messages.slice() copies full array, creates new state object, calls notifyListeners. With throttle:50 added, renders batched but state mutations still run per-token. callbackStreamMode (stream.lgp.js:146) auto-adds 'custom' mode when onCustomEvent is set — overhead on every request."
+        },
+        {
+          "id": "ui-perf-throttle-applied",
+          "content": "Add throttle:50 to useTypedStream options in Stream.tsx. Batches React re-renders to max once per 50ms instead of every token. Applied — verify it helps with fast cloud models.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T04:30:00Z",
+          "notes": "Added to Stream.tsx:112. Throttle batches renders but not state mutations. SDK source: StreamManager.subscribe (manager.js:287) uses setTimeout to defer listener calls. Helps but does not solve the core issue of per-token object creation."
+        },
+        {
+          "id": "ui-perf-increase-throttle",
+          "content": "Consider increasing throttle from 50ms to 100-200ms. Reduces render frequency from 20fps to 5-10fps. Still smooth for reading streaming text but halves markdown re-parse cost. Simple one-line change in Stream.tsx.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Trade-off: higher throttle = less CPU but choppier text appearance. 150ms is a good middle ground. Test with fast cloud model to find sweet spot."
+        },
+        {
+          "id": "ui-perf-remove-text-custom-event",
+          "content": "Remove the onCustomEvent 'text' handler in Stream.tsx:128-129. Currently calls options.mutate() for every OpenCode text chunk, setting opencode_status='streaming' hundreds of times per second. The 'text' events are already streamed via messages stream mode. Only keep handlers for 'status', 'complete', 'error' events.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The 'text' custom event handler is redundant — text chunks arrive via messages stream mode. The mutate() call creates unnecessary state objects per token. Removing it eliminates per-token state mutation overhead during OpenCode runs."
+        },
+        {
+          "id": "ui-perf-memoize-markdown",
+          "content": "Memoize MarkdownText component more aggressively. Only render full markdown when message streaming is complete. During streaming, show raw text. When streaming completes, render parsed markdown. This eliminates per-render markdown re-parse during streaming.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "MarkdownText is already wrapped in memo() but children (content string) change every token during streaming. Approach: add a 'streaming' prop, render plain text when streaming=true, switch to ReactMarkdown when streaming=false. Requires passing isLoading state to message components."
+        },
+        {
+          "id": "ui-perf-lazy-load-katex",
+          "content": "Lazy-load remarkMath and rehypeKatex plugins in markdown-text.tsx. These are heavy and most messages contain no math. Load them only when LaTeX delimiters ($...$, $$...$$) are detected in content. Reduces initial parse cost for non-math messages significantly.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "katex.min.css and rehype-katex are expensive. Conditional loading: check content for math delimiters before passing plugins to ReactMarkdown. Could use React.lazy or dynamic import for the plugins."
+        },
+        {
+          "id": "ui-perf-nostream-tag",
+          "content": "Add langsmith:nostream tag to cloud models that stream too fast. Per Agent Chat UI README: .with_config({tags:['langsmith:nostream']}) prevents live token streaming. Response appears all at once after completion. Eliminates per-token overhead entirely. Toggle per model: use nostream for fast cloud models, allow streaming for local models.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Trade-off: no live feedback (user waits for full response) but zero freeze risk. Best for cloud models with high token throughput. The tag is checked by the LangGraph server — it suppresses on_chat_model_stream events for tagged models. Source: Agent Chat UI README 'Hiding Messages' section."
+        },
+        {
+          "id": "ui-perf-todo-polling-conditional",
+          "content": "Only poll /api/todos when the todo sidebar is open. Currently TodoList component polls every 3s regardless of visibility. The motion.div hides it with CSS but the component stays mounted and polling. Add a visibility check or conditionally mount/unmount based on todosOpen state.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "TodoList is always mounted inside motion.div (index.tsx:392). Even when sidebar is closed (x:300, off-screen), useEffect interval runs every 3s, calling fetch + setSections. This adds render pressure during streaming. Fix: pass todosOpen as prop, only set interval when open."
+        },
+        {
+          "id": "ui-perf-conditional-custom-mode",
+          "content": "Only add 'custom' to streamMode when the target agent is OpenCode. Currently callbackStreamMode always includes 'custom' because onCustomEvent is always set. Could split onCustomEvent into two: one for UIMessage (always), one for OpenCode status (conditional). Or conditionally set onCustomEvent based on selectedAgent.",
+          "status": "pending",
+          "agent": "opencode",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The SDK auto-adds 'custom' to stream mode when onCustomEvent != null (stream.lgp.js:146). This means even Jasper requests get 'custom' in streamMode. The server then sends custom events (none for Jasper) adding SSE parsing overhead. Fix: only register the OpenCode status handler when routing to OpenCode."
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const TTS_API_BASE = "http://127.0.0.1:8000";
 const TTS_SAMPLE_RATE = 24000;
@@ -30,13 +30,24 @@ export function useTTS() {
   const [speaking, setSpeaking] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const checkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
-    audioCtxRef.current?.close();
+    if (checkIntervalRef.current) {
+      clearInterval(checkIntervalRef.current);
+      checkIntervalRef.current = null;
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+      audioCtxRef.current.close().catch(() => {});
+    }
     audioCtxRef.current = null;
     setSpeaking(false);
   }, []);
+
+  useEffect(() => {
+    return () => stop();
+  }, [stop]);
 
   const speak = useCallback(
     async (text: string, voice = "alba") => {
@@ -45,6 +56,19 @@ export function useTTS() {
 
       const abort = new AbortController();
       abortRef.current = abort;
+
+      // Create AudioContext synchronously (before any await) so the browser
+      // sees it as user-gesture-initiated.  AudioContexts created after an
+      // await are suspended and will never play.
+      const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
+
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+      console.log("[TTS] AudioContext state:", ctx.state, "sampleRate:", ctx.sampleRate);
+
+      const deviceRate = ctx.sampleRate;
 
       try {
         const res = await fetch(`${TTS_API_BASE}/api/tts/stream`, {
@@ -59,13 +83,10 @@ export function useTTS() {
         const reader = res.body?.getReader();
         if (!reader) throw new Error("No response body");
 
-        const ctx = new AudioContext();
-        audioCtxRef.current = ctx;
-        const deviceRate = ctx.sampleRate;
-
         const decoder = new TextDecoder();
         let buffer = "";
         let nextTime = ctx.currentTime;
+        let chunkCount = 0;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -93,14 +114,20 @@ export function useTTS() {
             source.connect(ctx.destination);
             source.start(Math.max(ctx.currentTime, nextTime));
             nextTime = Math.max(nextTime, ctx.currentTime) + audioBuffer.duration;
+            chunkCount++;
           }
         }
 
+        console.log("[TTS] playback done, chunks:", chunkCount, "duration:", nextTime.toFixed(1) + "s");
+
         // Wait for playback to finish
         await new Promise<void>((resolve) => {
-          const check = setInterval(() => {
+          checkIntervalRef.current = setInterval(() => {
             if (ctx.currentTime >= nextTime) {
-              clearInterval(check);
+              if (checkIntervalRef.current) {
+                clearInterval(checkIntervalRef.current);
+                checkIntervalRef.current = null;
+              }
               resolve();
             }
           }, 100);
@@ -110,8 +137,12 @@ export function useTTS() {
           console.error("TTS error:", err);
         }
       } finally {
-        audioCtxRef.current?.close();
-        audioCtxRef.current = null;
+        if (ctx.state !== "closed") {
+          ctx.close().catch(() => {});
+        }
+        if (audioCtxRef.current === ctx) {
+          audioCtxRef.current = null;
+        }
         setSpeaking(false);
       }
     },

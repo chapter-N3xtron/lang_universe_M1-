@@ -1,5 +1,6 @@
 """Tests for durable conversation memory via LangGraph checkpointer."""
 
+import asyncio
 import importlib
 import sys
 from unittest.mock import MagicMock, patch
@@ -34,7 +35,7 @@ def test_thread_memory_accumulates_messages():
         thread_id = "test-memory-thread"
         config = {"configurable": {"thread_id": thread_id}}
 
-        app.invoke(
+        asyncio.run(app.ainvoke(
             {
                 "messages": [
                     {"role": "assistant", "content": "welcome"},
@@ -46,9 +47,9 @@ def test_thread_memory_accumulates_messages():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
-        result = app.invoke(
+        result = asyncio.run(app.ainvoke(
             {
                 "messages": [{"role": "user", "content": "turn two"}],
                 "workspace": "/tmp",
@@ -57,7 +58,7 @@ def test_thread_memory_accumulates_messages():
                 "model": None,
             },
             config=config,
-        )
+        ))
 
     contents = [m["content"] for m in result["messages"]]
     assert "turn one" in contents
@@ -82,7 +83,7 @@ def test_thread_isolation():
 
         def run_turns(thread_id: str, phrase: str):
             config = {"configurable": {"thread_id": thread_id}}
-            app.invoke(
+            asyncio.run(app.ainvoke(
                 {
                     "messages": [{"role": "user", "content": phrase}],
                     "workspace": "/tmp",
@@ -91,7 +92,7 @@ def test_thread_isolation():
                     "model": None,
                 },
                 config=config,
-            )
+            ))
             snapshot = app.get_state(config)
             return [m["content"] for m in snapshot.values["messages"]]
 
@@ -110,49 +111,45 @@ def test_opencode_session_id_persists_in_state(monkeypatch):
 
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
-        opencode_agent = importlib.import_module("src.opencode_agent")
+        opencode_cli = importlib.import_module("src.opencode_cli")
 
         captured = {}
 
-        def fake_run_opencode(*, session_id=None, **kwargs):
+        async def fake_run_opencode_stream(
+            message="", title="", workspace="", model="",
+            auto_approve=False, history=None, session_id=None,
+        ):
             captured["session_id_in"] = session_id
-            return {
-                "success": True,
-                "session_id": "sess-123",
-                "text": "ok",
-                "artifacts": [],
-                "events": [],
-                "error": None,
-            }
+            yield {"type": "complete", "session_id": "sess-123", "text": "ok", "artifacts": []}
 
-        monkeypatch.setattr(opencode_agent, "run_opencode", fake_run_opencode)
+        monkeypatch.setattr(
+            opencode_cli, "run_opencode_stream", fake_run_opencode_stream
+        )
 
         from src.chat_ui import create_chat_ui
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-opencode-session"}}
 
-        result1 = app.invoke(
-            {
-                "messages": [{"role": "user", "content": "first"}],
-                "workspace": "/tmp",
-                "target_agent": "opencode",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        )
+        async def run_turn(messages, config):
+            return await app.ainvoke(
+                {
+                    "messages": messages,
+                    "workspace": "/tmp",
+                    "target_agent": "opencode",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+
+        result1 = asyncio.run(run_turn(
+            [{"role": "user", "content": "first"}], config
+        ))
         assert captured["session_id_in"] is None
         assert result1["opencode_session_id"] == "sess-123"
 
         captured.clear()
-        app.invoke(
-            {
-                "messages": [{"role": "user", "content": "second"}],
-                "workspace": "/tmp",
-                "target_agent": "opencode",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        )
+        result2 = asyncio.run(run_turn(
+            [{"role": "user", "content": "second"}], config
+        ))
         assert captured["session_id_in"] == "sess-123"

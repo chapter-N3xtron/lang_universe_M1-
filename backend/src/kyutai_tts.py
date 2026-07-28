@@ -38,10 +38,6 @@ def _normalize_chunk(audio: np.ndarray, max_gain: float = 8.0) -> np.ndarray:
         return audio
     gain = min(TARGET_PEAK / peak, max_gain)
     return audio * gain
-    peak = np.max(np.abs(audio))
-    if peak < 1e-6:
-        return audio
-    return audio * (TARGET_PEAK / peak)
 
 
 def _fade_out(audio: np.ndarray, fade_samples: int = FADE_SAMPLES) -> np.ndarray:

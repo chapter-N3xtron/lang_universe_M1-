@@ -1,5 +1,5 @@
 import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
@@ -68,18 +68,17 @@ export function ToolCalls({
 export function ToolResult({ message }: { message: ToolMessage }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  let parsedContent: any;
-  let isJsonContent = false;
-
-  try {
-    if (typeof message.content === "string") {
-      parsedContent = JSON.parse(message.content);
-      isJsonContent = isComplexValue(parsedContent);
+  const [parsedContent, isJsonContent] = useMemo(() => {
+    try {
+      if (typeof message.content === "string") {
+        const parsed = JSON.parse(message.content);
+        return [parsed, isComplexValue(parsed)] as const;
+      }
+    } catch {
+      // Content is not JSON, use as is
     }
-  } catch {
-    // Content is not JSON, use as is
-    parsedContent = message.content;
-  }
+    return [message.content, false] as const;
+  }, [message.content]);
 
   const contentStr = isJsonContent
     ? JSON.stringify(parsedContent, null, 2)

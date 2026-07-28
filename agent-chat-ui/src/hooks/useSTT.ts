@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const STT_API_BASE = "http://127.0.0.1:8000";
 
@@ -14,6 +14,18 @@ export function useSTT() {
   const stopRequestedRef = useRef(false);
   const onResultRef = useRef<((text: string) => void) | null>(null);
   const onErrorRef = useRef<((err: Error) => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+      if (cachedStreamRef.current) {
+        cachedStreamRef.current.getTracks().forEach((t) => t.stop());
+        cachedStreamRef.current = null;
+      }
+    };
+  }, []);
 
   const getStream = useCallback(async (): Promise<MediaStream> => {
     if (cachedStreamRef.current && cachedStreamRef.current.getAudioTracks().some((t) => t.readyState === "live")) {

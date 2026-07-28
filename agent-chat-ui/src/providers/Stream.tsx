@@ -25,6 +25,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
+import type { TodoSection } from "@/lib/types/todo";
 
 export type StateType = {
   messages: Message[];
@@ -36,6 +37,8 @@ export type StateType = {
   workspace?: string;
   model?: string;
   mode?: string;
+  todos?: TodoSection[];
+  opencode_status?: string;
 };
 
 const useTypedStream = useStream<
@@ -52,8 +55,10 @@ const useTypedStream = useStream<
       workspace?: string;
       model?: string;
       mode?: string;
+      todos?: TodoSection[];
+      opencode_status?: string;
     };
-    CustomEventType: UIMessage | RemoveUIMessage;
+    CustomEventType: UIMessage | RemoveUIMessage | { type: string; content: string };
   }
 >;
 
@@ -104,6 +109,7 @@ const StreamSession = ({
     apiUrl,
     apiKey: apiKey ?? undefined,
     assistantId,
+    throttle: 50,
     ...(authScheme && {
       defaultHeaders: {
         "X-Auth-Scheme": authScheme,
@@ -117,6 +123,15 @@ const StreamSession = ({
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
         });
+      } else if ("type" in event && "content" in event) {
+        const { type, content } = event as { type: string; content: string };
+        if (type === "text") {
+          options.mutate((prev) => ({ ...prev, opencode_status: "streaming" }));
+        } else if (type === "complete") {
+          options.mutate((prev) => ({ ...prev, opencode_status: "complete" }));
+        } else if (type === "error") {
+          options.mutate((prev) => ({ ...prev, opencode_status: `error: ${content}` }));
+        }
       }
     },
     onThreadId: (id) => {

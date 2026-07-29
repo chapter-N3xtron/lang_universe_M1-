@@ -166,7 +166,7 @@ export function AssistantMessage({
           <>
             {contentString.length > 0 && (
               <div className="py-1">
-                <MarkdownText>{contentString}</MarkdownText>
+                <MarkdownText streaming={isLoading && isLastMessage}>{contentString}</MarkdownText>
               </div>
             )}
 

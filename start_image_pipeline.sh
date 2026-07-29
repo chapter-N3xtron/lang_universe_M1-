@@ -25,6 +25,9 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOGDIR="$ROOT/logs"
 PIDDIR="$ROOT/.pids"
 
+# Make sure Docker Desktop CLI is on PATH (Docker.app is not always linked into /usr/local/bin)
+export PATH="/Applications/Docker.app/Contents/Resources/bin:${PATH}"
+
 # ── config ────────────────────────────────────────────────────────────
 
 OLLAMA_PORT=11434
@@ -35,6 +38,11 @@ FRONTEND_PORT=3001
 
 COMFYUI_DIR="$HOME/fun-multi-character-chats/ComfyUI"
 COMFYUI_PYTHON="$HOME/fun-multi-character-chats/.venv/bin/python"
+
+# Set COMFYUI_AUTO_START=1 to launch ComfyUI on startup.
+# It is intentionally OFF by default so checkpoint/model loading
+# does not slow down the core chat startup.
+COMFYUI_AUTO_START="${COMFYUI_AUTO_START:-0}"
 
 ELEMENT_ELS="$HOME/Documents/EQ_COMP_VERB_RACK.els"
 ELEMENT_BIN="/Applications/Element.app/Contents/MacOS/Element"
@@ -240,7 +248,7 @@ start_langgraph() {
   _ensure_dirs
   echo "  Starting LangGraph (graph server)..."
   cd "$ROOT/backend"
-  nohup ./venv/bin/langgraph dev --port "$LANGGRAPH_PORT" --no-browser >> "$LOGDIR/langgraph.log" 2>&1 &
+  nohup ./venv/bin/langgraph up --port "$LANGGRAPH_PORT" --wait >> "$LOGDIR/langgraph.log" 2>&1 &
   echo $! > "$PIDDIR/langgraph.pid"
   disown
 
@@ -253,16 +261,15 @@ start_langgraph() {
 }
 
 stop_langgraph() {
-  if [ -f "$PIDDIR/langgraph.pid" ]; then
-    local pid
-    pid=$(cat "$PIDDIR/langgraph.pid")
-    if _pid_alive "$pid"; then
-      kill "$pid" 2>/dev/null
-      echo "  LangGraph (pid $pid) stopped"
-    fi
-    rm -f "$PIDDIR/langgraph.pid"
+  local project_name="langgraph-agent-chat-opencode"
+  
+  if docker compose -p "$project_name" down --remove-orphans 2>/dev/null; then
+    echo "  LangGraph stopped and removed"
+  else
+    echo "  LangGraph not running via docker compose"
   fi
-  lsof -ti:"$LANGGRAPH_PORT" 2>/dev/null | xargs kill 2>/dev/null || true
+  
+  rm -f "$PIDDIR/langgraph.pid" 2>/dev/null || true
 }
 
 status_langgraph() {
@@ -429,9 +436,11 @@ case "${1:-}" in
       start_ollama
       echo ""
 
-      echo "── ComfyUI (background) ──"
-      start_comfyui
-      echo ""
+      if [ "$COMFYUI_AUTO_START" = "1" ]; then
+        echo "── ComfyUI (background) ──"
+        start_comfyui
+        echo ""
+      fi
 
       # Audio routing must happen before Element so it picks up the correct device
       echo "── Audio chain ──"
@@ -451,7 +460,11 @@ case "${1:-}" in
     echo "  Frontend:  http://localhost:$FRONTEND_PORT"
     echo "  LangGraph: http://127.0.0.1:$LANGGRAPH_PORT"
     echo "  Backend:   http://127.0.0.1:$BACKEND_PORT"
-    echo "  ComfyUI:   http://127.0.0.1:$COMFYUI_PORT  (starting in background)"
+    if [ "$COMFYUI_AUTO_START" = "1" ]; then
+      echo "  ComfyUI:   http://127.0.0.1:$COMFYUI_PORT  (starting in background)"
+    else
+      echo "  ComfyUI:   off by default (set COMFYUI_AUTO_START=1 to enable)"
+    fi
     echo "  Ollama:    http://127.0.0.1:$OLLAMA_PORT   (starting in background)"
     echo "  Audio:     System output → BlackHole 2ch → Element → Speakers (background)"
     echo "────────────────────────────────────────"

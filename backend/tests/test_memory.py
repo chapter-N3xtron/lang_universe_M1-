@@ -5,6 +5,7 @@ import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 
@@ -13,9 +14,7 @@ def _compile(app):
 
 
 def _make_llm_response(content: str):
-    mock = MagicMock()
-    mock.content = content
-    return mock
+    return AIMessage(content=content)
 
 
 def _clear_src_modules():
@@ -27,6 +26,7 @@ def _clear_src_modules():
 def test_thread_memory_accumulates_messages():
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = _make_llm_response("done")
+    mock_llm.bind_tools.return_value = mock_llm
 
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
@@ -75,6 +75,7 @@ def test_thread_memory_accumulates_messages():
 def test_thread_isolation():
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = _make_llm_response("done")
+    mock_llm.bind_tools.return_value = mock_llm
 
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
@@ -108,6 +109,7 @@ def test_thread_isolation():
 def test_opencode_session_id_persists_in_state(monkeypatch):
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = _make_llm_response("done")
+    mock_llm.bind_tools.return_value = mock_llm
 
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):

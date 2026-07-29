@@ -67,7 +67,7 @@ function TodoSectionCard({ section }: { section: TodoSection }) {
   );
 }
 
-export function TodoList() {
+export function TodoList({ todosOpen }: { todosOpen?: boolean }) {
   const [sections, setSections] = useState<TodoSection[]>([]);
   const [error, setError] = useState(false);
 
@@ -87,10 +87,11 @@ export function TodoList() {
   }, []);
 
   useEffect(() => {
+    if (!todosOpen) return;
     fetchTodos();
     const interval = setInterval(fetchTodos, 3000);
     return () => clearInterval(interval);
-  }, [fetchTodos]);
+  }, [fetchTodos, todosOpen]);
 
   if (error) {
     return (

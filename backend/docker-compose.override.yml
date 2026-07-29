@@ -1,0 +1,7 @@
+services:
+  langgraph-api:
+    volumes:
+      - ..:/workspace
+    environment:
+      - OPENCODE_WORKSPACE=/workspace
+      - TODOS_FILE=/workspace/todos.json

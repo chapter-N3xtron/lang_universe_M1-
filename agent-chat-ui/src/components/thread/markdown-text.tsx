@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
-import { FC, memo, useState } from "react";
+import { FC, memo, useMemo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { SyntaxHighlighter } from "@/components/thread/syntax-highlighter";
 
@@ -14,6 +14,12 @@ import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 
 import "katex/dist/katex.min.css";
+
+const HAS_MATH_RE = /\$[^$]*\$/;
+
+function hasMathDelimiters(text: string): boolean {
+  return HAS_MATH_RE.test(text);
+}
 
 interface CodeHeaderProps {
   language?: string;
@@ -243,12 +249,27 @@ const defaultComponents: any = {
   },
 };
 
-const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
+const MarkdownTextImpl: FC<{ children: string; streaming?: boolean }> = ({ children, streaming }) => {
+  const plugins = useMemo(() => {
+    if (streaming) return { remark: [remarkGfm], rehype: [] };
+    const hasMath = hasMathDelimiters(children);
+    return {
+      remark: hasMath ? [remarkGfm, remarkMath] : [remarkGfm],
+      rehype: hasMath ? [rehypeKatex] : [],
+    };
+  }, [children, streaming]);
+
+  if (streaming) {
+    return (
+      <div className="markdown-content whitespace-pre-wrap">{children}</div>
+    );
+  }
+
   return (
     <div className="markdown-content">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={plugins.remark}
+        rehypePlugins={plugins.rehype}
         components={defaultComponents}
       >
         {children}

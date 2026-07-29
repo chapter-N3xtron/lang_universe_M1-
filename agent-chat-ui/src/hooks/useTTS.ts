@@ -112,6 +112,7 @@ export function useTTS() {
             const source = ctx.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(ctx.destination);
+            source.onended = () => source.disconnect();
             source.start(Math.max(ctx.currentTime, nextTime));
             nextTime = Math.max(nextTime, ctx.currentTime) + audioBuffer.duration;
             chunkCount++;
@@ -130,7 +131,7 @@ export function useTTS() {
               }
               resolve();
             }
-          }, 100);
+          }, 250);
         });
       } catch (err) {
         if ((err as Error).name !== "AbortError") {

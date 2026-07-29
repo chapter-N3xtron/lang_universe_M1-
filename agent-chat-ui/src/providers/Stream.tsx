@@ -69,6 +69,14 @@ async function sleep(ms = 4000) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Returns true if the active/target agent in stream state is OpenCode. */
+function isRoutingToOpenCode(values?: StateType): boolean {
+  if (!values) return false;
+  const active = (values.active_agent || "").toLowerCase();
+  const target = (values.target_agent || "").toLowerCase();
+  return active === "opencode" || target === "opencode";
+}
+
 async function checkGraphStatus(
   apiUrl: string,
   apiKey: string | null,
@@ -109,7 +117,7 @@ const StreamSession = ({
     apiUrl,
     apiKey: apiKey ?? undefined,
     assistantId,
-    throttle: 50,
+    throttle: 150,
     ...(authScheme && {
       defaultHeaders: {
         "X-Auth-Scheme": authScheme,
@@ -125,13 +133,13 @@ const StreamSession = ({
         });
       } else if ("type" in event && "content" in event) {
         const { type, content } = event as { type: string; content: string };
-        if (type === "text") {
-          options.mutate((prev) => ({ ...prev, opencode_status: "streaming" }));
-        } else if (type === "complete") {
-          options.mutate((prev) => ({ ...prev, opencode_status: "complete" }));
-        } else if (type === "error") {
-          options.mutate((prev) => ({ ...prev, opencode_status: `error: ${content}` }));
-        }
+        options.mutate((prev) => {
+          if (!isRoutingToOpenCode(prev)) return prev;
+          return {
+            ...prev,
+            opencode_status: type === "complete" ? "complete" : `error: ${content}`,
+          };
+        });
       }
     },
     onThreadId: (id) => {

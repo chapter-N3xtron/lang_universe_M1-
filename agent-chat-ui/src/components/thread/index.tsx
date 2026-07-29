@@ -162,6 +162,8 @@ export function Thread() {
   const [selectedWorkspace, setSelectedWorkspace] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([{ value: "", label: "Auto" }]);
+  const [modelProviders, setModelProviders] = useState<Record<string, string>>({});
+  const [defaultModel, setDefaultModel] = useState<string>("");
   const [modelsLoadError, setModelsLoadError] = useState(false);
   const [voicesLoadError, setVoicesLoadError] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState<string>("");
@@ -173,11 +175,15 @@ export function Thread() {
         return r.json();
       })
       .then((data: { default: string; models: { id: string; name: string; provider: string }[] }) => {
+        setDefaultModel(data.default);
+        const providers: Record<string, string> = {};
         const options: ModelOption[] = [{ value: "", label: "Auto" }];
         for (const m of data.models) {
           options.push({ value: m.id, label: m.name });
+          providers[m.id] = m.provider;
         }
         setModelOptions(options);
+        setModelProviders(providers);
       })
       .catch((err) => {
         setModelsLoadError(true);
@@ -278,6 +284,14 @@ export function Thread() {
     prevMessageLength.current = messages.length;
   }, [messages]);
 
+    function isCloudModel(modelId: string, providers: Record<string, string>, defaultId: string): boolean {
+    const id = modelId || defaultId;
+    if (!id) return false;
+    const provider = providers[id];
+    if (provider && provider !== "ollama") return true;
+    return false;
+  }
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     stopTts();
@@ -311,6 +325,7 @@ export function Thread() {
         streamMode: ["messages"],
         streamSubgraphs: true,
         streamResumable: true,
+        config: isCloudModel(selectedModel, modelProviders, defaultModel) ? { tags: ["langsmith:nostream"] } : undefined,
         optimisticValues: (prev) => ({
           ...prev,
           context,
@@ -389,7 +404,7 @@ export function Thread() {
         }
       >
         <div className="h-full overflow-hidden border-l bg-background" style={{ width: 300 }}>
-          <TodoList />
+          <TodoList todosOpen={todosOpen} />
         </div>
       </motion.div>
 

@@ -17,6 +17,7 @@ import asyncio
 import sys
 from unittest.mock import MagicMock, patch
 
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 
@@ -25,9 +26,7 @@ def _compile(app):
 
 
 def _make_llm_response(content: str):
-    mock = MagicMock()
-    mock.content = content
-    return mock
+    return AIMessage(content=content)
 
 
 def _create_mock_llm(responses):
@@ -40,6 +39,7 @@ def _create_mock_llm(responses):
 
     mock = MagicMock()
     mock.invoke.side_effect = mock_invoke
+    mock.bind_tools.return_value = mock
     return mock
 
 

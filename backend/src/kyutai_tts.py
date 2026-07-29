@@ -287,5 +287,8 @@ _tts_lock = asyncio.Lock()
 def get_tts_engine() -> PocketTTSEngine:
     global _tts_engine
     if _tts_engine is None:
+        # Lazy initialization: the sidecar does not load the TTS model or voices
+        # on startup. They are loaded on the first TTS request.
+        logger.info("Creating TTS engine (lazy init on first request)")
         _tts_engine = PocketTTSEngine("english")
     return _tts_engine

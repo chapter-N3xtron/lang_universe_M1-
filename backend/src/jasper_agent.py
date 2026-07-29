@@ -1,15 +1,28 @@
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_core.messages import SystemMessage
 from typing import Annotated, TypedDict
-import operator
 
-from src.agent_utils import get_user_query, get_conversation_history
+from src.agent_utils import get_user_query
 from src.llm import get_llm
+from src.jasper_tools import list_todos, read_file, web_search, read_url
 
 
 class State(TypedDict):
-    messages: Annotated[list[dict], operator.add]
+    messages: Annotated[list, add_messages]
     jasper_response: str
     todos: list[dict]
+
+
+ACTIVE_TOOLS = [list_todos, read_file, read_url]
+
+def _active_tools():
+    """Return tools available to Jasper, checking env at runtime."""
+    tools = [list_todos, read_file, read_url]
+    if __import__("os").getenv("TAVILY_API_KEY"):
+        tools.append(web_search)
+    return tools
 
 
 def _format_todos_for_prompt(todos: list[dict]) -> str:
@@ -26,26 +39,25 @@ def _format_todos_for_prompt(todos: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def jasper_agent(state: State):
+def call_model(state: State):
     messages = state["messages"]
-    history = get_conversation_history(messages)
     todos_data = state.get("todos", [])
-    formatted_todos = _format_todos_for_prompt(todos_data)
-
-    system_prompt = (
-        "You are Jasper, a helpful daily-driver assistant. "
-        "You can hand off tasks to OpenCode for coding/repo work, "
-        "Research for web searches, or Magic Coder for unrestricted coding. "
-        "Be concise and friendly.\n\n"
-        "You have access to the project's current todo list. "
-        "When the user asks about task status, what's been done, what model did what, "
-        "or what's pending, answer from the todo data below.\n\n"
-        f"CURRENT TODO LIST:\n{formatted_todos}"
-    )
 
     try:
-        llm = get_llm()
-        response = llm.invoke([{"role": "system", "content": system_prompt}] + history)
+        llm = get_llm().bind_tools(_active_tools())
+        formatted_todos = _format_todos_for_prompt(todos_data)
+        system_prompt = (
+            "You are Jasper, a helpful daily-driver assistant. "
+            "You can hand off tasks to OpenCode for coding/repo work, "
+            "Research for web searches, or Magic Coder for unrestricted coding. "
+            "Be concise and friendly.\n\n"
+            "You have access to tools you can use to help the user. "
+            "When the user asks about task status, what's been done, what model did what, "
+            "or what's pending, use the list_todos tool.\n\n"
+            f"CURRENT TODO LIST:\n{formatted_todos}"
+        )
+        full_messages = [SystemMessage(content=system_prompt)] + list(messages)
+        response = llm.invoke(full_messages)
         content = response.content
     except Exception:
         user_text = get_user_query(messages)
@@ -55,19 +67,19 @@ def jasper_agent(state: State):
             f"I can hand this off to OpenCode for repo work or Research for web tasks. "
             f"Use the agent selector above to choose who should handle it."
         )
+        return {"messages": [{"role": "assistant", "content": content}], "jasper_response": content}
 
-    return {"messages": [{"role": "assistant", "content": content}], "jasper_response": content}
+    result = {"messages": [response]}
+    if not response.tool_calls:
+        result["jasper_response"] = content
+    return result
 
 
 def create_jasper_graph():
     graph = StateGraph(State)
-    graph.add_node("jasper_agent", jasper_agent)
-    graph.add_edge(START, "jasper_agent")
-    graph.add_edge("jasper_agent", END)
+    graph.add_node("call_model", call_model)
+    graph.add_node("tools", ToolNode(_active_tools()))
+    graph.add_conditional_edges("call_model", tools_condition)
+    graph.add_edge("tools", "call_model")
+    graph.add_edge(START, "call_model")
     return graph.compile()
-
-
-if __name__ == "__main__":
-    app = create_jasper_graph()
-    result = app.invoke({"messages": [{"role": "user", "content": "Hello! What can you do?"}]})
-    print(result["jasper_response"])

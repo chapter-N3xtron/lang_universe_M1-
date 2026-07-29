@@ -8,6 +8,8 @@ from typing import Annotated, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+
 from src.agent_utils import get_conversation_history
 from src.jasper_agent import create_jasper_graph
 from src.llm import get_llm
@@ -176,6 +178,24 @@ def approval_node(state: State):
     )
 
 
+def _base_messages_to_dicts(messages: list) -> list[dict]:
+    role_map = {"human": "user", "ai": "assistant", "tool": "tool", "system": "system"}
+    result = []
+    for m in messages:
+        if isinstance(m, dict):
+            result.append(m)
+            continue
+        msg_type = getattr(m, "type", "")
+        role = role_map.get(msg_type, msg_type)
+        entry = {"role": role, "content": getattr(m, "content", "")}
+        if role == "assistant" and hasattr(m, "tool_calls") and m.tool_calls:
+            entry["tool_calls"] = m.tool_calls
+        if role == "tool":
+            entry["tool_call_id"] = getattr(m, "tool_call_id", "")
+        result.append(entry)
+    return result
+
+
 def create_chat_ui():
     graph = StateGraph(State)
 
@@ -185,8 +205,10 @@ def create_chat_ui():
     magic_coder_app = create_magic_coder_graph()
 
     async def run_jasper(state):
+        os.environ["OPENCODE_WORKSPACE"] = state.get("workspace", os.getcwd())
         result = await jasper_app.ainvoke({"messages": state["messages"], "todos": state.get("todos", [])})
-        return {"messages": result["messages"]}
+        outer_messages = _base_messages_to_dicts(result["messages"])
+        return {"messages": outer_messages}
 
     async def run_opencode(state):
         result = await opencode_app.ainvoke({

@@ -123,3 +123,66 @@ def test_history_returns_empty_list_when_no_messages():
 def test_history_ignores_non_dict():
     msgs = [42, None, {"role": "user", "content": "valid"}]
     assert get_conversation_history(msgs) == [{"role": "user", "content": "valid"}]
+
+
+# ---------------------------------------------------------------------------
+# trim_history
+# ---------------------------------------------------------------------------
+
+def test_trim_history_under_budget():
+    from src.agent_utils import trim_history
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ]
+    result = trim_history(msgs, max_tokens=4000)
+    assert result == msgs
+
+
+def test_trim_history_drops_oldest():
+    from src.agent_utils import trim_history
+    msgs = [{"role": "user", "content": f"msg {i}"} for i in range(50)]
+    result = trim_history(msgs, max_tokens=50)
+    assert len(result) < len(msgs)
+    assert "msg 0" not in result  # oldest should be dropped
+
+
+def test_trim_history_empty():
+    from src.agent_utils import trim_history
+    assert trim_history([], max_tokens=100) == []
+
+
+def test_trim_history_preserves_tool_pairs():
+    from src.agent_utils import trim_history
+    msgs = [
+        {"role": "user", "content": "old question"},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "user", "content": "use file tool"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"name": "read_file", "args": {"file_path": "x.txt"}}],
+        },
+        {"role": "tool", "content": "file contents", "name": "read_file"},
+        {"role": "assistant", "content": "here is the content"},
+    ]
+    result = trim_history(msgs, max_tokens=2000)
+    tool_call_idx = None
+    tool_result_idx = None
+    for i, m in enumerate(result):
+        if m.get("tool_calls"):
+            tool_call_idx = i
+        if m.get("role") == "tool":
+            tool_result_idx = i
+    if tool_call_idx is not None:
+        assert tool_result_idx is not None, "Tool result must exist if tool call exists"
+        assert tool_result_idx > tool_call_idx, "Tool result must follow tool call"
+
+
+def test_trim_history_keeps_at_least_one_group():
+    from src.agent_utils import trim_history
+    msgs = [
+        {"role": "user", "content": "hello"},
+    ]
+    result = trim_history(msgs, max_tokens=1)
+    assert len(result) == 1

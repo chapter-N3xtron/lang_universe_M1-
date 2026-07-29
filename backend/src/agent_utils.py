@@ -12,6 +12,8 @@ Messages arrive as dicts with either LangGraph SDK format
 
 from typing import TypedDict
 
+from langchain_core.messages import trim_messages
+
 
 class AgentState(TypedDict, total=False):
     messages: list[dict]
@@ -59,3 +61,60 @@ def get_conversation_history(messages: list[dict]) -> list[dict]:
         if role in ("user", "assistant"):
             result.append({"role": role, "content": m.get("content", "")})
     return result
+
+
+def trim_history(messages: list, max_tokens: int = 4000) -> list:
+    """Trim conversation history to fit within max_tokens while preserving tool-call/result pairs.
+
+    Tool-call groups (an AIMessage with tool_calls followed by its ToolMessages)
+    are treated as atomic units — they are never split during trimming.
+    Keeps the most recent messages and drops from the start of the conversation.
+    """
+    if not messages:
+        return messages
+
+    # Group messages into atomic units
+    groups = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        content = msg if isinstance(msg, dict) else {}
+        is_tool_call = content.get("role") == "assistant" and bool(content.get("tool_calls", []))
+
+        if isinstance(msg, dict) and is_tool_call:
+            group = [msg]
+            i += 1
+            # Collect following ToolMessages that belong to this tool call
+            while i < len(messages):
+                next_msg = messages[i]
+                next_role = next_msg.get("role") if isinstance(next_msg, dict) else ""
+                if next_role == "tool":
+                    group.append(next_msg)
+                    i += 1
+                else:
+                    break
+            groups.append(group)
+        else:
+            groups.append([msg])
+            i += 1
+
+    # Estimate tokens per message
+    def estimate(msg: dict) -> int:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            return len(content) // 4 + 10
+        return 20
+
+    def group_tokens(group: list) -> int:
+        return sum(estimate(m) for m in group)
+
+    total = sum(group_tokens(g) for g in groups)
+    if total <= max_tokens:
+        return messages
+
+    # Drop groups from the start until we fit
+    kept = groups[:]
+    while len(kept) > 1 and sum(group_tokens(g) for g in kept) > max_tokens:
+        kept.pop(0)
+
+    return [m for g in kept for m in g]

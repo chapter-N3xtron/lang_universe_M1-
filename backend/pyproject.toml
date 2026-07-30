@@ -1,8 +1,8 @@
 [project]
-name = "langgraph-agent-chat-opencode"
+name = "langgraph-agent-chat-deep-agents"
 version = "1.0.0"
-description = "Multi-agent system with LangGraph, Chat UI, and OpenCode CLI"
-requires-python = ">=3.10"
+description = "Multi-agent system with LangGraph, Chat UI, and Deep Agents"
+requires-python = ">=3.11,<4"
 dependencies = [
     "langgraph>=1.2.0,<2",
     "langgraph-checkpoint-sqlite>=3.0.3,<4",
@@ -15,20 +15,25 @@ dependencies = [
     "langchain-tavily>=0.2.18,<1",
     "firecrawl-py>=1.0.0",
     "langchain-ollama>=0.2.0,<1",
+    "langchain-huggingface>=1.2.2,<2",
+    "deepagents==0.7.0b2",
     "fastapi>=0.115.0,<1",
     "uvicorn[standard]>=0.32.0,<1",
     "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+sidecar = [
     "kokoro>=0.7.16",
     "soundfile>=0.12.0",
     "numpy>=1.26.0,<3",
     "faster-whisper>=1.0.0",
     "python-multipart>=0.0.20",
 ]
-
-[project.optional-dependencies]
 dev = [
     "ruff>=0.8.0",
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
 ]
 
 [tool.ruff]
@@ -58,4 +63,5 @@ indent-style = "space"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-asyncio>=0.24.0",
 ]

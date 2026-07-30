@@ -5,16 +5,15 @@ import os
 from pathlib import Path
 from typing import Annotated, TypedDict
 
-from langgraph.graph import END, START, StateGraph
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph import START, StateGraph
 from langgraph.types import Command, interrupt
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
-
 from src.agent_utils import get_conversation_history
+from src.coding_agent import create_coding_agent_graph
 from src.jasper_agent import create_jasper_graph
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
-from src.opencode_agent import create_opencode_graph
 from src.research_agent import create_research_graph
 
 
@@ -24,7 +23,12 @@ class State(TypedDict):
     target_agent: str
     mode: str
     model: str
-    opencode_session_id: str
+    execution_mode: str
+    thread_identity: str
+    user_identity: str
+    coding_session_id: str
+    coding_status: str
+    coding_events: list[dict]
     active_agent: str
     handoff_history: Annotated[list[dict], operator.add]
     decision_log: Annotated[list[dict], operator.add]
@@ -46,7 +50,9 @@ def _load_todos() -> list[dict]:
 
 
 AGENT_ROUTING = {
-    "opencode": "opencode",
+    "coding": "coding",
+    "deep-agent": "coding",
+    "deepagents": "coding",
     "research": "research",
     "jasper": "jasper",
     "magic-coder": "magic-coder",
@@ -58,19 +64,19 @@ SUPERVISOR_PROMPT = """You are a supervisor agent managing a team of specialists
 
 Available specialists:
 - jasper: general daily assistant, ticketing, record keeping, friendly conversation
-- opencode: coding, repository work, data visualization, file operations
+- coding: repository analysis and coding work through Deep Agents
 - research: web research, essay analysis, structured Q&A, document breakdown
 - magic-coder: image generation, ComfyUI workflows, creative work, character creation
 
 Rules:
 1. If the user explicitly asks for a specific agent, route to that agent.
-2. If the user's request involves coding, repos, or data viz, route to opencode.
+2. If the user's request involves coding or repositories, route to coding.
 3. If the user's request involves research, web search, or document analysis, route to research.
 4. If the user's request involves image generation, ComfyUI, or creative work, route to magic-coder.
 5. For general conversation, questions, or assistance, route to jasper.
 6. If the task appears complete and no further specialist work is needed, reply with "done".
 
-Reply with ONLY the specialist name (jasper, opencode, research, magic-coder) or "done". No other text."""
+Reply with ONLY the specialist name (jasper, coding, research, magic-coder) or "done". No other text."""
 
 
 def supervisor_node(state: State):
@@ -200,52 +206,76 @@ def create_chat_ui():
     graph = StateGraph(State)
 
     jasper_app = create_jasper_graph()
-    opencode_app = create_opencode_graph()
+    coding_app = create_coding_agent_graph()
     research_app = create_research_graph()
     magic_coder_app = create_magic_coder_graph()
 
     async def run_jasper(state):
-        os.environ["OPENCODE_WORKSPACE"] = state.get("workspace", os.getcwd())
+        os.environ["AGENT_WORKSPACE"] = state.get("workspace", os.getcwd())
+        input_count = len(state["messages"])
         result = await jasper_app.ainvoke({"messages": state["messages"], "todos": state.get("todos", [])})
-        outer_messages = _base_messages_to_dicts(result["messages"])
+        new_messages = result["messages"][input_count:]
+        outer_messages = _base_messages_to_dicts(new_messages)
         return {"messages": outer_messages}
 
-    async def run_opencode(state):
-        result = await opencode_app.ainvoke({
-            "messages": state["messages"],
-            "workspace": state.get("workspace"),
-            "mode": state.get("mode", "live"),
-            "model": state.get("model"),
-            "opencode_session_id": state.get("opencode_session_id"),
-        })
-        return {
-            "messages": result["messages"],
-            "opencode_session_id": result.get("opencode_session_id"),
+    async def run_coding(state, config: RunnableConfig):
+        input_count = len(state["messages"])
+        configurable = config.get("configurable", {})
+        result = await coding_app.ainvoke(
+            {
+                "messages": state["messages"],
+                "workspace": state.get("workspace"),
+                "execution_mode": state.get(
+                    "execution_mode", state.get("mode", "read_only")
+                ),
+                "model": state.get("model"),
+                "thread_identity": state.get("thread_identity")
+                or configurable.get("thread_id", ""),
+                "user_identity": state.get("user_identity")
+                or configurable.get("user_id")
+                or configurable.get("owner_id")
+                or "anonymous",
+                "coding_session_id": state.get("coding_session_id")
+                or "",
+            },
+            config=config,
+        )
+        new_messages = result["messages"][input_count:]
+        update = {
+            "messages": _base_messages_to_dicts(new_messages),
+            "coding_session_id": result.get("coding_session_id", ""),
+            "coding_status": result.get("coding_status", ""),
+            "coding_events": result.get("coding_events", []),
         }
+        return update
 
     async def run_research(state):
+        input_count = len(state["messages"])
         result = await research_app.ainvoke({"messages": state["messages"]})
-        return {"messages": result["messages"]}
+        new_messages = result["messages"][input_count:]
+        return {"messages": _base_messages_to_dicts(new_messages)}
 
     async def run_magic_coder_node(state):
+        input_count = len(state["messages"])
         result = await magic_coder_app.ainvoke({
             "messages": state["messages"],
             "workspace": state.get("workspace"),
             "mode": state.get("mode", "live"),
             "model": state.get("model"),
         })
-        return {"messages": result["messages"]}
+        new_messages = result["messages"][input_count:]
+        return {"messages": _base_messages_to_dicts(new_messages)}
 
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("approval", approval_node)
     graph.add_node("jasper", run_jasper)
-    graph.add_node("opencode", run_opencode)
+    graph.add_node("coding", run_coding)
     graph.add_node("research", run_research)
     graph.add_node("magic-coder", run_magic_coder_node)
 
     graph.add_edge(START, "supervisor")
 
-    for specialist in ["jasper", "opencode", "research", "magic-coder"]:
+    for specialist in ["jasper", "coding", "research", "magic-coder"]:
         graph.add_edge(specialist, "supervisor")
 
     return graph
@@ -267,7 +297,7 @@ async def chat():
     print(f"{dark_mode['header']}{'=' * 70}{dark_mode['reset']}")
     print(f"{dark_mode['header']}  LangGraph Agent Chat UI - Supervisor Mode{dark_mode['reset']}")
     print(f"{dark_mode['header']}{'=' * 70}{dark_mode['reset']}")
-    print(f"{dark_mode['dim']}  Agents: Jasper | OpenCode | Magic Coder | Research{dark_mode['reset']}")
+    print(f"{dark_mode['dim']}  Agents: Jasper | Coding | Magic Coder | Research{dark_mode['reset']}")
     print(f"{dark_mode['dim']}  Type 'quit' to exit | 'clear' to clear history{dark_mode['reset']}")
     print(f"{dark_mode['header']}{'=' * 70}{dark_mode['reset']}\n")
 

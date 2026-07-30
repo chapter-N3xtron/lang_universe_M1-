@@ -37,9 +37,38 @@ export type StateType = {
   workspace?: string;
   model?: string;
   mode?: string;
+  execution_mode?: "read_only" | "approval";
   todos?: TodoSection[];
-  opencode_status?: string;
+  coding_status?: string;
+  coding_events?: CodingEvent[];
+  coding_text_preview?: string;
+  coding_event_sequence?: number;
+  coding_session_id?: string;
 };
+
+export type CodingEvent = {
+  type: "coding_event";
+  version: 1;
+  session_id: string;
+  sequence: number;
+  kind:
+    | "status"
+    | "text"
+    | "tool"
+    | "file"
+    | "plan"
+    | "subagent"
+    | "approval"
+    | "error";
+  status: string;
+  data: Record<string, unknown>;
+};
+
+function isCodingEvent(event: unknown): event is CodingEvent {
+  if (!event || typeof event !== "object") return false;
+  const candidate = event as Partial<CodingEvent>;
+  return candidate.type === "coding_event" && candidate.version === 1;
+}
 
 const useTypedStream = useStream<
   StateType,
@@ -55,26 +84,21 @@ const useTypedStream = useStream<
       workspace?: string;
       model?: string;
       mode?: string;
+      execution_mode?: "read_only" | "approval";
       todos?: TodoSection[];
-      opencode_status?: string;
+      coding_status?: string;
+      coding_events?: CodingEvent[];
+      coding_session_id?: string;
     };
-    CustomEventType: UIMessage | RemoveUIMessage | { type: string; content: string };
+    CustomEventType: UIMessage | RemoveUIMessage | CodingEvent;
   }
 >;
 
-type StreamContextType = ReturnType<typeof useTypedStream>;
+export type StreamContextType = ReturnType<typeof useTypedStream>;
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
 async function sleep(ms = 4000) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Returns true if the active/target agent in stream state is OpenCode. */
-function isRoutingToOpenCode(values?: StateType): boolean {
-  if (!values) return false;
-  const active = (values.active_agent || "").toLowerCase();
-  const target = (values.target_agent || "").toLowerCase();
-  return active === "opencode" || target === "opencode";
 }
 
 async function checkGraphStatus(
@@ -131,13 +155,39 @@ const StreamSession = ({
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
         });
-      } else if ("type" in event && "content" in event) {
-        const { type, content } = event as { type: string; content: string };
+      } else if (isCodingEvent(event)) {
         options.mutate((prev) => {
-          if (!isRoutingToOpenCode(prev)) return prev;
+          const startsRun =
+            event.kind === "status" && event.status === "running";
+          const sameSession = prev.coding_session_id === event.session_id;
+          if (
+            !startsRun &&
+            sameSession &&
+            event.sequence <= (prev.coding_event_sequence ?? -1)
+          )
+            return prev;
+          const terminal =
+            event.kind === "status" &&
+            ["completed", "cancelled"].includes(event.status);
+          const text =
+            event.kind === "text" && typeof event.data.content === "string"
+              ? event.data.content
+              : "";
           return {
             ...prev,
-            opencode_status: type === "complete" ? "complete" : `error: ${content}`,
+            coding_session_id: event.session_id,
+            coding_event_sequence: event.sequence,
+            coding_status: event.kind === "error" ? "error" : event.status,
+            coding_events: [
+              ...(startsRun ? [] : (prev.coding_events ?? [])),
+              event,
+            ].slice(-32),
+            coding_text_preview:
+              terminal || event.kind === "error"
+                ? ""
+                : `${startsRun ? "" : (prev.coding_text_preview ?? "")}${text}`.slice(
+                    -16384,
+                  ),
           };
         });
       }

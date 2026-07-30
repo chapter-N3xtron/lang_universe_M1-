@@ -1,0 +1,387 @@
+"""Security and human-approval tests for the Deep Agents coding backend."""
+
+import asyncio
+from pathlib import Path
+
+import pytest
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import START, StateGraph
+from langgraph.types import Command
+from pydantic import PrivateAttr
+
+
+class ToolCallingModel(BaseChatModel):
+    _responses: list[AIMessage] = PrivateAttr()
+
+    def __init__(self, responses):
+        super().__init__()
+        self._responses = list(responses)
+
+    @property
+    def _llm_type(self):
+        return "security-test"
+
+    def bind_tools(self, _tools, **_kwargs):
+        return self
+
+    def _generate(self, _messages, stop=None, run_manager=None, **_kwargs):
+        return ChatResult(
+            generations=[ChatGeneration(message=self._responses.pop(0))]
+        )
+
+
+def _write_model(file_path="/approved.txt", content="approved"):
+    return ToolCallingModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "approved_write_file",
+                        "args": {"file_path": file_path, "content": content},
+                        "id": "write-1",
+                    }
+                ],
+            ),
+            AIMessage(content="finished"),
+        ]
+    )
+
+
+def _approval_app(monkeypatch, tmp_path: Path, model):
+    from src import coding_agent
+
+    monkeypatch.setattr(coding_agent, "get_coding_llm", lambda _name: model)
+    return coding_agent._build_deep_agent(
+        tmp_path,
+        None,
+        execution_mode="approval",
+        checkpointer=InMemorySaver(),
+    )
+
+
+def _first_interrupt(app, thread_id: str):
+    config = {"configurable": {"thread_id": thread_id}}
+    result = asyncio.run(
+        app.ainvoke(
+            {"messages": [{"role": "user", "content": "write the file"}]},
+            config=config,
+        )
+    )
+    assert len(result["__interrupt__"]) == 1
+    return config, result["__interrupt__"][0].value
+
+
+def test_approval_executes_workspace_confined_write(monkeypatch, tmp_path):
+    app = _approval_app(monkeypatch, tmp_path, _write_model())
+    config, request = _first_interrupt(app, "approve-write")
+
+    assert request["action_requests"][0]["name"] == "approved_write_file"
+    asyncio.run(
+        app.ainvoke(
+            Command(resume={"decisions": [{"type": "approve"}]}), config=config
+        )
+    )
+
+    assert (tmp_path / "approved.txt").read_text() == "approved"
+
+
+def test_edit_decision_is_revalidated_and_writes_edited_action(monkeypatch, tmp_path):
+    app = _approval_app(monkeypatch, tmp_path, _write_model())
+    config, _request = _first_interrupt(app, "edit-write")
+
+    decision = {
+        "type": "edit",
+        "edited_action": {
+            "name": "approved_write_file",
+            "args": {"file_path": "/edited.txt", "content": "edited"},
+        },
+    }
+    asyncio.run(
+        app.ainvoke(Command(resume={"decisions": [decision]}), config=config)
+    )
+
+    assert not (tmp_path / "approved.txt").exists()
+    assert (tmp_path / "edited.txt").read_text() == "edited"
+
+
+def test_reject_decision_does_not_write(monkeypatch, tmp_path):
+    app = _approval_app(monkeypatch, tmp_path, _write_model())
+    config, _request = _first_interrupt(app, "reject-write")
+
+    asyncio.run(
+        app.ainvoke(
+            Command(
+                resume={
+                    "decisions": [
+                        {"type": "reject", "message": "change not approved"}
+                    ]
+                }
+            ),
+            config=config,
+        )
+    )
+
+    assert not (tmp_path / "approved.txt").exists()
+
+
+def test_edited_action_cannot_escape_workspace(monkeypatch, tmp_path):
+    app = _approval_app(monkeypatch, tmp_path, _write_model())
+    config, _request = _first_interrupt(app, "reject-escape")
+    decision = {
+        "type": "edit",
+        "edited_action": {
+            "name": "approved_write_file",
+            "args": {"file_path": "/../escaped.txt", "content": "denied"},
+        },
+    }
+
+    result = asyncio.run(
+        app.ainvoke(Command(resume={"decisions": [decision]}), config=config)
+    )
+
+    assert not (tmp_path.parent / "escaped.txt").exists()
+    tool_messages = [message for message in result["messages"] if message.type == "tool"]
+    assert tool_messages[-1].status == "error"
+
+
+def test_sensitive_and_symlink_escape_paths_are_denied(tmp_path):
+    from src.secure_coding_tools import CodingPolicyError, resolve_mutation_path
+
+    with pytest.raises(CodingPolicyError, match="sensitive_path"):
+        resolve_mutation_path(tmp_path, "/.env")
+
+    outside = tmp_path.parent / "outside-security-test"
+    outside.mkdir(exist_ok=True)
+    link = tmp_path / "link"
+    link.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(CodingPolicyError, match="workspace_escape"):
+        resolve_mutation_path(tmp_path, "/link/file.txt")
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["sh", "-c", "echo unsafe"],
+        ["git", "reset", "--hard"],
+        ["rg", "token", "/etc"],
+        ["pytest", "../outside"],
+        ["npm", "install"],
+        ["ruff", "format", "."],
+        ["git", "status", "&&", "whoami"],
+        ["git", "diff", "--ext-diff"],
+        ["git", "show", "--output=result.txt"],
+        ["rg", "--pre", "cat", "pattern"],
+    ],
+)
+def test_command_policy_denies_shell_destructive_and_escape_forms(argv):
+    from src.secure_coding_tools import CodingPolicyError, validate_command_argv
+
+    with pytest.raises(CodingPolicyError):
+        validate_command_argv(argv)
+
+
+def test_command_policy_allows_bounded_verification_commands():
+    from src.secure_coding_tools import validate_command_argv
+
+    assert validate_command_argv(["git", "status", "--short"])
+    assert validate_command_argv(["pytest", "-q", "tests"])
+    assert validate_command_argv(["ruff", "format", "--check", "."])
+    assert validate_command_argv(["pnpm", "run", "typecheck"])
+
+
+def test_command_path_symlink_escape_is_denied(tmp_path):
+    from src.secure_coding_tools import (
+        CodingPolicyError,
+        _validate_existing_command_paths,
+    )
+
+    outside = tmp_path.parent / "outside-command-test"
+    outside.mkdir(exist_ok=True)
+    (tmp_path / "outside-link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(CodingPolicyError, match="workspace_escape"):
+        _validate_existing_command_paths(tmp_path, ["pytest", "outside-link"])
+
+
+def test_command_output_redacts_credentials():
+    from src.secure_coding_tools import redact_command_output
+
+    rendered = redact_command_output(
+        "API_KEY=not-for-output\nAuthorization: Bearer abc.def.ghi\n"
+    )
+    assert "not-for-output" not in rendered
+    assert "abc.def.ghi" not in rendered
+    assert rendered.count("[REDACTED]") == 2
+
+
+def test_command_timeout_terminates_process_group(monkeypatch, tmp_path):
+    from src import secure_coding_tools
+
+    killed = []
+
+    class Process:
+        pid = 4321
+        returncode = None
+
+        async def communicate(self):
+            await asyncio.sleep(1)
+
+        async def wait(self):
+            self.returncode = -9
+
+    async def create_process(*_args, **_kwargs):
+        return Process()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+    monkeypatch.setattr(
+        secure_coding_tools.os,
+        "killpg",
+        lambda pid, sig: killed.append((pid, sig)),
+    )
+
+    with pytest.raises(secure_coding_tools.CodingPolicyError, match="command_timeout"):
+        asyncio.run(
+            secure_coding_tools._run_command(
+                tmp_path, ["git", "status"], timeout=0.001
+            )
+        )
+    assert killed == [(4321, secure_coding_tools.signal.SIGKILL)]
+
+
+def test_production_wrapper_surfaces_and_resumes_approval(monkeypatch, tmp_path):
+    from src import coding_agent
+
+    nested = _approval_app(monkeypatch, tmp_path, _write_model())
+    async def session_agent(*_args):
+        return nested
+
+    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
+
+    graph = StateGraph(coding_agent.CodingAgentState)
+    graph.add_node("coding", coding_agent.deep_agents_coding_node)
+    graph.add_edge(START, "coding")
+    app = graph.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "outer-approval"}}
+    initial = {
+        "messages": [{"role": "user", "content": "write the file"}],
+        "workspace": str(tmp_path),
+        "execution_mode": "approval",
+        "thread_identity": "nested-approval",
+    }
+
+    first = asyncio.run(app.ainvoke(initial, config=config))
+    assert len(first["__interrupt__"]) == 1
+    result = asyncio.run(
+        app.ainvoke(
+            Command(resume={"decisions": [{"type": "approve"}]}), config=config
+        )
+    )
+
+    assert result["coding_status"] == "completed"
+    assert (tmp_path / "approved.txt").read_text() == "approved"
+
+
+def test_expired_approval_is_rejected_without_writing(monkeypatch, tmp_path):
+    from src import coding_agent
+
+    nested = _approval_app(monkeypatch, tmp_path, _write_model())
+    async def session_agent(*_args):
+        return nested
+
+    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
+    monkeypatch.setattr(coding_agent, "_approval_deadline", lambda *_args: 100.0)
+    monkeypatch.setattr(coding_agent, "_now", lambda: 200.0)
+    monkeypatch.setenv("CODING_APPROVAL_TIMEOUT_SECONDS", "1")
+
+    graph = StateGraph(coding_agent.CodingAgentState)
+    graph.add_node("coding", coding_agent.deep_agents_coding_node)
+    graph.add_edge(START, "coding")
+    app = graph.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "outer-expired"}}
+    initial = {
+        "messages": [{"role": "user", "content": "write the file"}],
+        "workspace": str(tmp_path),
+        "execution_mode": "approval",
+        "thread_identity": "nested-expired",
+    }
+
+    first = asyncio.run(app.ainvoke(initial, config=config))
+    assert "expires_at" in first["__interrupt__"][0].value
+    result = asyncio.run(
+        app.ainvoke(
+            Command(resume={"decisions": [{"type": "approve"}]}), config=config
+        )
+    )
+
+    assert result["coding_status"] == "cancelled"
+    assert any(
+        event["kind"] == "approval" and event["status"] == "expired"
+        for event in result["coding_events"]
+    )
+    assert not (tmp_path / "approved.txt").exists()
+
+
+def test_coding_node_propagates_cancellation(monkeypatch, tmp_path):
+    from src import coding_agent
+
+    class SlowApp:
+        async def aget_state(self, _config):
+            return type("Snapshot", (), {"values": {}, "tasks": ()})()
+
+        async def ainvoke(self, _payload, config=None):
+            await asyncio.sleep(10)
+
+    async def session_agent(*_args):
+        return SlowApp()
+
+    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
+
+    async def cancel():
+        task = asyncio.create_task(
+            coding_agent.deep_agents_coding_node(
+                {
+                    "messages": [{"role": "user", "content": "wait"}],
+                    "workspace": str(tmp_path),
+                    "thread_identity": "cancel-thread",
+                }
+            )
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel())
+
+
+def test_coding_node_returns_sanitized_timeout(monkeypatch, tmp_path):
+    from src import coding_agent
+
+    class SlowApp:
+        async def aget_state(self, _config):
+            return type("Snapshot", (), {"values": {}, "tasks": ()})()
+
+        async def ainvoke(self, _payload, config=None):
+            await asyncio.sleep(10)
+
+    monkeypatch.setenv("CODING_AGENT_TIMEOUT_SECONDS", "0")
+    async def session_agent(*_args):
+        return SlowApp()
+
+    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
+    result = asyncio.run(
+        coding_agent.deep_agents_coding_node(
+            {
+                "messages": [{"role": "user", "content": "wait"}],
+                "workspace": str(tmp_path),
+                "thread_identity": "timeout-thread",
+            }
+        )
+    )
+
+    assert result["coding_status"] == "error"
+    assert result["coding_events"][-1]["kind"] == "error"
+    assert result["coding_events"][-1]["data"]["code"] == "agent_timeout"

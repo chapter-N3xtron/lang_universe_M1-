@@ -2,6 +2,10 @@ services:
   langgraph-api:
     volumes:
       - ..:/workspace
+      - /Volumes/Storage:/Volumes/Storage
+      - ${HOME}/world_monitor:${HOME}/world_monitor
     environment:
-      - OPENCODE_WORKSPACE=/workspace
+      - AGENT_WORKSPACE=/workspace
       - TODOS_FILE=/workspace/todos.json
+      - CODING_OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434

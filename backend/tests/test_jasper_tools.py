@@ -2,10 +2,10 @@
 
 import os
 import tempfile
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 
 from src import jasper_tools as jt
-from src.jasper_tools import read_file, web_search, read_url
+from src.jasper_tools import read_file
 
 
 def test_read_file_valid():
@@ -14,22 +14,22 @@ def test_read_file_valid():
         with open(file_path, "w") as f:
             f.write("Hello, world!")
 
-        os.environ["OPENCODE_WORKSPACE"] = tmp
+        os.environ["AGENT_WORKSPACE"] = tmp
         try:
             result = read_file.invoke({"file_path": file_path})
         finally:
-            del os.environ["OPENCODE_WORKSPACE"]
+            del os.environ["AGENT_WORKSPACE"]
 
     assert result == "Hello, world!"
 
 
 def test_read_file_path_traversal_blocked():
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["OPENCODE_WORKSPACE"] = tmp
+        os.environ["AGENT_WORKSPACE"] = tmp
         try:
             result = read_file.invoke({"file_path": "../../etc/passwd"})
         finally:
-            del os.environ["OPENCODE_WORKSPACE"]
+            del os.environ["AGENT_WORKSPACE"]
 
     assert "Access denied" in result
     assert "outside the workspace" in result
@@ -44,11 +44,11 @@ def test_read_file_symlink_escaping_blocked():
         link = os.path.join(tmp, "link.txt")
         os.symlink(target, link)
 
-        os.environ["OPENCODE_WORKSPACE"] = tmp
+        os.environ["AGENT_WORKSPACE"] = tmp
         try:
             result = read_file.invoke({"file_path": link})
         finally:
-            del os.environ["OPENCODE_WORKSPACE"]
+            del os.environ["AGENT_WORKSPACE"]
 
     assert result == "secret"
 
@@ -59,11 +59,11 @@ def test_read_file_binary_extension_blocked():
         with open(file_path, "wb") as f:
             f.write(b"PNG fake content")
 
-        os.environ["OPENCODE_WORKSPACE"] = tmp
+        os.environ["AGENT_WORKSPACE"] = tmp
         try:
             result = read_file.invoke({"file_path": file_path})
         finally:
-            del os.environ["OPENCODE_WORKSPACE"]
+            del os.environ["AGENT_WORKSPACE"]
 
     assert "Cannot read binary file" in result
 
@@ -74,11 +74,11 @@ def test_read_file_oversized_blocked():
         with open(file_path, "w") as f:
             f.write("x" * (100 * 1024 + 1))
 
-        os.environ["OPENCODE_WORKSPACE"] = tmp
+        os.environ["AGENT_WORKSPACE"] = tmp
         try:
             result = read_file.invoke({"file_path": file_path})
         finally:
-            del os.environ["OPENCODE_WORKSPACE"]
+            del os.environ["AGENT_WORKSPACE"]
 
     assert "File too large" in result
     assert "100KB" in result
@@ -87,11 +87,11 @@ def test_read_file_oversized_blocked():
 def test_read_file_not_found():
     with tempfile.TemporaryDirectory() as tmp:
         file_path = os.path.join(tmp, "nonexistent.txt")
-        os.environ["OPENCODE_WORKSPACE"] = tmp
+        os.environ["AGENT_WORKSPACE"] = tmp
         try:
             result = read_file.invoke({"file_path": file_path})
         finally:
-            del os.environ["OPENCODE_WORKSPACE"]
+            del os.environ["AGENT_WORKSPACE"]
 
     assert "File not found" in result
 
@@ -104,21 +104,21 @@ def test_read_file_relative_path_resolves_to_workspace():
         with open(file_path, "w") as f:
             f.write("relative path works")
 
-        os.environ["OPENCODE_WORKSPACE"] = tmp
+        os.environ["AGENT_WORKSPACE"] = tmp
         try:
             result = read_file.invoke({"file_path": "subdir/note.txt"})
         finally:
-            del os.environ["OPENCODE_WORKSPACE"]
+            del os.environ["AGENT_WORKSPACE"]
 
     assert result == "relative path works"
 
 
 def test_read_file_no_workspace():
-    if "OPENCODE_WORKSPACE" in os.environ:
-        del os.environ["OPENCODE_WORKSPACE"]
+    if "AGENT_WORKSPACE" in os.environ:
+        del os.environ["AGENT_WORKSPACE"]
 
     result = read_file.invoke({"file_path": "test.txt"})
-    assert "OPENCODE_WORKSPACE" in result
+    assert "AGENT_WORKSPACE" in result
 
 
 def test_web_search_no_api_key():

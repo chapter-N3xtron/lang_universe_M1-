@@ -10,11 +10,16 @@ __pycache__
 .pytest_cache
 .venv
 venv/
+.testenv/
+.langgraph_api/
 
 # Logs / runtime
 logs/
 .pids/
 *.log
+data/
+voices/
+test.wav
 
 # Node / frontend
 node_modules/

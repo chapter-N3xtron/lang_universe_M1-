@@ -1,4 +1,4 @@
-"""Direct local Ollama client fallback for models OpenCode CLI can't route."""
+"""Direct Ollama client helpers for local and cloud-hosted models."""
 
 import json
 import os
@@ -15,6 +15,28 @@ def list_ollama_models(timeout: int = 5) -> List[dict]:
     """Return Ollama's /api/tags model list."""
     try:
         resp = requests.get(f"{_ollama_base_url()}/api/tags", timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("models", [])
+    except Exception:
+        return []
+
+
+def list_ollama_cloud_models(timeout: int = 5) -> List[dict]:
+    """Return models available through Ollama Cloud without exposing its key."""
+    api_key = os.getenv("OLLAMA_API_KEY", "") or os.getenv("LLM_API_KEY", "")
+    if not api_key:
+        return []
+
+    base_url = os.getenv(
+        "CODING_OLLAMA_CLOUD_BASE_URL", "https://ollama.com"
+    ).rstrip("/")
+    try:
+        resp = requests.get(
+            f"{base_url}/api/tags",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
         resp.raise_for_status()
         data = resp.json()
         return data.get("models", [])

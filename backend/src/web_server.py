@@ -2,8 +2,8 @@
 
 Single-responsibility bridge for the few things the browser cannot do directly:
 Kyutai Pocket TTS streaming, faster-whisper STT, the local Ollama model list,
-and the native macOS folder picker. The LangGraph graph itself runs on
-`langgraph dev` (port 8123) — the sidecar intentionally owns no graph state.
+and the native macOS folder picker. The LangGraph graph itself runs separately
+on port 8123 — the sidecar intentionally owns no graph state.
 """
 
 import json
@@ -11,14 +11,17 @@ import os
 import subprocess
 from pathlib import Path
 
-import numpy as np
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Response, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from src.ollama_client import list_ollama_models
+from src.coding_agent import (
+    export_coding_session_state,
+    reset_coding_session_state,
+)
+from src.ollama_client import list_ollama_cloud_models, list_ollama_models
 from src.stt import transcribe
 
 load_dotenv()
@@ -71,6 +74,46 @@ def get_todos() -> dict:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+class CodingSessionScope(BaseModel):
+    thread_id: str
+    workspace: str
+    user_id: str = "anonymous"
+
+
+def _session_workspace(raw_workspace: str) -> Path:
+    workspace = Path(raw_workspace).expanduser()
+    if not workspace.is_absolute():
+        raise HTTPException(status_code=400, detail="workspace must be absolute")
+    try:
+        workspace = workspace.resolve(strict=True)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail="workspace does not exist") from exc
+    if not workspace.is_dir():
+        raise HTTPException(status_code=400, detail="workspace must be a directory")
+    return workspace
+
+
+@app.post("/api/coding-sessions/reset")
+async def reset_coding_session_api(scope: CodingSessionScope) -> dict:
+    removed = await reset_coding_session_state(
+        thread_identity=scope.thread_id,
+        workspace=_session_workspace(scope.workspace),
+        user_identity=scope.user_id,
+    )
+    return {"removed": removed}
+
+
+@app.get("/api/coding-sessions/export")
+async def export_coding_session_api(
+    thread_id: str, workspace: str, user_id: str = "anonymous"
+) -> dict:
+    return await export_coding_session_state(
+        thread_identity=thread_id,
+        workspace=_session_workspace(workspace),
+        user_identity=user_id,
+    )
 
 
 class TTSStreamRequest(BaseModel):
@@ -149,43 +192,84 @@ def fs_pick_folder(starting_path: str | None = None) -> FSPickResponse:
     """Open native macOS folder picker via AppleScript and return the absolute POSIX path."""
     try:
         default = starting_path or str(Path.home())
-        script = f'''
-        set defaultPath to POSIX file "{default}"
+        script = '''
+        on run argv
+        set defaultPath to POSIX file (item 1 of argv)
+        tell application "Finder" to activate
+        delay 0.2
         try
             set chosenFolder to choose folder with prompt "Select a repo or folder:" default location defaultPath
             return POSIX path of chosenFolder
-        on error
-            return "__CANCELLED__"
+        on error errorMessage number errorNumber
+            if errorNumber is -128 then return "__CANCELLED__"
+            error errorMessage number errorNumber
         end try
+        end run
         '''
         result = subprocess.run(
-            ["osascript", "-e", script],
+            ["osascript", "-e", script, default],
             capture_output=True,
             text=True,
             timeout=30,
         )
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail="Folder picker failed to open")
         output = result.stdout.strip()
         if output == "__CANCELLED__" or not output:
             return FSPickResponse(path=None, cancelled=True)
         return FSPickResponse(path=output, cancelled=False)
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(status_code=504, detail="Folder picker timed out") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Folder picker failed") from e
 
 
 @app.get("/api/models")
 def list_models() -> dict:
-    """List available models: OpenCode cloud default plus local Ollama models."""
-    cloud_default = os.getenv("OPENCODE_CLI_MODEL", "ollama-cloud/qwen3.5:397b")
+    """List configured Deep Agents models plus discovered local Ollama models."""
+    default = os.getenv("CODING_MODEL", "ollama/qwen3.5:27b")
+    configured = [
+        model.strip()
+        for model in os.getenv("CODING_MODELS", default).split(",")
+        if model.strip()
+    ]
+
+    def provider(model_id: str) -> str:
+        if model_id.startswith(("huggingface/", "hf/")):
+            return "huggingface"
+        if model_id.startswith("ollama-cloud/"):
+            return "ollama-cloud"
+        return "ollama"
+
+    models = [
+        {"id": model_id, "name": model_id, "provider": provider(model_id)}
+        for model_id in configured
+    ]
+    cloud_models = [
+        {
+            "id": f"ollama-cloud/{m['name']}",
+            "name": m["name"],
+            "provider": "ollama-cloud",
+        }
+        for m in list_ollama_cloud_models()
+        if m.get("name")
+    ]
     local_models = [
         {"id": f"ollama/{m['name']}", "name": m["name"], "provider": "ollama"}
         for m in list_ollama_models()
+        if m.get("name")
     ]
+    seen = {model["id"] for model in models}
+    for discovered in (cloud_models, local_models):
+        for model in discovered:
+            if model["id"] not in seen:
+                models.append(model)
+                seen.add(model["id"])
     return {
-        "default": cloud_default,
-        "models": [
-            {"id": cloud_default, "name": cloud_default, "provider": "opencode"},
-            *local_models,
-        ],
+        "default": default,
+        "models": models,
     }
 
 

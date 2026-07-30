@@ -34,7 +34,7 @@ The file is a JSON object with this structure:
 | `id` | string | Unique kebab-case identifier. |
 | `content` | string | What needs to be done. |
 | `status` | string | One of `"pending"`, `"in_progress"`, `"completed"`. |
-| `agent` | string or null | Responsible agent: `"opencode"`, `"jasper"`, `"research"`, `"magic-coder"`, or `null`. |
+| `agent` | string or null | Responsible agent: `"coding"`, `"jasper"`, `"research"`, `"magic-coder"`, or `null`. Historical completed entries may retain legacy values for audit integrity. |
 | `completed_by_model` | string or null | Full model ID that completed this todo. Set when status changes to `"completed"`. Never set for pending items. |
 | `completed_at` | string (ISO-8601) or null | When the todo was completed. Set with `completed_by_model`. |
 | `notes` | string | Brief summary of what was done or relevant context. |
@@ -96,7 +96,7 @@ Initial state of a new section:
           "id": "do-something",
           "content": "Do something important",
           "status": "pending",
-          "agent": "opencode",
+          "agent": "coding",
           "completed_by_model": null,
           "completed_at": null,
           "notes": ""
@@ -137,7 +137,7 @@ After completing "do-something":
           "id": "do-something",
           "content": "Do something important",
           "status": "completed",
-          "agent": "opencode",
+          "agent": "coding",
           "completed_by_model": "ollama-cloud/glm-5.2",
           "completed_at": "2026-07-27T23:00:00Z",
           "notes": "Implemented the feature"

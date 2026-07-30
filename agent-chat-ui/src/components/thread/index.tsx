@@ -1,64 +1,30 @@
-import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef } from "react";
-import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
-import { useStreamContext } from "@/providers/Stream";
-import { useState, FormEvent } from "react";
-import { Button } from "../ui/button";
-import { Checkpoint, Message } from "@langchain/langgraph-sdk";
-import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
-import { HumanMessage } from "./messages/human";
-import { useTTS } from "@/hooks/useTTS";
-import { useSTT } from "@/hooks/useSTT";
-import { getContentString } from "./utils";
 import {
-  DO_NOT_RENDER_ID_PREFIX,
-  ensureToolCallsHaveResponses,
-} from "@/lib/ensure-tool-responses";
+  ReactNode,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  memo,
+  useMemo,
+} from "react";
+import { cn } from "@/lib/utils";
+import { useStreamContext, type StreamContextType } from "@/providers/Stream";
+import { Button } from "../ui/button";
 import { LangGraphLogoSVG } from "../icons/langgraph";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import {
-  ArrowDown,
   List,
   ListX,
-  LoaderCircle,
   PanelRightOpen,
   PanelRightClose,
   SquarePen,
   XIcon,
-  Plus,
-  Mic,
-  Folder,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
-
-const AGENT_OPTIONS = [
-  { value: "", label: "Auto" },
-  { value: "jasper", label: "Jasper" },
-  { value: "opencode", label: "OpenCode" },
-  { value: "research", label: "Research" },
-  { value: "magic-coder", label: "Magic Coder" },
-] as const;
-
-interface ModelOption {
-  value: string;
-  label: string;
-}
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
-import ThreadHistory from "./history";
-import { TodoList } from "./todos";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
 import { GitHubSVG } from "../icons/github";
 import {
   Tooltip,
@@ -66,14 +32,21 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
-import { useFileUpload } from "@/hooks/use-file-upload";
-import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import {
   useArtifactOpen,
   ArtifactContent,
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
+import { useModelAndVoices } from "@/hooks/use-model-and-voices";
+import { MessageList } from "./message-list";
+import { ChatInput } from "./chat-input";
+import dynamic from "next/dynamic";
+
+const ThreadHistory = dynamic(() => import("./history"), { ssr: false });
+const TodoList = dynamic(() => import("./todos").then((m) => m.TodoList), {
+  ssr: false,
+});
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -94,25 +67,8 @@ function StickyToBottomContent(props: {
       >
         {props.content}
       </div>
-
       {props.footer}
     </div>
-  );
-}
-
-function ScrollToBottom(props: { className?: string }) {
-  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
-
-  if (isAtBottom) return null;
-  return (
-    <Button
-      variant="outline"
-      className={props.className}
-      onClick={() => scrollToBottom()}
-    >
-      <ArrowDown className="h-4 w-4" />
-      <span>Scroll to bottom</span>
-    </Button>
   );
 }
 
@@ -140,8 +96,8 @@ function OpenGitHubRepo() {
   );
 }
 
-export function Thread() {
-  const [artifactContext, setArtifactContext] = useArtifactContext();
+function ThreadImpl() {
+  const [, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
@@ -153,94 +109,48 @@ export function Thread() {
     "todosOpen",
     parseAsBoolean.withDefault(false),
   );
-  const [hideToolCalls, setHideToolCalls] = useQueryState(
-    "hideToolCalls",
-    parseAsBoolean.withDefault(false),
-  );
-  const [input, setInput] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState<string>("");
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string>("");
-  const [selectedModel, setSelectedModel] = useState<string>("");
-  const [modelOptions, setModelOptions] = useState<ModelOption[]>([{ value: "", label: "Auto" }]);
-  const [modelProviders, setModelProviders] = useState<Record<string, string>>({});
-  const [defaultModel, setDefaultModel] = useState<string>("");
-  const [modelsLoadError, setModelsLoadError] = useState(false);
-  const [voicesLoadError, setVoicesLoadError] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useState<string>("");
-  const [voiceOptions, setVoiceOptions] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    fetch("http://127.0.0.1:8000/api/models")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data: { default: string; models: { id: string; name: string; provider: string }[] }) => {
-        setDefaultModel(data.default);
-        const providers: Record<string, string> = {};
-        const options: ModelOption[] = [{ value: "", label: "Auto" }];
-        for (const m of data.models) {
-          options.push({ value: m.id, label: m.name });
-          providers[m.id] = m.provider;
-        }
-        setModelOptions(options);
-        setModelProviders(providers);
-      })
-      .catch((err) => {
-        setModelsLoadError(true);
-        toast.error("Could not load models", {
-          description: "Model sidecar at http://127.0.0.1:8000 may not be running.",
-        });
-        console.error("[Models] failed to load:", err);
-      });
-    fetch("http://127.0.0.1:8000/api/tts/voices")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data: { voices: string[] }) => {
-        const options = data.voices.map((v: string) => ({
-          id: v,
-          name: v.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase()),
-        }));
-        setVoiceOptions(options);
-      })
-      .catch((err) => {
-        setVoicesLoadError(true);
-        toast.error("Could not load voices", {
-          description: "TTS sidecar at http://127.0.0.1:8000 may not be running.",
-        });
-        console.error("[Voices] failed to load:", err);
-      });
-  }, []);
+
   const {
-    contentBlocks,
-    setContentBlocks,
-    handleFileUpload,
-    dropRef,
-    removeBlock,
-    resetBlocks: _resetBlocks,
-    dragOver,
-    handlePaste,
-  } = useFileUpload();
+    modelOptions,
+    modelProviders,
+    defaultModel,
+    modelsLoadError,
+    voiceOptions,
+    voicesLoadError,
+    selectedVoice,
+    setSelectedVoice,
+  } = useModelAndVoices();
+
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-  const { speak, stop: stopTts, speaking } = useTTS();
-  const { startRecording, stopRecording, isRecording, isProcessing } = useSTT();
-  const speakingMessageIdRef = useRef<string | undefined>(undefined);
 
   const stream = useStreamContext();
+  const streamRef = useRef(stream);
+  useEffect(() => {
+    streamRef.current = stream;
+  }, [stream]);
+  const streamActions = useMemo(
+    () => ({
+      getMessages: () => streamRef.current.messages,
+      submit: ((...args: Parameters<StreamContextType["submit"]>) =>
+        streamRef.current.submit(...args)) as StreamContextType["submit"],
+      stop: () => streamRef.current.stop(),
+    }),
+    [],
+  );
   const messages = stream.messages;
   const isLoading = stream.isLoading;
 
   const lastError = useRef<string | undefined>(undefined);
 
-  const setThreadId = (id: string | null) => {
-    _setThreadId(id);
-
-    // close artifact and reset artifact context
-    closeArtifact();
-    setArtifactContext({});
-  };
+  const setThreadId = useCallback(
+    (id: string | null) => {
+      _setThreadId(id);
+      closeArtifact();
+      setArtifactContext({});
+    },
+    [_setThreadId, closeArtifact, setArtifactContext],
+  );
 
   useEffect(() => {
     if (!stream.error) {
@@ -249,12 +159,7 @@ export function Thread() {
     }
     try {
       const message = (stream.error as any).message;
-      if (!message || lastError.current === message) {
-        // Message has already been logged. do not modify ref, return early.
-        return;
-      }
-
-      // Message is defined, and it has not been logged yet. Save it, and send the error
+      if (!message || lastError.current === message) return;
       lastError.current = message;
       toast.error("An error occurred. Please try again.", {
         description: (
@@ -270,7 +175,6 @@ export function Thread() {
     }
   }, [stream.error]);
 
-  // TODO: this should be part of the useStream hook
   const prevMessageLength = useRef(0);
   useEffect(() => {
     if (
@@ -280,107 +184,29 @@ export function Thread() {
     ) {
       setFirstTokenReceived(true);
     }
-
     prevMessageLength.current = messages.length;
   }, [messages]);
 
-    function isCloudModel(modelId: string, providers: Record<string, string>, defaultId: string): boolean {
-    const id = modelId || defaultId;
-    if (!id) return false;
-    const provider = providers[id];
-    if (provider && provider !== "ollama") return true;
-    return false;
-  }
-
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    stopTts();
-    if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading)
-      return;
+  const handleSubmit = useCallback(() => {
     setFirstTokenReceived(false);
+  }, []);
 
-    const newHumanMessage: Message = {
-      id: uuidv4(),
-      type: "human",
-      content: [
-        ...(input.trim().length > 0 ? [{ type: "text", text: input }] : []),
-        ...contentBlocks,
-      ] as Message["content"],
-    };
-
-    const toolMessages = ensureToolCallsHaveResponses(stream.messages);
-
-    const context =
-      Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
-
-    stream.submit(
-      {
-        messages: [...toolMessages, newHumanMessage],
-        context,
-        target_agent: selectedAgent || undefined,
-        workspace: selectedWorkspace || undefined,
-        model: selectedModel || undefined,
-      },
-      {
-        streamMode: ["messages"],
-        streamSubgraphs: true,
-        streamResumable: true,
-        config: isCloudModel(selectedModel, modelProviders, defaultModel) ? { tags: ["langsmith:nostream"] } : undefined,
-        optimisticValues: (prev) => ({
-          ...prev,
-          context,
-          target_agent: selectedAgent || undefined,
-          workspace: selectedWorkspace || undefined,
-          model: selectedModel || undefined,
-          messages: [
-            ...(prev.messages ?? []),
-            ...toolMessages,
-            newHumanMessage,
-          ],
-        }),
-      },
-    );
-
-    setInput("");
-    setContentBlocks([]);
-  };
-
-  const handleRegenerate = (
-    parentCheckpoint: Checkpoint | null | undefined,
-  ) => {
-    // Do this so the loading state is correct
+  const handleRegenerate = useCallback(() => {
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
-    stream.submit(undefined, {
-      checkpoint: parentCheckpoint,
-      streamMode: ["messages"],
-      streamSubgraphs: true,
-      streamResumable: true,
-    });
-  };
+  }, []);
 
   const chatStarted = !!threadId || !!messages.length;
-  const hasNoAIOrToolMessages = !messages.find(
-    (m) => m.type === "ai" || m.type === "tool",
-  );
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <div className="relative hidden lg:flex">
-        <motion.div
-          className="absolute z-20 h-full overflow-hidden border-r bg-background"
-          style={{ width: 300 }}
-          animate={
-            isLargeScreen
-              ? { x: chatHistoryOpen ? 0 : -300 }
-              : { x: chatHistoryOpen ? 0 : -300 }
-          }
-          initial={{ x: -300 }}
-          transition={
-            isLargeScreen
-              ? { type: "spring", stiffness: 300, damping: 30 }
-              : { duration: 0 }
-          }
+        <div
+          className="bg-background absolute z-20 h-full overflow-hidden border-r transition-transform duration-200 motion-reduce:transition-none"
+          style={{
+            width: 300,
+            transform: `translateX(${chatHistoryOpen ? 0 : -300}px)`,
+          }}
         >
           <div
             className="relative h-full"
@@ -388,25 +214,20 @@ export function Thread() {
           >
             <ThreadHistory />
           </div>
-        </motion.div>
+        </div>
       </div>
 
-      <motion.div
-        className="absolute right-0 top-0 z-20 hidden h-full lg:flex"
-        animate={{
-          x: isLargeScreen ? (todosOpen ? 0 : 300) : (todosOpen ? 0 : 300),
-        }}
-        initial={{ x: 300 }}
-        transition={
-          isLargeScreen
-            ? { type: "spring", stiffness: 300, damping: 30 }
-            : { duration: 0 }
-        }
+      <div
+        className="absolute top-0 right-0 z-20 hidden h-full transition-transform duration-200 motion-reduce:transition-none lg:flex"
+        style={{ transform: `translateX(${todosOpen ? 0 : 300}px)` }}
       >
-        <div className="h-full overflow-hidden border-l bg-background" style={{ width: 300 }}>
+        <div
+          className="bg-background h-full overflow-hidden border-l"
+          style={{ width: 300 }}
+        >
           <TodoList todosOpen={todosOpen} />
         </div>
-      </motion.div>
+      </div>
 
       <div
         className={cn(
@@ -414,20 +235,14 @@ export function Thread() {
           artifactOpen && "grid-cols-[3fr_2fr]",
         )}
       >
-        <motion.div
+        <div
           className={cn(
-            "relative flex min-w-0 flex-1 flex-col overflow-hidden",
+            "relative flex min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-200 motion-reduce:transition-none",
             !chatStarted && "grid-rows-[1fr]",
           )}
-
-          animate={{
-            marginLeft: chatHistoryOpen ? (isLargeScreen ? 300 : 0) : 0,
+          style={{
+            marginLeft: chatHistoryOpen && isLargeScreen ? 300 : 0,
           }}
-          transition={
-            isLargeScreen
-              ? { type: "spring", stiffness: 300, damping: 30 }
-              : { duration: 0 }
-          }
         >
           {!chatStarted && (
             <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
@@ -483,17 +298,10 @@ export function Thread() {
                     </Button>
                   )}
                 </div>
-                <motion.button
-                  className="flex cursor-pointer items-center gap-2"
+                <button
+                  className="flex cursor-pointer items-center gap-2 transition-[margin] duration-200 motion-reduce:transition-none"
                   onClick={() => setThreadId(null)}
-                  animate={{
-                    marginLeft: !chatHistoryOpen ? 48 : 0,
-                  }}
-                  transition={{
-                    type: "spring",
-                    stiffness: 300,
-                    damping: 30,
-                  }}
+                  style={{ marginLeft: !chatHistoryOpen ? 48 : 0 }}
                 >
                   <LangGraphLogoSVG
                     width={32}
@@ -502,15 +310,17 @@ export function Thread() {
                   <span className="text-xl font-semibold tracking-tight">
                     Agent Chat
                   </span>
-                </motion.button>
+                </button>
               </div>
 
               <div className="flex items-center gap-4">
                 <div className="flex items-center">
-                  {stream.values?.opencode_status && (
-                    <span className="mr-2 flex items-center gap-1.5 rounded-full bg-red-900/30 px-2.5 py-0.5 text-xs text-red-300">
-                      <span className="inline-block size-1.5 animate-pulse rounded-full bg-red-400" />
-                      OC: {stream.values.opencode_status}
+                  {stream.values?.coding_status && (
+                    <span className="mr-2 flex items-center gap-1.5 rounded-full bg-blue-900/30 px-2.5 py-0.5 text-xs text-blue-300">
+                      <span
+                        className={`inline-block size-1.5 rounded-full bg-blue-400 ${stream.values.coding_status === "running" ? "animate-pulse" : ""}`}
+                      />
+                      Coding: {stream.values.coding_status}
                     </span>
                   )}
                   <TooltipIconButton
@@ -553,310 +363,32 @@ export function Thread() {
               )}
               contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
               content={
-                <>
-                  {messages
-                    .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                    .map((message, index) =>
-                      message.type === "human" ? (
-                        <HumanMessage
-                          key={`${message.id || message.type}-${index}`}
-                          message={message}
-                          isLoading={isLoading}
-                        />
-                      ) : (
-                        <AssistantMessage
-                          key={`${message.id || message.type}-${index}`}
-                          message={message}
-                          isLoading={isLoading}
-                          handleRegenerate={handleRegenerate}
-                          isSpeaking={speaking && speakingMessageIdRef.current === message.id}
-                          onSpeak={() => {
-                            if (speaking && speakingMessageIdRef.current === message.id) {
-                              stopTts();
-                            } else {
-                              speakingMessageIdRef.current = message.id;
-                              speak(getContentString(message.content), selectedVoice || undefined);
-                            }
-                          }}
-                        />
-                      ),
-                    )}
-                  {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
-                    We need to render it outside of the messages list, since there are no messages to render */}
-                  {hasNoAIOrToolMessages && !!stream.interrupt && (
-                    <AssistantMessage
-                      key="interrupt-msg"
-                      message={undefined}
-                      isLoading={isLoading}
-                      handleRegenerate={handleRegenerate}
-                    />
-                  )}
-                  {isLoading && !firstTokenReceived && (
-                    <AssistantMessageLoading />
-                  )}
-                </>
+                <MessageList
+                  isLoading={isLoading}
+                  firstTokenReceived={firstTokenReceived}
+                  selectedVoice={selectedVoice}
+                  onRegenerateStart={handleRegenerate}
+                />
               }
               footer={
-                <div className="sticky bottom-0 flex flex-col items-center gap-8 bg-background">
-                  {!chatStarted && (
-                    <div className="flex items-center gap-3">
-                      <LangGraphLogoSVG className="h-8 flex-shrink-0" />
-                      <h1 className="text-2xl font-semibold tracking-tight">
-                        Agent Chat
-                      </h1>
-                    </div>
-                  )}
-
-                  <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
-
-                  <div
-                    ref={dropRef}
-                    className={cn(
-                      "bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
-                      dragOver
-                        ? "border-primary border-2 border-dotted"
-                        : "border border-solid",
-                    )}
-                  >
-                    <form
-                      onSubmit={handleSubmit}
-                      className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2"
-                    >
-                      <ContentBlocksPreview
-                        blocks={contentBlocks}
-                        onRemove={removeBlock}
-                      />
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onPaste={handlePaste}
-                        onKeyDown={(e) => {
-                          if (
-                            e.key === "Enter" &&
-                            !e.shiftKey &&
-                            !e.metaKey &&
-                            !e.nativeEvent.isComposing
-                          ) {
-                            e.preventDefault();
-                            const el = e.target as HTMLElement | undefined;
-                            const form = el?.closest("form");
-                            form?.requestSubmit();
-                          }
-                        }}
-                        placeholder="Type your message..."
-                        className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
-                      />
-
-                      <div className="flex items-start justify-between gap-1.5 p-1.5 pt-3">
-                        <div className="flex flex-col gap-1.5">
-                          <div className="flex items-center space-x-1.5">
-                            <Switch
-                              id="render-tool-calls"
-                              checked={hideToolCalls ?? false}
-                              onCheckedChange={setHideToolCalls}
-                            />
-                            <Label
-                              htmlFor="render-tool-calls"
-                              className="text-xs text-gray-600"
-                            >
-                              Hide Tool Calls
-                            </Label>
-                          </div>
-                          <Label
-                            htmlFor="file-input"
-                            className="flex cursor-pointer items-center gap-1.5"
-                          >
-                            <Plus className="size-4 text-gray-600" />
-                            <span className="text-xs text-gray-600">
-                              Upload PDF or Image
-                            </span>
-                          </Label>
-                          <input
-                            id="file-input"
-                            type="file"
-                            onChange={handleFileUpload}
-                            multiple
-                            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                            className="hidden"
-                          />
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                const res = await fetch("http://127.0.0.1:8000/api/fs/pick-folder");
-                                const data = await res.json();
-                                if (!data.cancelled && data.path) {
-                                  setSelectedWorkspace(data.path);
-                                }
-                              } catch {
-                                toast.error("Could not open folder picker.");
-                              }
-                            }}
-                            className="flex cursor-pointer items-center gap-1.5"
-                          >
-                            <Folder className="size-4 text-gray-600" />
-                            <span className="text-xs text-gray-600">
-                              {selectedWorkspace
-                                ? selectedWorkspace.replace(/\/+$/, "").split("/").pop() || selectedWorkspace
-                                : "Repo selector"}
-                            </span>
-                          </button>
-                        </div>
-                        <div className="flex flex-col items-end gap-1.5">
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-gray-600">Agent</span>
-                            <Select
-                              value={selectedAgent}
-                              onValueChange={setSelectedAgent}
-                            >
-                              <SelectTrigger
-                                className="h-7 w-[112px] text-xs"
-                                aria-label="Select agent"
-                              >
-                                <SelectValue placeholder="Auto" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {AGENT_OPTIONS.map((opt) => (
-                                  <SelectItem key={opt.value || "auto"} value={opt.value}>
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-gray-600">Model</span>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span>
-                                    <Select
-                                      value={selectedModel}
-                                      onValueChange={setSelectedModel}
-                                      disabled={modelsLoadError}
-                                    >
-                                      <SelectTrigger
-                                        className="h-7 w-[128px] text-xs"
-                                        aria-label="Select model"
-                                      >
-                                        <SelectValue placeholder="Auto" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {modelOptions.map((opt) => (
-                                          <SelectItem key={opt.value || "auto"} value={opt.value}>
-                                            {opt.label}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </span>
-                                </TooltipTrigger>
-                                {(modelsLoadError || selectedModel === "") && (
-                                  <TooltipContent side="top">
-                                    {modelsLoadError
-                                      ? "No models available (sidecar may not be running)"
-                                      : "Auto: uses agent default (glm-5.2 for chat, qwen3.5:397b for coding)"}
-                                  </TooltipContent>
-                                )}
-                              </Tooltip>
-                            </TooltipProvider>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-gray-600">Voice</span>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span>
-                                    <Select
-                                      value={selectedVoice}
-                                      onValueChange={setSelectedVoice}
-                                      disabled={voicesLoadError || voiceOptions.length === 0}
-                                    >
-                                      <SelectTrigger
-                                        className="h-7 w-[112px] text-xs"
-                                        aria-label="Select voice"
-                                      >
-                                        <SelectValue placeholder="Auto" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {voiceOptions.map((opt) => (
-                                          <SelectItem key={opt.id} value={opt.id}>
-                                            {opt.name}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </span>
-                                </TooltipTrigger>
-                                {(voicesLoadError || voiceOptions.length === 0) && (
-                                  <TooltipContent side="top">
-                                    No voices available (TTS sidecar may not be running)
-                                  </TooltipContent>
-                                )}
-                              </Tooltip>
-                            </TooltipProvider>
-                          </div>
-                          <div className="mt-0.5 flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onMouseDown={() => startRecording()}
-                              onMouseUp={() =>
-                                stopRecording(
-                                  (text) => setInput((prev) => prev + text),
-                                  (err) => console.error(err),
-                                )
-                              }
-                              onMouseLeave={() => {
-                                if (isRecording) {
-                                  stopRecording(
-                                    (text) => setInput((prev) => prev + text),
-                                    (err) => console.error(err),
-                                  );
-                                }
-                              }}
-                              className={`flex cursor-pointer items-center gap-1 ${isRecording ? "text-red-500" : "text-gray-600"}`}
-                              title={isRecording ? "Recording... release to transcribe" : "Hold to record"}
-                            >
-                              {isProcessing ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : (
-                                <Mic className="size-4" />
-                              )}
-                              <span className="text-xs">
-                                {isRecording ? "Recording..." : isProcessing ? "Transcribing..." : "Voice"}
-                              </span>
-                            </button>
-                            {stream.isLoading ? (
-                              <Button
-                                key="stop"
-                                onClick={() => stream.stop()}
-                                className="h-7 text-xs"
-                              >
-                                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                                Cancel
-                              </Button>
-                            ) : (
-                              <Button
-                                type="submit"
-                                className="h-7 text-xs shadow-md transition-all"
-                                disabled={
-                                  isLoading ||
-                                  (!input.trim() && contentBlocks.length === 0)
-                                }
-                              >
-                                Send
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </form>
-                  </div>
-                </div>
+                <ChatInput
+                  isLoading={isLoading}
+                  selectedVoice={selectedVoice}
+                  onVoiceChange={setSelectedVoice}
+                  modelOptions={modelOptions}
+                  modelProviders={modelProviders}
+                  defaultModel={defaultModel}
+                  modelsLoadError={modelsLoadError}
+                  voicesLoadError={voicesLoadError}
+                  voiceOptions={voiceOptions}
+                  chatStarted={chatStarted}
+                  streamActions={streamActions}
+                  onStartSubmit={handleSubmit}
+                />
               }
             />
           </StickToBottom>
-        </motion.div>
+        </div>
         <div className="relative flex flex-col border-l">
           <div className="absolute inset-0 flex min-w-[30vw] flex-col">
             <div className="grid grid-cols-[1fr_auto] border-b p-4">
@@ -875,3 +407,5 @@ export function Thread() {
     </div>
   );
 }
+
+export const Thread = memo(ThreadImpl);

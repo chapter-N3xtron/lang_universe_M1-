@@ -1,16 +1,18 @@
-from langgraph.graph import StateGraph, START, END
-from typing import TypedDict, Annotated, List
 import operator
 import os
-from src.agent_utils import get_user_query, get_conversation_history
-from src.llm import get_llm
+from typing import Annotated, TypedDict
+
 from dotenv import load_dotenv
+from langgraph.graph import END, START, StateGraph
+
+from src.agent_utils import get_conversation_history
+from src.llm import get_llm
 
 load_dotenv()
 
 
 class State(TypedDict):
-    messages: Annotated[List[dict], operator.add]
+    messages: Annotated[list[dict], operator.add]
     research_findings: str
 
 
@@ -34,15 +36,8 @@ def research_agent(state: State):
             + history
         )
         return {"messages": [{"role": "assistant", "content": response.content}], "research_findings": response.content}
-    except Exception as e:
-        error_msg = f"""[Research Agent]
-
-Error: {str(e)}
-
-Make sure the OpenCode bridge proxy is running:
-```bash
-cd ~/fun-multi-character-chats/opencode-bridge && ./start_proxy.sh
-```"""
+    except Exception:
+        error_msg = "[Research Agent]\n\nThe research provider is currently unavailable."
         return {"messages": [{"role": "assistant", "content": error_msg}], "research_findings": error_msg}
 
 

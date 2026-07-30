@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { type TodoSection, type Todo, type TodoStatus } from "@/lib/types/todo";
 

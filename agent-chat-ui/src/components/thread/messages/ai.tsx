@@ -2,6 +2,7 @@ import { parsePartialJson } from "@langchain/core/output_parsers";
 import { useStreamContext } from "@/providers/Stream";
 import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { useStream } from "@langchain/langgraph-sdk/react";
+import { memo, useEffect } from "react";
 import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
@@ -16,15 +17,10 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 
-function CustomComponent({
-  message,
-  thread,
-}: {
-  message: Message;
-  thread: ReturnType<typeof useStreamContext>;
-}) {
+function CustomComponent({ message }: { message: Message }) {
   const artifact = useArtifact();
-  const { values } = useStreamContext();
+  const thread = useStreamContext();
+  const { values } = thread;
   const customComponents = values.ui?.filter(
     (ui) => ui.metadata?.message_id === message.id,
   );
@@ -99,19 +95,45 @@ function Interrupt({
   );
 }
 
-export function AssistantMessage({
+function AssistantMessageImpl({
   message,
   isLoading,
   handleRegenerate,
-  onSpeak,
+  onSpeakMessage,
   isSpeaking,
+  isLastMessage,
+  hasNoAIOrToolMessages,
+  parentCheckpoint,
+  branch,
+  branchOptions,
+  onSelectBranch,
+  threadInterrupt,
+  hasCustomComponent,
 }: {
   message: Message | undefined;
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
-  onSpeak?: () => void;
+  onSpeakMessage?: (messageId: string | undefined, content: string) => void;
   isSpeaking?: boolean;
+  isLastMessage: boolean;
+  hasNoAIOrToolMessages: boolean;
+  parentCheckpoint: Checkpoint | null | undefined;
+  branch: string | undefined;
+  branchOptions: string[] | undefined;
+  onSelectBranch: (branch: string) => void;
+  threadInterrupt: unknown;
+  hasCustomComponent: boolean;
 }) {
+  useEffect(() => {
+    if (!message?.id) return;
+    const target = window as typeof window & {
+      __messageRenders?: Record<string, number>;
+    };
+    if (target.__messageRenders) {
+      target.__messageRenders[message.id] =
+        (target.__messageRenders[message.id] ?? 0) + 1;
+    }
+  });
   const content = message?.content ?? [];
   const contentString = getContentString(content);
   const [hideToolCalls] = useQueryState(
@@ -119,16 +141,6 @@ export function AssistantMessage({
     parseAsBoolean.withDefault(false),
   );
 
-  const thread = useStreamContext();
-  const isLastMessage =
-    thread.messages[thread.messages.length - 1].id === message?.id;
-  const hasNoAIOrToolMessages = !thread.messages.find(
-    (m) => m.type === "ai" || m.type === "tool",
-  );
-  const meta = message ? thread.getMessagesMetadata(message) : undefined;
-  const threadInterrupt = thread.interrupt;
-
-  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
   const anthropicStreamedToolCalls = Array.isArray(content)
     ? parseAnthropicStreamedToolCalls(content)
     : undefined;
@@ -151,7 +163,10 @@ export function AssistantMessage({
   }
 
   return (
-    <div className="group mr-auto flex w-full items-start gap-2">
+    <div
+      className="group mr-auto flex w-full items-start gap-2"
+      data-message-id={message?.id}
+    >
       <div className="flex w-full flex-col gap-2">
         {isToolResult ? (
           <>
@@ -166,7 +181,9 @@ export function AssistantMessage({
           <>
             {contentString.length > 0 && (
               <div className="py-1">
-                <MarkdownText streaming={isLoading && isLastMessage}>{contentString}</MarkdownText>
+                <MarkdownText streaming={isLoading && isLastMessage}>
+                  {contentString}
+                </MarkdownText>
               </div>
             )}
 
@@ -184,11 +201,8 @@ export function AssistantMessage({
               </>
             )}
 
-            {message && (
-              <CustomComponent
-                message={message}
-                thread={thread}
-              />
+            {message && hasCustomComponent && (
+              <CustomComponent message={message} />
             )}
             <Interrupt
               interrupt={threadInterrupt}
@@ -202,9 +216,9 @@ export function AssistantMessage({
               )}
             >
               <BranchSwitcher
-                branch={meta?.branch}
-                branchOptions={meta?.branchOptions}
-                onSelect={(branch) => thread.setBranch(branch)}
+                branch={branch}
+                branchOptions={branchOptions}
+                onSelect={onSelectBranch}
                 isLoading={isLoading}
               />
               <CommandBar
@@ -212,7 +226,11 @@ export function AssistantMessage({
                 isLoading={isLoading}
                 isAiMessage={true}
                 handleRegenerate={() => handleRegenerate(parentCheckpoint)}
-                onSpeak={onSpeak}
+                onSpeak={
+                  onSpeakMessage
+                    ? () => onSpeakMessage(message?.id, contentString)
+                    : undefined
+                }
                 isSpeaking={isSpeaking}
               />
             </div>
@@ -222,6 +240,8 @@ export function AssistantMessage({
     </div>
   );
 }
+
+export const AssistantMessage = memo(AssistantMessageImpl);
 
 export function AssistantMessageLoading() {
   return (

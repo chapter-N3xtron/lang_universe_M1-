@@ -4,16 +4,28 @@ import "./markdown-styles.css";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeKatex from "rehype-katex";
-import remarkMath from "remark-math";
-import { FC, memo, useMemo, useState } from "react";
+import { FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import { SyntaxHighlighter } from "@/components/thread/syntax-highlighter";
+import dynamic from "next/dynamic";
 
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 
-import "katex/dist/katex.min.css";
+const SyntaxHighlighter = dynamic(
+  () =>
+    import("@/components/thread/syntax-highlighter").then(
+      (module) => module.SyntaxHighlighter,
+    ),
+  {
+    ssr: false,
+    loading: () => <pre className="overflow-x-auto p-4">Loading code…</pre>,
+  },
+);
+
+const MathMarkdown = dynamic(
+  () => import("./math-markdown").then((module) => module.MathMarkdown),
+  { ssr: false },
+);
 
 const HAS_MATH_RE = /\$[^$]*\$/;
 
@@ -249,27 +261,28 @@ const defaultComponents: any = {
   },
 };
 
-const MarkdownTextImpl: FC<{ children: string; streaming?: boolean }> = ({ children, streaming }) => {
-  const plugins = useMemo(() => {
-    if (streaming) return { remark: [remarkGfm], rehype: [] };
-    const hasMath = hasMathDelimiters(children);
-    return {
-      remark: hasMath ? [remarkGfm, remarkMath] : [remarkGfm],
-      rehype: hasMath ? [rehypeKatex] : [],
-    };
-  }, [children, streaming]);
-
+const MarkdownTextImpl: FC<{ children: string; streaming?: boolean }> = ({
+  children,
+  streaming,
+}) => {
   if (streaming) {
     return (
       <div className="markdown-content whitespace-pre-wrap">{children}</div>
     );
   }
 
+  if (hasMathDelimiters(children)) {
+    return (
+      <div className="markdown-content">
+        <MathMarkdown components={defaultComponents}>{children}</MathMarkdown>
+      </div>
+    );
+  }
+
   return (
     <div className="markdown-content">
       <ReactMarkdown
-        remarkPlugins={plugins.remark}
-        rehypePlugins={plugins.rehype}
+        remarkPlugins={[remarkGfm]}
         components={defaultComponents}
       >
         {children}

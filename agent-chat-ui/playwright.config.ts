@@ -11,12 +11,12 @@ export default defineConfig({
     },
   ],
   use: {
-    baseURL: "http://127.0.0.1:3001",
+    baseURL: "http://127.0.0.1:3101",
     headless: true,
   },
   webServer: {
-    command: "pnpm start -p 3001",
-    url: "http://127.0.0.1:3001",
-    reuseExistingServer: true,
+    command: "./node_modules/.bin/next start -p 3101",
+    url: "http://127.0.0.1:3101",
+    reuseExistingServer: false,
   },
 });

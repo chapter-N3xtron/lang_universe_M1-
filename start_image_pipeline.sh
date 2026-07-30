@@ -248,7 +248,9 @@ start_langgraph() {
   _ensure_dirs
   echo "  Starting LangGraph (graph server)..."
   cd "$ROOT/backend"
-  nohup ./venv/bin/langgraph up --port "$LANGGRAPH_PORT" --wait >> "$LOGDIR/langgraph.log" 2>&1 &
+  nohup ./venv/bin/langgraph up --port "$LANGGRAPH_PORT" --wait \
+    --docker-compose "$ROOT/backend/docker-compose.override.yml" \
+    >> "$LOGDIR/langgraph.log" 2>&1 &
   echo $! > "$PIDDIR/langgraph.pid"
   disown
 
@@ -261,14 +263,19 @@ start_langgraph() {
 }
 
 stop_langgraph() {
-  local project_name="langgraph-agent-chat-opencode"
-  
-  if docker compose -p "$project_name" down --remove-orphans 2>/dev/null; then
+  local project_name="backend"
+  local container_ids
+  container_ids=$(docker ps -aq \
+    --filter "label=com.docker.compose.project=$project_name" 2>/dev/null)
+
+  if [ -n "$container_ids" ]; then
+    echo "$container_ids" | xargs docker rm -f >/dev/null
+    docker network rm "${project_name}_default" >/dev/null 2>&1 || true
     echo "  LangGraph stopped and removed"
   else
-    echo "  LangGraph not running via docker compose"
+    echo "  LangGraph not running"
   fi
-  
+
   rm -f "$PIDDIR/langgraph.pid" 2>/dev/null || true
 }
 

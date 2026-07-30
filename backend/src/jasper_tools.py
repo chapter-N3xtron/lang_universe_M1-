@@ -4,7 +4,6 @@ from pathlib import Path
 
 import httpx
 from langchain_core.tools import tool
-
 from langchain_tavily import TavilySearch
 
 TODOS_FILE = os.getenv(
@@ -58,9 +57,9 @@ def read_file(file_path: str) -> str:
     Security: path traversal and symlink attacks are blocked.
     Binary files and files over 100KB are rejected.
     """
-    workspace = os.getenv("OPENCODE_WORKSPACE", "")
+    workspace = os.getenv("AGENT_WORKSPACE", "")
     if not workspace:
-        return "Error: OPENCODE_WORKSPACE environment variable is not set."
+        return "Error: AGENT_WORKSPACE environment variable is not set."
 
     workspace_path = Path(workspace).resolve()
     resolved = Path(file_path).expanduser()
@@ -71,7 +70,7 @@ def read_file(file_path: str) -> str:
     try:
         resolved.relative_to(workspace_path)
     except ValueError:
-        return f"Error: Access denied — path is outside the workspace directory."
+        return "Error: Access denied — path is outside the workspace directory."
 
     if not resolved.exists():
         return f"Error: File not found: {file_path}"

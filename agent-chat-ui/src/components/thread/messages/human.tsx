@@ -1,6 +1,5 @@
-import { useStreamContext } from "@/providers/Stream";
-import { Message } from "@langchain/langgraph-sdk";
-import { useState } from "react";
+import { Checkpoint, Message } from "@langchain/langgraph-sdk";
+import { useEffect, useState, memo } from "react";
 import { getContentString } from "../utils";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,17 +33,39 @@ function EditableContent({
   );
 }
 
-export function HumanMessage({
+function HumanMessageImpl({
   message,
   isLoading,
+  parentCheckpoint,
+  firstSeenValues,
+  branch,
+  branchOptions,
+  onSelectBranch,
+  onSubmitEdit,
 }: {
   message: Message;
   isLoading: boolean;
+  parentCheckpoint: Checkpoint | null | undefined;
+  firstSeenValues: Record<string, unknown> | undefined;
+  branch: string | undefined;
+  branchOptions: string[] | undefined;
+  onSelectBranch: (branch: string) => void;
+  onSubmitEdit: (
+    message: Message,
+    checkpoint: Checkpoint | null | undefined,
+    values: Record<string, unknown> | undefined,
+  ) => void;
 }) {
-  const thread = useStreamContext();
-  const meta = thread.getMessagesMetadata(message);
-  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
-
+  useEffect(() => {
+    if (!message.id) return;
+    const target = window as typeof window & {
+      __messageRenders?: Record<string, number>;
+    };
+    if (target.__messageRenders) {
+      target.__messageRenders[message.id] =
+        (target.__messageRenders[message.id] ?? 0) + 1;
+    }
+  });
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState("");
   const contentString = getContentString(message.content);
@@ -53,28 +74,12 @@ export function HumanMessage({
     setIsEditing(false);
 
     const newMessage: Message = { type: "human", content: value };
-    thread.submit(
-      { messages: [newMessage] },
-      {
-        checkpoint: parentCheckpoint,
-        streamMode: ["messages"],
-        streamSubgraphs: true,
-        streamResumable: true,
-        optimisticValues: (prev) => {
-          const values = meta?.firstSeenState?.values;
-          if (!values) return prev;
-
-          return {
-            ...values,
-            messages: [...(values.messages ?? []), newMessage],
-          };
-        },
-      },
-    );
+    onSubmitEdit(newMessage, parentCheckpoint, firstSeenValues);
   };
 
   return (
     <div
+      data-message-id={message.id}
       className={cn(
         "group ml-auto flex items-center gap-2",
         isEditing && "w-full max-w-xl",
@@ -126,9 +131,9 @@ export function HumanMessage({
           )}
         >
           <BranchSwitcher
-            branch={meta?.branch}
-            branchOptions={meta?.branchOptions}
-            onSelect={(branch) => thread.setBranch(branch)}
+            branch={branch}
+            branchOptions={branchOptions}
+            onSelect={onSelectBranch}
             isLoading={isLoading}
           />
           <CommandBar
@@ -149,3 +154,5 @@ export function HumanMessage({
     </div>
   );
 }
+
+export const HumanMessage = memo(HumanMessageImpl);

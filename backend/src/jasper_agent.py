@@ -1,12 +1,13 @@
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
-from langchain_core.messages import SystemMessage
 from typing import Annotated, TypedDict
 
+from langchain_core.messages import SystemMessage
+from langgraph.graph import START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+
 from src.agent_utils import get_user_query
+from src.jasper_tools import list_todos, read_file, read_url, web_search
 from src.llm import get_llm
-from src.jasper_tools import list_todos, read_file, web_search, read_url
 
 
 class State(TypedDict):
@@ -48,7 +49,7 @@ def call_model(state: State):
         formatted_todos = _format_todos_for_prompt(todos_data)
         system_prompt = (
             "You are Jasper, a helpful daily-driver assistant. "
-            "You can hand off tasks to OpenCode for coding/repo work, "
+            "You can hand off tasks to Deep Agent for coding/repo work, "
             "Research for web searches, or Magic Coder for unrestricted coding. "
             "Be concise and friendly.\n\n"
             "You have access to tools you can use to help the user. "
@@ -64,7 +65,7 @@ def call_model(state: State):
         content = (
             f"Hi, I'm Jasper.\n\n"
             f"I heard: \"{user_text}\"\n\n"
-            f"I can hand this off to OpenCode for repo work or Research for web tasks. "
+            f"I can hand this off to Deep Agent for repo work or Research for web tasks. "
             f"Use the agent selector above to choose who should handle it."
         )
         return {"messages": [{"role": "assistant", "content": content}], "jasper_response": content}

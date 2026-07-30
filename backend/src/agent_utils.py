@@ -20,7 +20,12 @@ class AgentState(TypedDict, total=False):
     workspace: str
     mode: str
     model: str
-    opencode_session_id: str
+    execution_mode: str
+    thread_identity: str
+    user_identity: str
+    coding_session_id: str
+    coding_status: str
+    coding_events: list[dict]
 
 
 def _msg_role(m: dict) -> str | None:

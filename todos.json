@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-29T03:00:00Z",
+  "updated_at": "2026-07-30T03:36:05Z",
   "updated_by": "opencode-desktop",
   "sections": [
     {
@@ -98,7 +98,7 @@
           "agent": "opencode",
           "completed_by_model": "unknown",
           "completed_at": "2026-07-27T05:00:00Z",
-          "notes": "WebSocket streaming and artifact rendering"
+          "notes": "Audit correction (2026-07-30): artifact rendering exists, but the active frontend uses LangGraph SDK HTTP/SSE streaming; no application WebSocket implementation was found. The WebSocket portion of this milestone is unsupported by the current repository."
         },
         {
           "id": "phase-10-refinement",
@@ -107,7 +107,7 @@
           "agent": "opencode",
           "completed_by_model": "unknown",
           "completed_at": "2026-07-27T05:30:00Z",
-          "notes": "Final polish and error handling improvements"
+          "notes": "Historical milestone for polish and error handling. Audit correction (2026-07-30): this should not be read as current production-readiness evidence; runtime UI lag remains unresolved and the focused Playwright suite is currently 8/9."
         }
       ]
     },
@@ -278,7 +278,7 @@
           "agent": "opencode",
           "completed_by_model": "ollama-cloud/glm-5.2",
           "completed_at": "2026-07-27T23:30:00Z",
-          "notes": "33 pytest, 11 Playwright, tsc clean \u2014 all passing"
+          "notes": "Historical result: 33 pytest, 11 Playwright, and tsc were reported passing at completion time. Current audit on 2026-07-30: backend 58/58 passed and tsc passed, but the focused frontend suite was 8/9 because tests/tts.spec.ts failed to render its mocked assistant message. This record does not establish that the current full suite passes."
         }
       ]
     },
@@ -503,7 +503,7 @@
           "agent": "opencode",
           "completed_by_model": "ollama-cloud/kimi-k2.7-code",
           "completed_at": "2026-07-29T01:06:25Z",
-          "notes": "remarkMath/rehypeKatex are only included when content contains $...$ delimiters. TypeScript compiles clean."
+          "notes": "Audit correction (2026-07-30): plugin execution is conditional on math delimiters, but remark-math and rehype-katex remain static top-level imports in markdown-text.tsx. This avoids parsing non-math messages but does not lazy-load or remove the libraries from the initial module graph."
         },
         {
           "id": "ui-perf-nostream-tag",
@@ -530,7 +530,7 @@
           "agent": "opencode",
           "completed_by_model": "ollama-cloud/kimi-k2.7-code",
           "completed_at": "2026-07-29T01:06:25Z",
-          "notes": "OpenCode complete/error event handling in Stream.tsx now checks isRoutingToOpenCode(prev) inside the mutate callback so it only mutates state during OpenCode runs."
+          "notes": "Audit correction (2026-07-30): state mutation is guarded by isRoutingToOpenCode(prev), but onCustomEvent remains installed globally. The requested conditional custom stream mode was not implemented, so the SDK may still add custom mode for non-OpenCode requests."
         }
       ]
     },
@@ -612,51 +612,267 @@
           "completed_by_model": "deepseek-v4-flash-free",
           "completed_at": "2026-07-28T05:00:00Z",
           "notes": "Sources: npm (https://www.npmjs.com/package/opencode-swarm), GitHub (https://github.com/ZaxbyHub/opencode-swarm \u2014 417 stars, 44 forks, MIT, v7.132.0), Architecture doc (https://github.com/ZaxbyHub/opencode-swarm/blob/main/docs/architecture.md), Libraries.io (https://libraries.io/npm/opencode-swarm). Swarm is by ZaxbyHub (community), NOT by anomalyco (OpenCode team, 191k stars)."
+        }
+      ]
+    },
+    {
+      "id": "tts-leak-and-frontend-arch",
+      "title": "TTS Buffer Leak Fix + Next.js Frontend Architecture Refactor",
+      "created_at": "2026-07-29T04:30:00Z",
+      "planned_by_model": "ollama-cloud/glm-5.2",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "tts-buffer-source-leak",
+          "content": "Fix TTS BufferSource node leak. After long TTS readouts, hundreds of dead audio nodes accumulated in the Web Audio graph causing UI slowdown. Added source.onended = () => source.disconnect() to clean up each node after playback. Also reduced polling interval from 100ms to 250ms.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T04:00:00Z",
+          "notes": "Fixed in agent-chat-ui/src/hooks/useTTS.ts. Two changes: (1) source.onended callback disconnects the node from the audio graph after playback, preventing accumulation. (2) Polling interval for playback completion increased from 100ms to 250ms to reduce timer overhead."
         },
         {
-          "id": "swarm-verification-spike",
-          "content": "VERIFICATION SPIKE (go/no-go gate): Install OpenCode Swarm, run opencode serve, send a test task to the Swarm architect, verify: (1) GET /session/:id/children returns child sessions for subagent work, (2) GET /session/:id/message returns full message history for each subagent, (3) GET /session/:id/diff returns file diffs, (4) GET /event SSE stream delivers real-time events for tool calls and subagent invocations, (5) .swarm/ files (plan-ledger.jsonl, evidence/, context.md) are parseable. If any of these fail, Swarm may be a black box and we need a different approach.",
-          "status": "pending",
+          "id": "frontend-memoize-messages",
+          "content": "Memoize AssistantMessage and HumanMessage with React.memo. Previously, every keystroke or stream token re-rendered ALL messages in the list. Now message components only re-render when their own props change.",
+          "status": "completed",
           "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "Sources: OpenCode Server API (https://opencode.ai/docs/server \u2014 child sessions, messages, diffs, events endpoints documented), OpenCode Agents (https://opencode.ai/docs/agents \u2014 'When subagents create child sessions, use session_child_first'). UNVERIFIED: Swarm's internal delegations may or may not produce queryable child sessions. Must test before committing."
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T04:15:00Z",
+          "notes": "Wrapped AssistantMessage (ai.tsx) and HumanMessage (human.tsx) in React.memo. Audit correction (2026-07-30): the components consume stream context, so React.memo does not guarantee they render only when their own props change; context updates can still rerender every message."
         },
         {
-          "id": "swarm-server-client",
-          "content": "Replace backend/src/opencode_cli.py subprocess approach with HTTP client talking to opencode serve on port 4096. New module backend/src/opencode_server.py. Wraps REST API: POST /session (create), POST /session/:id/message (send prompt with agent param), GET /session/:id/children (subagent sessions), GET /session/:id/message (messages), GET /session/:id/diff (file diffs), GET /event (SSE stream), POST /session/:id/permissions/:permissionID (respond to permission requests).",
-          "status": "pending",
+          "id": "frontend-extract-chat-input",
+          "content": "Extract chat input/footer into separate ChatInput component with its own state. Previously, typing in the textarea caused the entire Thread component (877 lines) to re-render, including all messages. Now input state (text, file upload, agent/model/voice selection, STT) is isolated in ChatInput.",
+          "status": "completed",
           "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "Sources: OpenCode Server API (https://opencode.ai/docs/server), OpenCode SDK (https://opencode.ai/docs/sdk \u2014 type-safe JS client, Python equivalent would use httpx or aiohttp). Replaces current asyncio.create_subprocess_exec approach in opencode_cli.py:286."
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T04:15:00Z",
+          "notes": "New file: agent-chat-ui/src/components/thread/chat-input.tsx. Contains textarea, file upload, agent/model/voice selectors, STT button, submit/cancel button. Wrapped in memo. Receives model/voice options as props from parent."
         },
         {
-          "id": "swarm-event-forwarding",
-          "content": "Subscribe to GET /event SSE stream from OpenCode Server. Forward Swarm events to LangGraph's get_stream_writer() as custom events: subagent_started, subagent_completed, tool_call, file_diff, permission_request, session_message, phase_complete. Frontend onCustomEvent handler in Stream.tsx extended for new event types. UI shows real-time subagent activity.",
-          "status": "pending",
+          "id": "frontend-extract-message-list",
+          "content": "Extract message rendering into MessageList component with isolated TTS state. Previously, TTS speaking state in Thread caused all messages to re-render. Now TTS (speak/stop/speaking) lives inside MessageList, so TTS state changes only affect MessageList, not ChatInput or header.",
+          "status": "completed",
           "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "Sources: OpenCode Server events (https://opencode.ai/docs/server \u2014 'GET /event Server-sent events stream. First event is server.connected, then bus events'), LangGraph streaming custom events (https://docs.langchain.com/oss/python/langgraph/streaming \u2014 'Custom data' section, get_stream_writer()). UNVERIFIED: exact event types Swarm produces via the SSE stream."
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T04:15:00Z",
+          "notes": "New file: agent-chat-ui/src/components/thread/message-list.tsx. Contains message filtering, mapping, TTS hook, handleRegenerate/handleSpeak callbacks via useCallback. Wrapped in memo."
         },
         {
-          "id": "swarm-ui-components",
-          "content": "Build UI components for OpenCode Swarm visibility in Agent Chat UI: (1) Subagent tree panel showing parent + child sessions with agent name, status, description (adapt todo sidebar pattern, uses GET /session/:id/children). (2) File diff viewer showing changes made by agents (adapt artifact panel, uses GET /session/:id/diff). (3) Permission approval UI for responding to agent permission requests (adapt existing HITL interrupt pattern, uses POST /session/:id/permissions/:permissionID). (4) Agent selector dropdown for choosing Swarm architect vs other agents. (5) Evidence/quality gate display showing test results, security scans, review verdicts.",
-          "status": "pending",
+          "id": "frontend-extract-model-voices-hook",
+          "content": "Extract model and voice loading into useModelAndVoices custom hook. Previously, two fetch calls + 6 useState calls lived in Thread. Now isolated in a reusable hook.",
+          "status": "completed",
           "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "Sources: Agent Chat UI existing patterns (todo sidebar in components/thread/todos/index.tsx, artifact panel, HITL interrupt in chat_ui.py approval_node). OpenCode Server API for data sources (https://opencode.ai/docs/server). OpenCode SDK for client-side integration option (https://opencode.ai/docs/sdk)."
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T04:15:00Z",
+          "notes": "New file: agent-chat-ui/src/hooks/use-model-and-voices.ts. Returns modelOptions, modelProviders, defaultModel, selectedModel, voiceOptions, selectedVoice, and setters. useEffect with [] deps for one-time fetch."
         },
         {
-          "id": "swarm-configuration",
-          "content": "Configure OpenCode Swarm: install via bunx opencode-swarm install, create project-level .opencode/opencode-swarm.json with per-agent models, execution mode (balanced/turbo/full-auto), permission policy. QUESTION: Which models for each agent? Which execution mode? Should user approve every file edit or auto-approve safe operations?",
-          "status": "pending",
+          "id": "frontend-dynamic-imports",
+          "content": "Dynamic import heavy sidebar components (ThreadHistory, TodoList) via next/dynamic with ssr:false. Reduces initial JS bundle by deferring sidebar load until needed.",
+          "status": "completed",
           "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "Sources: Swarm getting started (https://github.com/ZaxbyHub/opencode-swarm/blob/main/docs/getting-started.md), configuration (https://github.com/ZaxbyHub/opencode-swarm/blob/main/docs/configuration.md). Open questions: model selection per agent, execution mode, permission policy. Swarm supports per-agent models (e.g. strong for architect, fast for explorer)."
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T04:15:00Z",
+          "notes": "Changed from static imports to dynamic() in thread/index.tsx. Audit correction (2026-07-30): this creates split chunks and disables SSR, but both components remain mounted by Thread even when their sidebars are closed, so it does not strictly defer loading until the user opens a sidebar."
+        },
+        {
+          "id": "frontend-callback-stabilization",
+          "content": "Stabilize callbacks with useCallback in Thread and child components. Previously, inline arrow functions created new references every render, defeating memo. Now all handlers passed to children are wrapped in useCallback.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T04:15:00Z",
+          "notes": "useCallback applied to handleRegenerate, handleSpeak, handleSubmit in MessageList and ChatInput. Thread also wrapped in memo."
+        },
+        {
+          "id": "frontend-verify-build",
+          "content": "Verify the refactored frontend builds and runs correctly. TypeScript compiles clean (tsc --noEmit passes). npm run build succeeds. Frontend serves 200 on :3001. However, the initial build was done while in plan mode (violation) and needed a clean rebuild to confirm the refactored code is actually served.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T20:17:00Z",
+          "notes": "Historical verification: clean build and three healthy services were reported on 2026-07-29. Current audit on 2026-07-30: backend 58/58 passed and tsc passed; focused Playwright was 8/9 with tests/tts.spec.ts failing before the TTS button assertion. Runtime UI lag remains unresolved."
+        }
+      ]
+    },
+    {
+      "id": "ui-lag-evidence-and-remediation",
+      "title": "UI Lag — Evidence, Remediation, and Regression Plan",
+      "created_at": "2026-07-30T01:17:59Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "ui-lag-reproduce-profile",
+          "content": "Create a deterministic lag reproduction using short, long, tool-heavy, and fast-streaming conversations. Capture Chrome Performance and React Profiler traces from the production build, recording long tasks, commit duration, render counts, FPS, heap growth, and time-to-first/last-token.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "Added production-build Chromium profiles in agent-chat-ui/tests/performance.spec.ts and recorded the reproducible baseline in agent-chat-ui/PERFORMANCE.md. The suite covers a 300-message persisted thread and a maximum 128-event tool/text coding stream. It records ready/last-token time, DOM nodes, JS heap, long tasks, frame intervals, MessageList commits, and sampled historical-row commits. Latest full-suite baseline: 378 ms long-thread readiness, 1,915 DOM nodes, 24.5 MB heap, 447 ms maximum-event stream completion, 54 ms maximum long task, 59 ms maximum frame interval, and zero sampled historical-row rerenders. Short functional and TTS conversations remain covered separately."
+        },
+        {
+          "id": "ui-lag-stream-event-audit",
+          "content": "Instrument the LangGraph stream path and fix event-mode selection. Measure events and React notifications per response; ensure custom streaming is requested only when required, remove no-op mutations, and tune batching from trace evidence without breaking OpenCode status events or HITL interrupts.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "Replaced the former unbounded status path with the versioned Deep Agents coding contract. Native stream events are translated once; canonical final messages remain separate. Text batches at 512 characters and 16 KiB, backend events cap at 128, browser retention caps at 32, duplicate sequences are ignored, and custom mutations apply only to validated coding_event version 1 envelopes. The maximum-contract browser profile completes in 447 ms with a 54 ms maximum long task. Standard LangGraph HITL interrupts remain on the resumable message stream."
+        },
+        {
+          "id": "ui-lag-isolate-stream-context",
+          "content": "Prevent historical message rows and unrelated controls from rerendering on every stream-state update. Split stream state into narrow subscriptions or pass stable derived data into memoized components; verify with profiler render counts rather than relying on React.memo alone.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "AssistantMessage and HumanMessage now receive stable metadata/action props instead of subscribing directly to the stream. Only active external UI and interrupt leaves subscribe when present. ChatInput uses stable action wrappers and reads messages only at submit time. Production commit counters prove sampled historical rows have zero rerenders across the maximum 128-event stream."
+        },
+        {
+          "id": "ui-lag-message-windowing",
+          "content": "Bound DOM and parsing work for long threads by implementing message windowing or virtualization with preserved scroll-to-bottom, regeneration, tool-call expansion, interrupts, and accessibility. Define a safe fallback for variable-height Markdown and artifacts.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "Implemented variable-height-safe incremental windowing: the newest 80 messages render initially and an accessible button reveals earlier 80-message windows. Boundaries expand backward across leading tool results so a window does not begin mid-tool sequence. Existing stick-to-bottom, regeneration, tool expansion, interrupts, artifacts, and message controls remain intact. The 300-message profile renders 80 rows and 1,915 total DOM nodes."
+        },
+        {
+          "id": "ui-lag-markdown-bundle",
+          "content": "Profile Markdown, syntax highlighting, math, and tool-call rendering separately. Cache finalized message output, keep streaming rendering lightweight, dynamically load math/highlighting code when truly needed, and avoid reparsing unchanged historical messages.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "Streaming text uses a lightweight whitespace-preserving element. Final Markdown remains memoized. Syntax highlighting is dynamically imported only for fenced language blocks; math parsing, rendering, and Katex CSS are isolated in a dynamic module loaded only for math delimiters. Together with layout cleanup, the initial route fell from 676 kB to 549 kB. Historical finalized Markdown is protected by row memoization and verified commit counts."
+        },
+        {
+          "id": "ui-lag-layout-animation-audit",
+          "content": "Measure layout, paint, and compositing cost from Framer Motion sidebars, sticky scrolling, artifacts, and loading indicators. Remove or simplify only the animations shown to cause long frames, and honor reduced-motion preferences.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "Removed spring animation work from the main history sidebar, todo sidebar, content margin, and header movement. These now use short transform/margin CSS transitions with motion-reduce:transition-none. Dynamic sidebar module loading and conditional todo polling remain. The measured maximum frame interval under the maximum coding event stream is 59 ms against a 200 ms regression budget."
+        },
+        {
+          "id": "ui-lag-regression-suite",
+          "content": "Repair the failing TTS Playwright mock and add performance-oriented regression coverage for fast streaming and long conversations. Establish explicit budgets for render count, long tasks, heap growth, and interaction latency, then verify backend tests, TypeScript, production build, focused UI tests, and live-service end-to-end tests separately.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "Repaired production Playwright startup by using an isolated port and direct Next binary, updated the TTS/model mocks, and added explicit performance budgets for readiness, visible rows, DOM size, long tasks, heap, frame interval, stream completion, and historical-row rerenders. The optimized build, TypeScript, 94 backend tests, 9 focused UI/TTS tests, 2 performance tests, and live read-only local-Ollama Deep Agents smoke are run as distinct gates."
+        }
+      ]
+    },
+    {
+      "id": "deep-agents-coding-agent-migration",
+      "title": "Replace OpenCode with Deep Agents Coding Agent",
+      "created_at": "2026-07-30T01:44:03Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "deep-agents-installer-review",
+          "content": "Download the official https://langch.in/dcode installer to a temporary file, inspect its source and resolved release artifacts without executing it, record the package/version and filesystem changes, then install Deep Agents Code only after explicit approval. Verify dcode --version and dcode --help without displaying credentials or configuration values.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T02:03:11Z",
+          "notes": "Downloaded the official installer to a temporary directory and inspected it before execution; SHA-256 was 3d5ad6020775879a319eb034ea8b78582ec179494073005af2ce039d6fac9763 and bash syntax validation passed. Installed with optional-tool setup disabled using the existing Homebrew uv. Verified /Users/chaptercaptaingeneral/.local/bin/dcode, deepagents-code 0.1.49, Deep Agents SDK 0.7.0b2, and help output. Default provider extras installed: OpenAI, Anthropic, Google GenAI, and media. No credential files or values were read or displayed."
+        },
+        {
+          "id": "deep-agents-integration-spike",
+          "content": "Run a reversible integration-selection spike comparing three supported paths: direct Python Deep Agents SDK via create_deep_agent, dcode --acp over stdio, and dcode -n non-interactive subprocess mode. Verify a representative read-only task, tool-call and message streaming, ACP protocol startup, and CLI task completion, then select one path before production implementation. Leave the full functional, security, persistence, cancellation, error, subagent, artifact, and performance matrix to the downstream parity gate.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T02:19:54Z",
+          "notes": "Selected direct Python SDK integration. A read-only create_deep_agent probe using local Ollama qwen3.5:27b completed successfully, invoked read_file, emitted 55 message chunks and 59 tool-related events, returned DIRECT_OK, confined access to the repository, and denied writes. The dcode ACP adapter completed a JSON-RPC initialize handshake with protocol version 1, so it remains a viable optional interoperability boundary, but adds a stdio translation layer and currently constructs in-memory persistence. The dcode -n probe exited successfully but emitted only a JavaScript-style readFile tool-call expression and no final CLI_OK result, so it failed task-completion parity and was rejected for application integration. Probe scripts are in backend/spikes/. Full production parity remains tracked by deep-agents-parity-verification."
+        },
+        {
+          "id": "deep-agents-provider-configuration",
+          "content": "Define the Deep Agents model/provider configuration and capability checks. Preserve local Ollama support where tool calling is available, choose a default coding model, verify required provider extras, and document environment variable names and loading order without copying secret values into source, tests, logs, todos, or chat output.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T02:44:48Z",
+          "notes": "Added provider-neutral coding model selection for local Ollama, Ollama Cloud, and Hugging Face. The default is the tool-capable local ollama/qwen3.5:27b model with bounded context/output settings; a production-subgraph smoke test completed with read_file and tool-result events. Cloud auth uses OLLAMA_API_KEY with the existing LLM_API_KEY as a compatibility fallback, and Hugging Face uses the library-standard HUGGINGFACEHUB_API_TOKEN. Added only variable names to .env.example, installed and locked deepagents 0.7.0b2 and langchain-huggingface 1.2.2, and added deterministic provider-selection tests. No credential values were read or displayed. Credential-dependent cloud/HF live-model validation remains part of deep-agents-parity-verification."
+        },
+        {
+          "id": "deep-agents-backend-subgraph",
+          "content": "Implement a Deep Agents coding subgraph behind a provider-neutral coding-agent interface. Accept messages, absolute workspace, selected model, execution mode, and thread identity; return standard LangGraph messages and structured coding events. Keep the current OpenCode subgraph available only behind a temporary rollback flag until parity is proven.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T02:44:48Z",
+          "notes": "Implemented backend/src/coding_agent.py and routed the supervisor through a provider-neutral coding node with coding_session_id, coding_status, coding_events, execution_mode, and thread_identity. Deep Agents is the default; CODING_AGENT_BACKEND=opencode is the temporary rollback switch and maps legacy sessions at the adapter boundary. The Deep Agents backend requires an existing absolute directory, confines FilesystemBackend to that root in virtual mode, allows reads, denies writes, exposes no shell tool, emits bounded status/tool summaries, and sanitizes invalid-workspace, dependency, timeout, and provider failures. The production subgraph completed a read-only local Ollama smoke test with a tool call/result and preserved thread identity. Backend lint passed and the full suite passed 68/68."
+        },
+        {
+          "id": "deep-agents-security-hitl",
+          "content": "Configure workspace confinement, filesystem permissions, shell policy, and human-in-the-loop approval before enabling writes or command execution. Resolve and validate the absolute workspace root, deny traversal and sensitive paths, use explicit command policies, redact subprocess/tool errors, and test approve, edit, reject, cancel, and timeout flows.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T02:54:49Z",
+          "notes": "Implemented the security boundary in backend/src/coding_agent.py and backend/src/secure_coding_tools.py and documented it in backend/SECURITY.md. read_only remains the default and legacy live/async values cannot enable mutations. Exact approval mode exposes only workspace-confined write/edit tools and an argv-only command tool, each behind standard Deep Agents/LangGraph approve-edit-reject interrupts with a 900-second expiry. Built-in writes remain denied; reads block .env, .git, and private-key formats; mutations additionally block AGENTS.md and SSH/AWS/GPG paths, traversal, sensitive files, symlink escapes, missing parents, and content over 1 MB. Writes are atomic. Commands reject shell syntax, destructive Git actions, absolute/parent/symlink escapes, risky Git/rg options, and unlisted executables; they run with no inherited credentials, bounded time/output, and credential redaction. LocalShellBackend is not used. Cancellation propagates, runtime/command/approval timeouts are bounded, edited actions are revalidated, and the OpenCode rollback adapter can no longer auto-approve. Full backend lint passed and tests passed 91/91, covering approve, edit, reject, cancellation, runtime timeout, approval expiry, command timeout, redaction, and path policies. Limitation: approved tests/package scripts execute repository code locally and are not OS-isolated; unattended or untrusted execution remains prohibited until a real sandbox is added. Durable approval/checkpoint storage remains tracked by deep-agents-persistence-memory."
+        },
+        {
+          "id": "deep-agents-persistence-memory",
+          "content": "Map Deep Agents thread persistence, conversation compaction, agent memory, skills, and subagent state onto the existing LangGraph/Postgres lifecycle. Ensure one UI thread resumes the correct coding session, prevent memory leakage across repositories or users, and define reset/export behavior.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:03:41Z",
+          "notes": "Implemented backend/src/coding_persistence.py and documented the lifecycle in backend/PERSISTENCE.md. The outer LangGraph server remains canonical UI conversation memory; nested Deep Agents tool, summary, subagent, and pending-HITL state uses an async durable checkpointer. Default storage is backend/data/deep_agents_checkpoints.sqlite3 so restart durability does not depend on Docker; CODING_CHECKPOINT_DB_URI selects the installed async Postgres saver when a deployment provides a dedicated URI. Session IDs are opaque SHA-256 scopes over user identity, UI thread, and resolved repository, preventing cross-user/repository reuse without embedding raw identities or paths. Deep Agents receives full outer history on the first coding turn and only the latest user turn after nested history exists. Repository AGENTS.md loads as read-only memory and workspace-local .agents/skills loads when present. Added scoped sidecar reset/export endpoints. Tests close and reopen the checkpointer to prove pending approval and multi-turn history recovery, verify user/repository isolation, and verify reset/export do not affect sibling sessions. Full backend lint passed and tests passed 96/96."
+        },
+        {
+          "id": "deep-agents-streaming-contract",
+          "content": "Define and implement a bounded frontend event contract for coding status, text, tool calls, subagents, plans, file changes, approvals, completion, and errors. Use native LangGraph/Deep Agents streaming where possible, avoid duplicate message and custom-event text streams, and batch high-frequency updates to protect UI responsiveness.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:14:37Z",
+          "notes": "Added backend/src/coding_events.py and integrated native Deep Agents astream messages/updates into a versioned coding_event envelope. Events include opaque session, monotonic per-run sequence, kind, status, and sanitized data. Transient text is batched at 512 characters, capped at 16 KiB, and never replaces or duplicates the canonical final LangGraph message transcript. Runs retain at most 128 events; frontend state retains only 32. Tool/subagent/plan/file events contain names and opaque call IDs but never arguments, outputs, prompts, file contents, or exception details. Approval events expose only counts, expiry, and decision types. Tests cover batching, caps, categorization, versioning, and secret-payload exclusion; the backend suite passes 99/99."
+        },
+        {
+          "id": "deep-agents-frontend-cutover",
+          "content": "Replace the OpenCode selector, OC status badge, opencode_status state, and OpenCode-specific labels with a Deep Agent coding option and provider-neutral coding status UI. Add subagent/tool progress only after the event contract is stable, and preserve approval and artifact behavior.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:14:37Z",
+          "notes": "Replaced the OpenCode selector and OC badge with Deep Agent and provider-neutral Coding status. Removed opencode_status from Stream state and added typed coding events with sequence deduplication, 32-event retention, and a bounded transient preview. Added an explicit Read only / Ask to edit control that submits execution_mode. The model sidecar now advertises CODING_MODEL/CODING_MODELS entries for local Ollama, Ollama Cloud, and Hugging Face without OpenCode provider labels. TypeScript and the optimized production build pass; mocked UI/TTS Playwright tests pass 9/9 after isolating the test server from a stale port and updating Deep Agent labels."
+        },
+        {
+          "id": "deep-agents-parity-verification",
+          "content": "Build a migration test matrix covering read-only repository analysis, bounded file edits, test execution, multi-turn resume, subagent delegation, long-context compaction, model switching, local Ollama, approvals, cancellation, invalid workspace, missing credentials, restart persistence, and frontend streaming performance. Run backend, typecheck, production build, mocked UI, and live end-to-end suites separately.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:17:49Z",
+          "notes": "The cutover gate passed and is recorded in backend/PARITY.md. Focused lint passed; all 99 backend tests passed; TypeScript passed; the optimized Next.js production build passed; mocked production UI/TTS Playwright tests passed 9/9. A live read-only direct-SDK run against local Ollama qwen3.5:27b completed with 55 message chunks, 59 tool events, a final success token, workspace confinement, and denied writes. The matrix covers bounded edits and commands, model switching, approvals/edit/reject/expiry, cancellation, invalid workspaces, sanitized provider failures, multi-turn restart persistence, subagent availability/events, installed summarization middleware, and bounded frontend streaming. Cloud Ollama and Hugging Face routing are deterministic boundary tests so no credential values were read and no remote quota was spent."
+        },
+        {
+          "id": "deep-agents-remove-opencode",
+          "content": "After the parity gate passes, switch supervisor routing to the Deep Agent implementation and remove OpenCode runtime code, session fields, environment variables, provider labels, tests, launcher configuration, Docker overrides, README/HANDOFF references, and obsolete OpenCode Swarm plans. Update AGENTS.md and todo attribution vocabulary while preserving completed audit history.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "Removed the rollback adapter, CLI subprocess/server runtime files, session compatibility fields, backend selector flag, provider configuration, provider labels, dedicated tests, launcher/Docker variables, and stale Jasper/Research text. Replaced README and HANDOFF with the current Deep Agents architecture. Removed the confirmed obsolete 97-file frontend. Deleted the five never-started superseded Swarm todos while retaining the completed Swarm research entry and all other completed audit history. AGENTS.md now assigns new coding work to the coding agent while explicitly retaining historical legacy values; its schema-v1 updated_by/planned_by_agent protocol identifiers remain unchanged as required by the governing instructions. The package and lock metadata now use langgraph-agent-chat-deep-agents. A read-only reference scan is clean outside todos/AGENTS audit records and the repository's existing directory name. Backend tests pass 94/94 after removing five rollback-only tests."
+        },
+        {
+          "id": "deep-agents-post-cutover-ui-profile",
+          "content": "Resume the paused deterministic UI-lag profile against Deep Agents streaming, establish baseline budgets, and complete the remaining UI remediation work using measured evidence from the final coding-agent event path.",
+          "status": "completed",
+          "agent": null,
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T03:31:49Z",
+          "notes": "Completed the post-cutover production profile and all seven UI Lag remediation tasks. In the final concurrent browser suite, the Deep Agents maximum 128-event stream completes in 447 ms with a 54 ms maximum long task, a 59 ms maximum frame interval, and zero sampled historical-row rerenders. A 300-message persisted thread becomes ready in 378 ms while rendering only 80 rows, 1,915 DOM nodes, and 24.5 MB heap. Implemented stable stream action boundaries, row isolation, tool-safe 80-message windows, lightweight streaming text, dynamic syntax/math loading, and reduced-motion CSS layout transitions. Initial route size fell from 676 kB to 549 kB. Budgets and reproduction are in agent-chat-ui/PERFORMANCE.md and tests/performance.spec.ts."
         }
       ]
     }

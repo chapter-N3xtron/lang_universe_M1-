@@ -1,6 +1,6 @@
 """Custom magic coding agent with local tool use.
 
-This agent bypasses OpenCode CLI entirely. It sends the conversation to a local
+This agent sends the conversation directly to a local
 Ollama model with a permissive system prompt, then lets the model invoke a
 small set of filesystem/shell tools. Tool outputs are appended to the context
 and a final answer is generated.
@@ -65,7 +65,7 @@ def _workspace() -> str:
     ws = _current_workspace.get()
     if ws:
         return ws
-    return os.getenv("OPENCODE_WORKSPACE", os.getcwd())
+    return os.getenv("AGENT_WORKSPACE", os.getcwd())
 
 
 def _resolve(path: str) -> Path:
@@ -1703,6 +1703,6 @@ def _guess_character_name(message: str) -> Optional[str]:
 if __name__ == "__main__":
     result = run_magic_coder(
         "List the files in the workspace and write a one-line summary.",
-        workspace="/Volumes/Storage/LangGraph_AgentChat_ui_Opencode_CLI",
+        workspace=os.getcwd(),
     )
     print(result["text"])

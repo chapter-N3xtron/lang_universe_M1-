@@ -13,7 +13,7 @@ import { test, expect } from "@playwright/test";
 test.describe("TTS play/stop button", () => {
   test.beforeEach(async ({ page }) => {
     // LangGraph SDK polls threads on mount; mock it so the Suspense layout resolves.
-    await page.route("http://127.0.0.1:8123/threads/search", async (route) => {
+    await page.route("**/threads/search", async (route) => {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify([]),
@@ -41,7 +41,7 @@ test.describe("TTS play/stop button", () => {
             {
               id: "ollama-cloud/qwen3.5:397b",
               name: "ollama-cloud/qwen3.5:397b",
-              provider: "opencode",
+              provider: "ollama-cloud",
             },
           ],
         }),
@@ -89,43 +89,56 @@ test.describe("TTS play/stop button", () => {
         }),
       });
     });
-    await page.route("http://127.0.0.1:8123/threads/*/runs/stream", async (route) => {
-      const sseBody = [
-        "event: metadata",
-        `data: ${JSON.stringify({ run_id: "run-1", thread_id: "thread-1" })}`,
-        "",
-        "event: values",
-        `data: ${JSON.stringify({
-          messages: [
-            {
-              id: "msg-human-1",
-              type: "human",
-              content: [{ type: "text", text: "Hello" }],
-            },
+    await page.route("http://127.0.0.1:8123/threads", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          thread_id: "thread-1",
+          created_at: "2026-07-30T00:00:00Z",
+          updated_at: "2026-07-30T00:00:00Z",
+          metadata: {},
+          status: "idle",
+          values: {},
+        }),
+      });
+    });
+    await page.route(
+      "http://127.0.0.1:8123/threads/*/runs/stream",
+      async (route) => {
+        const sseBody = [
+          "event: metadata",
+          `data: ${JSON.stringify({ run_id: "run-1", thread_id: "thread-1" })}`,
+          "",
+          "event: messages",
+          `data: ${JSON.stringify([
             {
               id: "msg-ai-1",
               type: "ai",
               content: [{ type: "text", text: "Hello back to you." }],
             },
-          ],
-        })}`,
-        "",
-        "event: end",
-        "data: [DONE]",
-        "",
-      ].join("\n");
-      await route.fulfill({
-        contentType: "text/event-stream",
-        status: 200,
-        body: sseBody,
-      });
-    });
-    await page.route("http://127.0.0.1:8123/threads/*/history", async (route) => {
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ values: { messages: [] } }),
-      });
-    });
+            { langgraph_node: "jasper" },
+          ])}`,
+          "",
+          "event: end",
+          "data: [DONE]",
+          "",
+        ].join("\n");
+        await route.fulfill({
+          contentType: "text/event-stream",
+          status: 200,
+          body: sseBody,
+        });
+      },
+    );
+    await page.route(
+      "http://127.0.0.1:8123/threads/*/history",
+      async (route) => {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ values: { messages: [] } }),
+        });
+      },
+    );
 
     const sendBtn = page.getByText("Send");
     await expect(sendBtn).toBeEnabled();

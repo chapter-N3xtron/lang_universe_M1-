@@ -1,7 +1,6 @@
 """Tests for durable conversation memory via LangGraph checkpointer."""
 
 import asyncio
-import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -104,54 +103,3 @@ def test_thread_isolation():
     assert "phrase-b" not in a
     assert "phrase-b" in b
     assert "phrase-a" not in b
-
-
-def test_opencode_session_id_persists_in_state(monkeypatch):
-    mock_llm = MagicMock()
-    mock_llm.invoke.return_value = _make_llm_response("done")
-    mock_llm.bind_tools.return_value = mock_llm
-
-    _clear_src_modules()
-    with patch("src.llm.ChatOllama", return_value=mock_llm):
-        opencode_cli = importlib.import_module("src.opencode_cli")
-
-        captured = {}
-
-        async def fake_run_opencode_stream(
-            message="", title="", workspace="", model="",
-            auto_approve=False, history=None, session_id=None,
-        ):
-            captured["session_id_in"] = session_id
-            yield {"type": "complete", "session_id": "sess-123", "text": "ok", "artifacts": []}
-
-        monkeypatch.setattr(
-            opencode_cli, "run_opencode_stream", fake_run_opencode_stream
-        )
-
-        from src.chat_ui import create_chat_ui
-        app = _compile(create_chat_ui())
-        config = {"configurable": {"thread_id": "test-opencode-session"}}
-
-        async def run_turn(messages, config):
-            return await app.ainvoke(
-                {
-                    "messages": messages,
-                    "workspace": "/tmp",
-                    "target_agent": "opencode",
-                    "mode": "live",
-                    "model": None,
-                },
-                config=config,
-            )
-
-        result1 = asyncio.run(run_turn(
-            [{"role": "user", "content": "first"}], config
-        ))
-        assert captured["session_id_in"] is None
-        assert result1["opencode_session_id"] == "sess-123"
-
-        captured.clear()
-        result2 = asyncio.run(run_turn(
-            [{"role": "user", "content": "second"}], config
-        ))
-        assert captured["session_id_in"] == "sess-123"

@@ -120,7 +120,7 @@ test.describe("TTS play/stop button", () => {
           ])}`,
           "",
           "event: end",
-          "data: [DONE]",
+          "data: {}",
           "",
         ].join("\n");
         await route.fulfill({
@@ -135,7 +135,29 @@ test.describe("TTS play/stop button", () => {
       async (route) => {
         await route.fulfill({
           contentType: "application/json",
-          body: JSON.stringify({ values: { messages: [] } }),
+          body: JSON.stringify([
+            {
+              values: {
+                messages: [
+                  {
+                    id: "msg-ai-1",
+                    type: "ai",
+                    content: [{ type: "text", text: "Hello back to you." }],
+                  },
+                ],
+              },
+              next: [],
+              tasks: [],
+              metadata: {},
+              created_at: "2026-07-30T00:00:00Z",
+              checkpoint: {
+                thread_id: "thread-1",
+                checkpoint_ns: "",
+                checkpoint_id: "tts-checkpoint",
+              },
+              parent_checkpoint: null,
+            },
+          ]),
         });
       },
     );

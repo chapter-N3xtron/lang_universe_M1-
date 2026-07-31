@@ -94,7 +94,9 @@ def _atomic_write(path: Path, content: str) -> None:
     encoded = content.encode("utf-8")
     if len(encoded) > MAX_WRITE_BYTES:
         raise CodingPolicyError("content_too_large")
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".coding-agent-", dir=path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".coding-agent-", dir=path.parent
+    )
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as handle:
@@ -224,9 +226,7 @@ def redact_command_output(output: str) -> str:
     return _BEARER.sub("Bearer [REDACTED]", output)
 
 
-async def _run_command(
-    workspace: Path, argv: list[str], timeout: int = 60
-) -> str:
+async def _run_command(workspace: Path, argv: list[str], timeout: int = 60) -> str:
     argv = validate_command_argv(argv)
     _validate_existing_command_paths(workspace, argv)
     if timeout <= 0 or timeout > MAX_COMMAND_TIMEOUT_SECONDS:

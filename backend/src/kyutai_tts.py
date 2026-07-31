@@ -1,17 +1,16 @@
 """Kyutai Pocket TTS engine with streaming and voice cloning support."""
 
 import asyncio
-import os
-from pathlib import Path
-from typing import AsyncGenerator, Optional
-import numpy as np
-import torch
-import safetensors
-from pocket_tts.models.tts_model import TTSModel, init_states, prepare_text_prompt
-from huggingface_hub import hf_hub_download, list_repo_files
 import logging
-import io
-import wave
+import os
+from collections.abc import AsyncGenerator
+from pathlib import Path
+
+import numpy as np
+import safetensors
+import torch
+from huggingface_hub import hf_hub_download, list_repo_files
+from pocket_tts.models.tts_model import TTSModel, init_states, prepare_text_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +19,8 @@ VOICE_DIR = "languages/english/embeddings"
 LOCAL_VOICE_DIR = Path(__file__).resolve().parent.parent / "voices"
 
 TARGET_PEAK = 10 ** (-4.8 / 20)  # -4.8 dBFS (matches predefined voice level)
-CLONE_TARGET = 10 ** (-5 / 20)   # -5 dBFS for cloned voices
-FADE_SAMPLES = 240       # 10ms at 24kHz
+CLONE_TARGET = 10 ** (-5 / 20)  # -5 dBFS for cloned voices
+FADE_SAMPLES = 240  # 10ms at 24kHz
 CROSSFADE_SAMPLES = 120  # 5ms at 24kHz
 
 
@@ -62,7 +61,7 @@ def _load_voice_state(voice_path: str, device: torch.device) -> dict:
     """Load a pre-computed voice state from a safetensors file."""
     result = {}
     with safetensors.safe_open(voice_path, framework="pt") as f:
-        for key in f.keys():
+        for key in f.keys():  # noqa: SIM118 - safe_open is not a dict
             module_name, tensor_key = key.split("/")
             result.setdefault(module_name, {})
             if tensor_key == "current_end":
@@ -80,7 +79,7 @@ class PocketTTSEngine:
 
     def __init__(self, model_name: str = "english"):
         self.model_name = model_name
-        self._model: Optional[TTSModel] = None
+        self._model: TTSModel | None = None
         self._voice_cache: dict[str, dict] = {}
         self._voice_mtimes: dict[str, float] = {}
         self._available_voices: list[str] = []
@@ -135,7 +134,9 @@ class PocketTTSEngine:
             if voice_name in self._voice_cache and cached == mtime:
                 return self._voice_cache[voice_name]
             logger.info(f"Loading local voice: {voice_name}")
-            state = await asyncio.to_thread(_load_voice_state, str(local_path), self._device)
+            state = await asyncio.to_thread(
+                _load_voice_state, str(local_path), self._device
+            )
             self._voice_mtimes[voice_name] = mtime
         else:
             if voice_name in self._voice_cache:
@@ -204,6 +205,7 @@ class PocketTTSEngine:
             except Exception as e:
                 logger.error(f"TTS synthesis failed: {e}")
                 import traceback
+
                 logger.error(traceback.format_exc())
                 return np.zeros(24000, dtype=np.float32), 1.0
 
@@ -220,15 +222,18 @@ class PocketTTSEngine:
 
             states = await self._get_states(text, voice)
             text_str, _ = prepare_text_prompt(
-            text,
-            pad_with_spaces_for_short_inputs=False,
-            remove_semicolons=False,
-        )
+                text,
+                pad_with_spaces_for_short_inputs=False,
+                remove_semicolons=False,
+            )
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         sentinel = object()
-        _queue_put = lambda item: asyncio.run_coroutine_threadsafe(queue.put(item), loop).result()
+
+        def _queue_put(item):
+            return asyncio.run_coroutine_threadsafe(queue.put(item), loop).result()
+
         is_clone = voice in self._local_voices
 
         def producer():
@@ -264,6 +269,7 @@ class PocketTTSEngine:
             except Exception as e:
                 logger.error(f"Streaming TTS failed: {e}")
                 import traceback
+
                 logger.error(traceback.format_exc())
                 _queue_put((np.zeros(0, dtype=np.float32), {"error": str(e)}))
             finally:
@@ -280,7 +286,7 @@ class PocketTTSEngine:
         await executor
 
 
-_tts_engine: Optional[PocketTTSEngine] = None
+_tts_engine: PocketTTSEngine | None = None
 _tts_lock = asyncio.Lock()
 
 

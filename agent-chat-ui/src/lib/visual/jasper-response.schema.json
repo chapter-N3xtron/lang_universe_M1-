@@ -1,0 +1,435 @@
+{
+  "$defs": {
+    "ConceptMapArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "alt_text": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Alt Text",
+          "type": "string"
+        },
+        "artifact_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ConceptMapPayload"
+        },
+        "renderer": {
+          "const": "react_flow",
+          "default": "react_flow",
+          "title": "Renderer",
+          "type": "string"
+        },
+        "source_message_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Message Id"
+        },
+        "title": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "alt_text",
+        "payload"
+      ],
+      "title": "ConceptMapArtifact",
+      "type": "object"
+    },
+    "ConceptMapEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_status": {
+          "enum": [
+            "observed",
+            "researched",
+            "user_defined",
+            "proposed",
+            "inferred"
+          ],
+          "title": "Claim Status",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "relation": {
+          "default": "relates_to",
+          "enum": [
+            "relates_to",
+            "contains",
+            "calls",
+            "depends_on",
+            "flows_to"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "claim_status",
+        "evidence_refs"
+      ],
+      "title": "ConceptMapEdge",
+      "type": "object"
+    },
+    "ConceptMapNode": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_status": {
+          "enum": [
+            "observed",
+            "researched",
+            "user_defined",
+            "proposed",
+            "inferred"
+          ],
+          "title": "Claim Status",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "default": "concept",
+          "enum": [
+            "concept",
+            "group",
+            "code",
+            "decision",
+            "input",
+            "output"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "narration": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Narration",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "narration",
+        "claim_status",
+        "evidence_refs"
+      ],
+      "title": "ConceptMapNode",
+      "type": "object"
+    },
+    "ConceptMapPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "default": "left_to_right",
+          "enum": [
+            "top_to_bottom",
+            "left_to_right"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/ConceptMapEdge"
+          },
+          "maxItems": 200,
+          "title": "Edges",
+          "type": "array"
+        },
+        "grounding_kind": {
+          "enum": [
+            "repo",
+            "web",
+            "user_input",
+            "mixed"
+          ],
+          "title": "Grounding Kind",
+          "type": "string"
+        },
+        "narration_order": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Narration Order",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/ConceptMapNode"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/EvidenceSource"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "grounding_kind",
+        "sources",
+        "nodes",
+        "narration_order"
+      ],
+      "title": "ConceptMapPayload",
+      "type": "object"
+    },
+    "EvidenceSource": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "repo_file",
+            "web_url",
+            "user_input"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "locator",
+        "title",
+        "content_sha256"
+      ],
+      "title": "EvidenceSource",
+      "type": "object"
+    },
+    "LayoutSuggestion": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "chat",
+            "visual",
+            "split",
+            "compact_chat"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "reason"
+      ],
+      "title": "LayoutSuggestion",
+      "type": "object"
+    },
+    "ResponseDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "structured_output_unavailable",
+            "structured_output_invalid",
+            "provider_unavailable"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "recoverable": {
+          "default": true,
+          "title": "Recoverable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ResponseDiagnostic",
+      "type": "object"
+    }
+  },
+  "$id": "https://agent-chat.local/schemas/jasper-response-v1.json",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ConceptMapArtifact"
+          }
+        ]
+      },
+      "maxItems": 4,
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "diagnostic": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResponseDiagnostic"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "layout_suggestion": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayoutSuggestion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "version": {
+      "const": 2,
+      "default": 2,
+      "title": "Version",
+      "type": "integer"
+    },
+    "voice_text": {
+      "maxLength": 12000,
+      "minLength": 1,
+      "title": "Voice Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "voice_text"
+  ],
+  "title": "JasperResponse",
+  "type": "object"
+}

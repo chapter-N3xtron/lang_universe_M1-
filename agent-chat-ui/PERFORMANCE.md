@@ -4,17 +4,17 @@ Measured from the optimized production build on 2026-07-30 with Chromium.
 
 ## Budgets
 
-| Scenario | Budget | Baseline |
-| --- | --- | --- |
-| 300-message thread ready | < 2,500 ms | 378 ms |
-| Initial visible message rows | <= 80 | 80 |
-| Initial DOM nodes | < 5,000 | 1,914 |
-| Maximum initial long task | < 250 ms | 0 ms |
-| Initial JS heap | < 150 MiB | 24.5 MB |
-| 128-event coding stream complete | < 2,500 ms | 447 ms |
-| Maximum stream long task | < 250 ms | 54 ms |
-| Maximum stream frame interval | < 200 ms | 59 ms |
-| Sample historical-row rerenders | 0 | 0 |
+| Scenario                         | Budget     | Baseline |
+| -------------------------------- | ---------- | -------- |
+| 300-message thread ready         | < 2,500 ms | 378 ms   |
+| Initial visible message rows     | <= 80      | 80       |
+| Initial DOM nodes                | < 5,000    | 1,914    |
+| Maximum initial long task        | < 250 ms   | 0 ms     |
+| Initial JS heap                  | < 150 MiB  | 24.5 MB  |
+| 128-event coding stream complete | < 2,500 ms | 447 ms   |
+| Maximum stream long task         | < 250 ms   | 54 ms    |
+| Maximum stream frame interval    | < 200 ms   | 59 ms    |
+| Sample historical-row rerenders  | 0          | 0        |
 
 The regression is `tests/performance.spec.ts`. It runs against the production
 server, injects a 300-message persisted thread, then sends the maximum bounded

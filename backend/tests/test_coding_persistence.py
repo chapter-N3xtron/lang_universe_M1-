@@ -28,9 +28,7 @@ class PersistentToolModel(BaseChatModel):
 
     def _generate(self, messages, stop=None, run_manager=None, **_kwargs):
         self._seen_messages.append(list(messages))
-        return ChatResult(
-            generations=[ChatGeneration(message=self._responses.pop(0))]
-        )
+        return ChatResult(generations=[ChatGeneration(message=self._responses.pop(0))])
 
 
 def _write_request():
@@ -212,9 +210,7 @@ def test_scoped_export_reads_reconstructed_agent_state(monkeypatch, tmp_path):
                 (),
                 {
                     "values": {
-                        "messages": [
-                            AIMessage(content="exported coding conversation")
-                        ]
+                        "messages": [AIMessage(content="exported coding conversation")]
                     },
                     "created_at": "2026-07-30T00:00:00Z",
                 },

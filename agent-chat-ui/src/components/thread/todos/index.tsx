@@ -14,7 +14,13 @@ const STATUS_COLORS: Record<TodoStatus, string> = {
   completed: "text-green-500",
 };
 
-function ProgressBar({ completed, total }: { completed: number; total: number }) {
+function ProgressBar({
+  completed,
+  total,
+}: {
+  completed: number;
+  total: number;
+}) {
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
   return (
     <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
@@ -24,7 +30,9 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="tabular-nums whitespace-nowrap">{completed}/{total} ({pct}%)</span>
+      <span className="whitespace-nowrap tabular-nums">
+        {completed}/{total} ({pct}%)
+      </span>
     </div>
   );
 }
@@ -32,10 +40,23 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
 function TodoItem({ todo }: { todo: Todo }) {
   const color = STATUS_COLORS[todo.status];
   return (
-    <div className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-sm", todo.status === "in_progress" && "animate-pulse")}>
-      <span className={cn("mt-0.5 flex-shrink-0", color)}>{STATUS_ICONS[todo.status]}</span>
+    <div
+      className={cn(
+        "flex items-start gap-2 rounded-md px-2 py-1.5 text-sm",
+        todo.status === "in_progress" && "animate-pulse",
+      )}
+    >
+      <span className={cn("mt-0.5 flex-shrink-0", color)}>
+        {STATUS_ICONS[todo.status]}
+      </span>
       <div className="min-w-0 flex-1">
-        <span className={cn("text-gray-800 dark:text-gray-200", todo.status === "completed" && "line-through text-gray-400 dark:text-gray-500")}>
+        <span
+          className={cn(
+            "text-gray-800 dark:text-gray-200",
+            todo.status === "completed" &&
+              "text-gray-400 line-through dark:text-gray-500",
+          )}
+        >
           {todo.content}
         </span>
         <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-400 dark:text-gray-500">
@@ -49,17 +70,29 @@ function TodoItem({ todo }: { todo: Todo }) {
 
 function TodoSectionCard({ section }: { section: TodoSection }) {
   const total = section.todos.length;
-  const completed = section.todos.filter((t) => t.status === "completed").length;
+  const completed = section.todos.filter(
+    (t) => t.status === "completed",
+  ).length;
   return (
-    <div className="rounded-lg border bg-white dark:bg-gray-900 p-3 shadow-xs">
+    <div className="rounded-lg border bg-white p-3 shadow-xs dark:bg-gray-900">
       <div className="mb-2">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{section.title}</h3>
-        <p className="text-xs text-gray-400 dark:text-gray-500">planned by {section.planned_by_model}</p>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {section.title}
+        </h3>
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          planned by {section.planned_by_model}
+        </p>
       </div>
-      <ProgressBar completed={completed} total={total} />
+      <ProgressBar
+        completed={completed}
+        total={total}
+      />
       <div className="mt-2 space-y-0.5">
         {section.todos.map((todo) => (
-          <TodoItem key={todo.id} todo={todo} />
+          <TodoItem
+            key={todo.id}
+            todo={todo}
+          />
         ))}
       </div>
     </div>
@@ -95,7 +128,9 @@ export function TodoList({ todosOpen }: { todosOpen?: boolean }) {
   if (error) {
     return (
       <div className="flex h-full items-center justify-center p-4">
-        <p className="text-sm text-gray-400 dark:text-gray-500">Could not load todos</p>
+        <p className="text-sm text-gray-400 dark:text-gray-500">
+          Could not load todos
+        </p>
       </div>
     );
   }
@@ -110,13 +145,18 @@ export function TodoList({ todosOpen }: { todosOpen?: boolean }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Todo List</h2>
+      <div className="flex-shrink-0 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          Todo List
+        </h2>
       </div>
       <div className="flex-1 overflow-y-auto p-3">
         <div className="space-y-3">
           {sections.map((section) => (
-            <TodoSectionCard key={section.id} section={section} />
+            <TodoSectionCard
+              key={section.id}
+              section={section}
+            />
           ))}
         </div>
       </div>

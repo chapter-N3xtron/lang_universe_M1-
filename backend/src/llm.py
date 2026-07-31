@@ -10,9 +10,7 @@ API_KEY = os.getenv("LLM_API_KEY", "")
 CHAT_UI_MODEL = os.getenv("CHAT_UI_MODEL", "glm-5.2")
 CODING_MODEL = os.getenv("CODING_MODEL", "ollama/qwen3.5:27b")
 CODING_MODEL_PROVIDER = os.getenv("CODING_MODEL_PROVIDER", "ollama")
-CODING_OLLAMA_BASE_URL = os.getenv(
-    "CODING_OLLAMA_BASE_URL", "http://127.0.0.1:11434"
-)
+CODING_OLLAMA_BASE_URL = os.getenv("CODING_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 CODING_OLLAMA_CLOUD_BASE_URL = os.getenv(
     "CODING_OLLAMA_CLOUD_BASE_URL", "https://ollama.com"
 )
@@ -42,6 +40,20 @@ def get_llm(model_name: str = None):
     )
 
 
+def get_agent_llm(model_name: str | None = None):
+    """Create the selected daily-driver model across supported providers."""
+
+    if not model_name or not any(
+        model_name.startswith(prefix)
+        for prefix in ("ollama/", "ollama-cloud/", "huggingface/", "hf/", "ollama:")
+    ):
+        return get_llm(model_name)
+    return get_coding_llm(
+        model_name,
+        num_predict=int(os.getenv("JASPER_OLLAMA_NUM_PREDICT", "2048")),
+    )
+
+
 def get_chat_ui_llm():
     """Get LLM for Chat UI (GLM)"""
     return get_llm()
@@ -62,7 +74,7 @@ def _coding_provider_and_model(model_name: str | None) -> tuple[str, str]:
     return CODING_MODEL_PROVIDER, selected
 
 
-def get_coding_llm(model_name: str | None = None):
+def get_coding_llm(model_name: str | None = None, *, num_predict: int | None = None):
     """Create the selected coding model without logging credential values."""
     provider, model = _coding_provider_and_model(model_name)
     if provider == "huggingface":
@@ -71,7 +83,7 @@ def get_coding_llm(model_name: str | None = None):
         endpoint = HuggingFaceEndpoint(
             repo_id=model,
             task="text-generation",
-            max_new_tokens=1024,
+            max_new_tokens=num_predict or 1024,
             temperature=0.01,
             streaming=True,
         )
@@ -96,5 +108,7 @@ def get_coding_llm(model_name: str | None = None):
         client_kwargs=client_kwargs,
         temperature=0,
         num_ctx=int(os.getenv("CODING_OLLAMA_NUM_CTX", "8192")),
-        num_predict=int(os.getenv("CODING_OLLAMA_NUM_PREDICT", "256")),
+        num_predict=num_predict
+        if num_predict is not None
+        else int(os.getenv("CODING_OLLAMA_NUM_PREDICT", "256")),
     )

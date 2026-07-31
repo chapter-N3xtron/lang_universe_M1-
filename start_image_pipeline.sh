@@ -18,6 +18,7 @@
 #   ./start_image_pipeline.sh stop       Shut everything down
 #   ./start_image_pipeline.sh status     Show what's running
 #   ./start_image_pipeline.sh restart    Stop then start
+#   ./start_image_pipeline.sh restart-core  Restart LangGraph, sidecar, and UI only
 
 set -e
 
@@ -248,7 +249,7 @@ start_langgraph() {
   _ensure_dirs
   echo "  Starting LangGraph (graph server)..."
   cd "$ROOT/backend"
-  nohup ./venv/bin/langgraph up --port "$LANGGRAPH_PORT" --wait \
+  nohup ./.venv/bin/langgraph up --port "$LANGGRAPH_PORT" --wait \
     --docker-compose "$ROOT/backend/docker-compose.override.yml" \
     >> "$LOGDIR/langgraph.log" 2>&1 &
   echo $! > "$PIDDIR/langgraph.pid"
@@ -265,6 +266,23 @@ start_langgraph() {
 stop_langgraph() {
   local project_name="backend"
   local container_ids
+
+  # Stop the supervising CLI before removing its containers. Otherwise the
+  # still-running `langgraph up` process can keep :8123 alive long enough for
+  # restart-core to mistake the old server for the replacement.
+  if [ -f "$PIDDIR/langgraph.pid" ]; then
+    local supervisor_pid
+    supervisor_pid=$(cat "$PIDDIR/langgraph.pid")
+    if _pid_alive "$supervisor_pid"; then
+      kill "$supervisor_pid" 2>/dev/null || true
+      local attempt
+      for attempt in {1..50}; do
+        _pid_alive "$supervisor_pid" || break
+        sleep 0.1
+      done
+    fi
+  fi
+
   container_ids=$(docker ps -aq \
     --filter "label=com.docker.compose.project=$project_name" 2>/dev/null)
 
@@ -277,6 +295,16 @@ stop_langgraph() {
   fi
 
   rm -f "$PIDDIR/langgraph.pid" 2>/dev/null || true
+
+  local attempt
+  for attempt in {1..50}; do
+    _port_listening "$LANGGRAPH_PORT" || break
+    sleep 0.1
+  done
+  if _port_listening "$LANGGRAPH_PORT"; then
+    echo "  LangGraph port :$LANGGRAPH_PORT is still in use; refusing a false restart"
+    return 1
+  fi
 }
 
 status_langgraph() {
@@ -300,7 +328,7 @@ start_backend() {
   _ensure_dirs
   echo "  Starting backend..."
   cd "$ROOT/backend"
-  source ./venv/bin/activate
+  source ./.venv/bin/activate
   nohup python -m src.web_server >> "$LOGDIR/backend.log" 2>&1 &
   echo $! > "$PIDDIR/backend.pid"
   disown
@@ -348,16 +376,24 @@ start_frontend() {
   cd "$ROOT/agent-chat-ui"
 
   # Auto-rebuild: rebuild the production bundle if .next/BUILD_ID is missing
-  # or any source file (.ts/.tsx) is newer than the last build. This lets the
+  # or any UI source/config file is newer than the last build. This lets the
   # user (or their coding agent) edit UI code and have the next launch pick up
   # the changes automatically — no manual `pnpm build` step required.
   local needs_build=0
   if [ ! -f ".next/BUILD_ID" ]; then
     needs_build=1
   else
-    local build_mtime newest_src
+    local build_mtime newest_src input_mtime
     build_mtime=$(stat -f %m .next/BUILD_ID 2>/dev/null || echo 0)
-    newest_src=$(find src -type f \( -name '*.ts' -o -name '*.tsx' \) -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1)
+    newest_src=$(find src public scripts -type f -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1)
+    for build_input in package.json pnpm-lock.yaml next.config.* postcss.config.*; do
+      if [ -e "$build_input" ]; then
+        input_mtime=$(stat -f %m "$build_input" 2>/dev/null || echo 0)
+        if [ "$input_mtime" -gt "$newest_src" ]; then
+          newest_src="$input_mtime"
+        fi
+      fi
+    done
     newest_src=${newest_src:-0}
     if [ "$newest_src" -gt "$build_mtime" ]; then
       needs_build=1
@@ -366,7 +402,7 @@ start_frontend() {
 
   if [ "$needs_build" = "1" ]; then
     echo "  Building frontend (production)..."
-    pnpm build >> "$LOGDIR/frontend-build.log" 2>&1 || {
+    ./node_modules/.bin/next build >> "$LOGDIR/frontend-build.log" 2>&1 || {
       echo "  Frontend build failed — check $LOGDIR/frontend-build.log"
       return 1
     }
@@ -375,7 +411,7 @@ start_frontend() {
   fi
 
   echo "  Starting frontend (production server)..."
-  nohup pnpm start -p "$FRONTEND_PORT" >> "$LOGDIR/frontend.log" 2>&1 &
+  nohup ./node_modules/.bin/next start -p "$FRONTEND_PORT" >> "$LOGDIR/frontend.log" 2>&1 &
   echo $! > "$PIDDIR/frontend.pid"
   disown
 
@@ -532,8 +568,22 @@ case "${1:-}" in
     "$0" start
     ;;
 
+  restart-core)
+    echo "Restarting core chat services..."
+    echo ""
+    stop_frontend
+    stop_backend
+    stop_langgraph
+    echo ""
+    start_langgraph
+    start_backend
+    start_frontend
+    echo ""
+    echo "Core chat services ready at http://localhost:$FRONTEND_PORT"
+    ;;
+
   *)
-    echo "Usage: $0 {start|stop|status|restart}"
+    echo "Usage: $0 {start|stop|status|restart|restart-core}"
     exit 1
     ;;
 esac

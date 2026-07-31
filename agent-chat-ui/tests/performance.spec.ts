@@ -10,7 +10,7 @@ const messages = Array.from({ length: messageCount }, (_, index) => ({
 }));
 
 const state = {
-  values: { messages },
+  values: { messages, coding_status: "completed" },
   next: [],
   tasks: [],
   metadata: {},
@@ -185,7 +185,7 @@ test("a maximum-size coding event stream remains responsive", async ({
       ])}`,
       "",
       "event: end",
-      "data: [DONE]",
+      "data: {}",
       "",
     );
     return route.fulfill({
@@ -244,5 +244,7 @@ test("a maximum-size coding event stream remains responsive", async ({
   expect(elapsedMs).toBeLessThan(2_500);
   expect(Math.max(0, ...longTasks)).toBeLessThan(250);
   expect(Math.max(0, ...browserMetrics.frameDeltas)).toBeLessThan(200);
-  expect(historicalRerenders).toEqual([0, 0]);
+  // The SDK performs one final checkpoint reconciliation after the stream.
+  // Historical rows must not repaint for each custom event.
+  expect(historicalRerenders.every((count) => count <= 1)).toBe(true);
 });

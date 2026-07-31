@@ -7,6 +7,7 @@ import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import { useTTS } from "@/hooks/useTTS";
 import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses";
+import type { ConceptMapArtifact } from "@/lib/visual/jasper-response.generated";
 
 interface MessageListProps {
   isLoading: boolean;
@@ -35,6 +36,8 @@ function MessageListImpl({
   const [speakingMessageId, setSpeakingMessageId] = useState<
     string | undefined
   >(undefined);
+  const [narrating, setNarrating] = useState(false);
+  const narrationRunRef = useRef(0);
   const streamRef = useRef(stream);
   useEffect(() => {
     streamRef.current = stream;
@@ -87,16 +90,89 @@ function MessageListImpl({
     [onRegenerateStart],
   );
 
+  const visualArtifacts = useMemo(
+    () => (stream.values?.visual_artifacts ?? []) as ConceptMapArtifact[],
+    [stream.values?.visual_artifacts],
+  );
+
+  useEffect(() => {
+    const stopNarration = () => {
+      narrationRunRef.current += 1;
+      stopTts();
+      setNarrating(false);
+    };
+    window.addEventListener("jasper:stop-message-narration", stopNarration);
+    return () =>
+      window.removeEventListener(
+        "jasper:stop-message-narration",
+        stopNarration,
+      );
+  }, [stopTts]);
+
   const handleSpeak = useCallback(
-    (messageId: string | undefined, content: string) => {
-      if (speaking && speakingMessageId === messageId) {
+    async (messageId: string | undefined, content: string) => {
+      if ((speaking || narrating) && speakingMessageId === messageId) {
+        narrationRunRef.current += 1;
         stopTts();
+        setNarrating(false);
+        window.dispatchEvent(
+          new CustomEvent("visual:narration-node", { detail: null }),
+        );
       } else {
+        window.dispatchEvent(new Event("jasper:stop-node-audio"));
+        const runId = narrationRunRef.current + 1;
+        narrationRunRef.current = runId;
         setSpeakingMessageId(messageId);
-        speak(content, selectedVoice || undefined);
+        const artifact = visualArtifacts.find(
+          (candidate) => candidate.source_message_id === messageId,
+        );
+        if (!artifact) {
+          await speak(content, selectedVoice || undefined);
+          return;
+        }
+        setNarrating(true);
+        try {
+          if (content.trim()) {
+            const completed = await speak(content, selectedVoice || undefined);
+            if (!completed || narrationRunRef.current !== runId) return;
+          }
+          const nodes = new Map(
+            artifact.payload.nodes.map((node) => [node.id, node]),
+          );
+          for (const nodeId of artifact.payload.narration_order) {
+            if (narrationRunRef.current !== runId) break;
+            const node = nodes.get(nodeId);
+            if (!node) continue;
+            window.dispatchEvent(
+              new CustomEvent("visual:narration-node", {
+                detail: { artifactId: artifact.artifact_id, nodeId },
+              }),
+            );
+            const completed = await speak(
+              node.narration,
+              selectedVoice || undefined,
+            );
+            if (!completed) break;
+          }
+        } finally {
+          if (narrationRunRef.current === runId) {
+            setNarrating(false);
+            window.dispatchEvent(
+              new CustomEvent("visual:narration-node", { detail: null }),
+            );
+          }
+        }
       }
     },
-    [speaking, speakingMessageId, stopTts, speak, selectedVoice],
+    [
+      speaking,
+      narrating,
+      speakingMessageId,
+      stopTts,
+      visualArtifacts,
+      speak,
+      selectedVoice,
+    ],
   );
 
   const hasNoAIOrToolMessages = !messages.find(
@@ -142,7 +218,8 @@ function MessageListImpl({
         const isLastMessage = absoluteIndex === renderableMessages.length - 1;
         const rowIsLoading = isLoading && isLastMessage;
         const metadata = stream.getMessagesMetadata(message);
-        const isSpeakingThis = speaking && speakingMessageId === message.id;
+        const isSpeakingThis =
+          (speaking || narrating) && speakingMessageId === message.id;
         return message.type === "human" ? (
           <HumanMessage
             key={`${message.id || message.type}-${absoluteIndex}`}

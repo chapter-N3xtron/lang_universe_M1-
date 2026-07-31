@@ -37,7 +37,12 @@ def _allowed_origins() -> list[str]:
     raw = os.getenv("SIDECAR_ALLOWED_ORIGINS")
     if raw:
         return [o.strip() for o in raw.split(",") if o.strip()]
-    return ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"]
+    return [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ]
 
 
 app = FastAPI(
@@ -55,7 +60,9 @@ app.add_middleware(
 )
 
 
-TODOS_FILE = os.getenv("TODOS_FILE", str(Path(__file__).resolve().parent.parent.parent / "todos.json"))
+TODOS_FILE = os.getenv(
+    "TODOS_FILE", str(Path(__file__).resolve().parent.parent.parent / "todos.json")
+)
 
 
 def _load_todos() -> dict:
@@ -192,7 +199,7 @@ def fs_pick_folder(starting_path: str | None = None) -> FSPickResponse:
     """Open native macOS folder picker via AppleScript and return the absolute POSIX path."""
     try:
         default = starting_path or str(Path.home())
-        script = '''
+        script = """
         on run argv
         set defaultPath to POSIX file (item 1 of argv)
         tell application "Finder" to activate
@@ -205,7 +212,7 @@ def fs_pick_folder(starting_path: str | None = None) -> FSPickResponse:
             error errorMessage number errorNumber
         end try
         end run
-        '''
+        """
         result = subprocess.run(
             ["osascript", "-e", script, default],
             capture_output=True,

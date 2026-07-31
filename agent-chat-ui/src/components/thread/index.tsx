@@ -18,7 +18,6 @@ import {
   PanelRightOpen,
   PanelRightClose,
   SquarePen,
-  XIcon,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -42,32 +41,41 @@ import { useModelAndVoices } from "@/hooks/use-model-and-voices";
 import { MessageList } from "./message-list";
 import { ChatInput } from "./chat-input";
 import dynamic from "next/dynamic";
+import { WorkspaceShell } from "@/components/workspace/workspace-shell";
+import type { JasperResponse } from "@/lib/visual/jasper-response.generated";
 
 const ThreadHistory = dynamic(() => import("./history"), { ssr: false });
 const TodoList = dynamic(() => import("./todos").then((m) => m.TodoList), {
   ssr: false,
 });
+const VisualSurface = dynamic(
+  () =>
+    import("@/components/workspace/visual-surface").then(
+      (module) => module.VisualSurface,
+    ),
+  { ssr: false },
+);
 
 function StickyToBottomContent(props: {
   content: ReactNode;
-  footer?: ReactNode;
   className?: string;
+  scrollClassName?: string;
   contentClassName?: string;
 }) {
   const context = useStickToBottomContext();
   return (
-    <div
-      ref={context.scrollRef}
-      style={{ width: "100%", height: "100%" }}
-      className={props.className}
-    >
+    <div className={props.className}>
       <div
-        ref={context.contentRef}
-        className={props.contentClassName}
+        ref={context.scrollRef}
+        className={props.scrollClassName}
       >
-        {props.content}
+        <div
+          ref={context.contentRef}
+          className={props.contentClassName}
+        >
+          {props.content}
+        </div>
       </div>
-      {props.footer}
     </div>
   );
 }
@@ -197,6 +205,33 @@ function ThreadImpl() {
   }, []);
 
   const chatStarted = !!threadId || !!messages.length;
+  const structuredCandidate = stream.values?.jasper_structured_response;
+  const [validatedEntry, setValidatedEntry] = useState<{
+    candidate: unknown;
+    value: JasperResponse | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!structuredCandidate) return;
+    let active = true;
+    void import("@/lib/visual/validate").then(({ validateJasperResponse }) => {
+      if (!active) return;
+      const result = validateJasperResponse(structuredCandidate);
+      setValidatedEntry({
+        candidate: structuredCandidate,
+        value: result.valid ? result.value : null,
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [structuredCandidate]);
+  const validatedJasperResponse =
+    validatedEntry && validatedEntry.candidate === structuredCandidate
+      ? validatedEntry.value
+      : null;
+  const visualArtifacts = validatedJasperResponse?.artifacts ?? [];
+  const latestVisualArtifact = visualArtifacts.at(-1);
+  const visualAvailable = Boolean(latestVisualArtifact || artifactOpen);
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
@@ -229,61 +264,23 @@ function ThreadImpl() {
         </div>
       </div>
 
-      <div
-        className={cn(
-          "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
-          artifactOpen && "grid-cols-[3fr_2fr]",
-        )}
-      >
-        <div
-          className={cn(
-            "relative flex min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-200 motion-reduce:transition-none",
-            !chatStarted && "grid-rows-[1fr]",
-          )}
-          style={{
-            marginLeft: chatHistoryOpen && isLargeScreen ? 300 : 0,
-          }}
-        >
-          {!chatStarted && (
-            <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-              <div>
-                {(!chatHistoryOpen || !isLargeScreen) && (
-                  <Button
-                    className="hover:bg-gray-100"
-                    variant="ghost"
-                    onClick={() => setChatHistoryOpen((p) => !p)}
-                  >
-                    {chatHistoryOpen ? (
-                      <PanelRightOpen className="size-5" />
-                    ) : (
-                      <PanelRightClose className="size-5" />
-                    )}
-                  </Button>
-                )}
-              </div>
-              <div className="absolute top-2 right-4 flex items-center">
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip={todosOpen ? "Close todos" : "Show todos"}
-                  variant="ghost"
-                  onClick={() => setTodosOpen((p) => !p)}
-                >
-                  {todosOpen ? (
-                    <ListX className="size-5" />
-                  ) : (
-                    <List className="size-5" />
-                  )}
-                </TooltipIconButton>
-                <ThemeToggle />
-                <OpenGitHubRepo />
-              </div>
-            </div>
-          )}
-          {chatStarted && (
-            <div className="relative z-10 flex items-center justify-between gap-3 p-2">
-              <div className="relative flex items-center justify-start gap-2">
-                <div className="absolute left-0 z-10">
+      <WorkspaceShell
+        threadId={threadId}
+        visualAvailable={visualAvailable}
+        suggestion={validatedJasperResponse?.layout_suggestion ?? null}
+        chat={
+          <div
+            className={cn(
+              "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-200 motion-reduce:transition-none",
+              !chatStarted && "grid-rows-[1fr]",
+            )}
+            style={{
+              marginLeft: chatHistoryOpen && isLargeScreen ? 300 : 0,
+            }}
+          >
+            {!chatStarted && (
+              <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
+                <div>
                   {(!chatHistoryOpen || !isLargeScreen) && (
                     <Button
                       className="hover:bg-gray-100"
@@ -298,31 +295,7 @@ function ThreadImpl() {
                     </Button>
                   )}
                 </div>
-                <button
-                  className="flex cursor-pointer items-center gap-2 transition-[margin] duration-200 motion-reduce:transition-none"
-                  onClick={() => setThreadId(null)}
-                  style={{ marginLeft: !chatHistoryOpen ? 48 : 0 }}
-                >
-                  <LangGraphLogoSVG
-                    width={32}
-                    height={32}
-                  />
-                  <span className="text-xl font-semibold tracking-tight">
-                    Agent Chat
-                  </span>
-                </button>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <div className="flex items-center">
-                  {stream.values?.coding_status && (
-                    <span className="mr-2 flex items-center gap-1.5 rounded-full bg-blue-900/30 px-2.5 py-0.5 text-xs text-blue-300">
-                      <span
-                        className={`inline-block size-1.5 rounded-full bg-blue-400 ${stream.values.coding_status === "running" ? "animate-pulse" : ""}`}
-                      />
-                      Coding: {stream.values.coding_status}
-                    </span>
-                  )}
+                <div className="absolute top-2 right-4 flex items-center">
                   <TooltipIconButton
                     size="lg"
                     className="p-4"
@@ -339,71 +312,130 @@ function ThreadImpl() {
                   <ThemeToggle />
                   <OpenGitHubRepo />
                 </div>
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip="New thread"
-                  variant="ghost"
-                  onClick={() => setThreadId(null)}
-                >
-                  <SquarePen className="size-5" />
-                </TooltipIconButton>
               </div>
+            )}
+            {chatStarted && (
+              <div className="relative z-10 flex items-center justify-between gap-3 p-2">
+                <div className="relative flex items-center justify-start gap-2">
+                  <div className="absolute left-0 z-10">
+                    {(!chatHistoryOpen || !isLargeScreen) && (
+                      <Button
+                        className="hover:bg-gray-100"
+                        variant="ghost"
+                        onClick={() => setChatHistoryOpen((p) => !p)}
+                      >
+                        {chatHistoryOpen ? (
+                          <PanelRightOpen className="size-5" />
+                        ) : (
+                          <PanelRightClose className="size-5" />
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                  <button
+                    className="flex cursor-pointer items-center gap-2 transition-[margin] duration-200 motion-reduce:transition-none"
+                    onClick={() => setThreadId(null)}
+                    style={{ marginLeft: !chatHistoryOpen ? 48 : 0 }}
+                  >
+                    <LangGraphLogoSVG
+                      width={32}
+                      height={32}
+                    />
+                    <span className="text-xl font-semibold tracking-tight">
+                      Agent Chat
+                    </span>
+                  </button>
+                </div>
 
-              <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
-            </div>
-          )}
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center">
+                    {stream.values?.coding_status && (
+                      <span className="mr-2 flex items-center gap-1.5 rounded-full bg-blue-900/30 px-2.5 py-0.5 text-xs text-blue-300">
+                        <span
+                          className={`inline-block size-1.5 rounded-full bg-blue-400 ${stream.values.coding_status === "running" ? "animate-pulse" : ""}`}
+                        />
+                        Coding: {stream.values.coding_status}
+                      </span>
+                    )}
+                    <TooltipIconButton
+                      size="lg"
+                      className="p-4"
+                      tooltip={todosOpen ? "Close todos" : "Show todos"}
+                      variant="ghost"
+                      onClick={() => setTodosOpen((p) => !p)}
+                    >
+                      {todosOpen ? (
+                        <ListX className="size-5" />
+                      ) : (
+                        <List className="size-5" />
+                      )}
+                    </TooltipIconButton>
+                    <ThemeToggle />
+                    <OpenGitHubRepo />
+                  </div>
+                  <TooltipIconButton
+                    size="lg"
+                    className="p-4"
+                    tooltip="New thread"
+                    variant="ghost"
+                    onClick={() => setThreadId(null)}
+                  >
+                    <SquarePen className="size-5" />
+                  </TooltipIconButton>
+                </div>
 
-          <StickToBottom className="relative flex-1 overflow-hidden">
-            <StickyToBottomContent
-              className={cn(
-                "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
-                !chatStarted && "mt-[25vh] flex flex-col items-stretch",
-                chatStarted && "grid grid-rows-[1fr_auto]",
-              )}
-              contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
-              content={
-                <MessageList
-                  isLoading={isLoading}
-                  firstTokenReceived={firstTokenReceived}
-                  selectedVoice={selectedVoice}
-                  onRegenerateStart={handleRegenerate}
-                />
-              }
-              footer={
-                <ChatInput
-                  isLoading={isLoading}
-                  selectedVoice={selectedVoice}
-                  onVoiceChange={setSelectedVoice}
-                  modelOptions={modelOptions}
-                  modelProviders={modelProviders}
-                  defaultModel={defaultModel}
-                  modelsLoadError={modelsLoadError}
-                  voicesLoadError={voicesLoadError}
-                  voiceOptions={voiceOptions}
-                  chatStarted={chatStarted}
-                  streamActions={streamActions}
-                  onStartSubmit={handleSubmit}
-                />
-              }
-            />
-          </StickToBottom>
-        </div>
-        <div className="relative flex flex-col border-l">
-          <div className="absolute inset-0 flex min-w-[30vw] flex-col">
-            <div className="grid grid-cols-[1fr_auto] border-b p-4">
-              <ArtifactTitle className="truncate overflow-hidden" />
-              <button
-                onClick={closeArtifact}
-                className="cursor-pointer"
-              >
-                <XIcon className="size-5" />
-              </button>
-            </div>
-            <ArtifactContent className="relative flex-grow" />
+                <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
+              </div>
+            )}
+
+            <StickToBottom className="relative flex-1 overflow-hidden">
+              <StickyToBottomContent
+                className="absolute inset-0 flex min-h-0 flex-col overflow-hidden"
+                scrollClassName="min-h-0 flex-1 overflow-y-auto px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent"
+                contentClassName={cn(
+                  "mx-auto flex w-full max-w-3xl flex-col gap-4 pt-8 pb-8",
+                  !chatStarted && "min-h-full justify-end",
+                )}
+                content={
+                  <MessageList
+                    isLoading={isLoading}
+                    firstTokenReceived={firstTokenReceived}
+                    selectedVoice={selectedVoice}
+                    onRegenerateStart={handleRegenerate}
+                  />
+                }
+              />
+            </StickToBottom>
           </div>
-        </div>
-      </div>
+        }
+        visual={
+          <VisualSurface
+            artifact={latestVisualArtifact}
+            selectedVoice={selectedVoice}
+            legacyActive={artifactOpen}
+            legacyTitle={<ArtifactTitle className="truncate overflow-hidden" />}
+            legacyContent={<ArtifactContent className="relative h-full" />}
+          />
+        }
+        composer={
+          <ChatInput
+            isLoading={isLoading}
+            selectedVoice={selectedVoice}
+            onVoiceChange={setSelectedVoice}
+            modelOptions={modelOptions}
+            modelProviders={modelProviders}
+            defaultModel={defaultModel}
+            modelsLoadError={modelsLoadError}
+            voicesLoadError={voicesLoadError}
+            voiceOptions={voiceOptions}
+            chatStarted={chatStarted}
+            targetAgent={stream.values?.target_agent}
+            targetModel={stream.values?.model}
+            streamActions={streamActions}
+            onStartSubmit={handleSubmit}
+          />
+        }
+      />
     </div>
   );
 }

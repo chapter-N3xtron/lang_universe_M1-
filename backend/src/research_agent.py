@@ -31,14 +31,19 @@ def research_agent(state: State):
         system_prompt = "You are a research assistant. Provide accurate, well-researched information based on your training data. Note: Set FIRECRAWL_API_KEY in .env to enable live web scraping."
 
     try:
-        response = llm.invoke(
-            [{"role": "system", "content": system_prompt}]
-            + history
-        )
-        return {"messages": [{"role": "assistant", "content": response.content}], "research_findings": response.content}
+        response = llm.invoke([{"role": "system", "content": system_prompt}] + history)
+        return {
+            "messages": [{"role": "assistant", "content": response.content}],
+            "research_findings": response.content,
+        }
     except Exception:
-        error_msg = "[Research Agent]\n\nThe research provider is currently unavailable."
-        return {"messages": [{"role": "assistant", "content": error_msg}], "research_findings": error_msg}
+        error_msg = (
+            "[Research Agent]\n\nThe research provider is currently unavailable."
+        )
+        return {
+            "messages": [{"role": "assistant", "content": error_msg}],
+            "research_findings": error_msg,
+        }
 
 
 def create_research_graph():
@@ -51,5 +56,7 @@ def create_research_graph():
 
 if __name__ == "__main__":
     app = create_research_graph()
-    result = app.invoke({"messages": [{"role": "user", "content": "Research LangGraph best practices"}]})
+    result = app.invoke(
+        {"messages": [{"role": "user", "content": "Research LangGraph best practices"}]}
+    )
     print(result["research_findings"])

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 
 @plugin "tailwindcss-animate";
 
@@ -141,6 +142,31 @@
 }
 
 @layer utilities {
+  .concept-map-flow {
+    --xy-background-color: var(--background);
+    --xy-background-pattern-color: color-mix(
+      in oklab,
+      var(--muted-foreground) 32%,
+      transparent
+    );
+    --xy-edge-stroke: var(--muted-foreground);
+    --xy-edge-stroke-selected: var(--primary);
+    --xy-edge-label-background-color: var(--card);
+    --xy-edge-label-color: var(--foreground);
+    --xy-controls-button-background-color: var(--card);
+    --xy-controls-button-background-color-hover: var(--accent);
+    --xy-controls-button-color: var(--card-foreground);
+    --xy-controls-button-color-hover: var(--accent-foreground);
+    --xy-controls-button-border-color: var(--border);
+    --xy-handle-background-color: var(--foreground);
+    --xy-handle-border-color: var(--background);
+  }
+
+  .concept-map-flow .react-flow__controls-button {
+    width: 2rem;
+    height: 2rem;
+  }
+
   .shadow-inner-right {
     box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
@@ -149,5 +175,3 @@
     box-shadow: inset 9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
 }
-
-

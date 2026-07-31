@@ -3,7 +3,7 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from src.agent_utils import get_user_query, get_conversation_history
+from src.agent_utils import get_conversation_history, get_user_query
 from src.magic_coder_agent import run_magic_coder
 
 
@@ -23,6 +23,7 @@ def magic_coder_node(state: State):
     mode = state.get("mode", "live")
     if mode == "async":
         from src.jobs import create_job, run_job
+
         job_id = create_job()
         run_job(
             job_id,
@@ -45,7 +46,10 @@ def magic_coder_node(state: State):
             content = f"[Magic Coder error]\n\n{result['error'] or 'Unknown error'}"
         else:
             content = result["text"] or "(no response)"
-    return {"messages": [{"role": "assistant", "content": content}], "code_response": content}
+    return {
+        "messages": [{"role": "assistant", "content": content}],
+        "code_response": content,
+    }
 
 
 def create_magic_coder_graph():
@@ -58,10 +62,14 @@ def create_magic_coder_graph():
 
 if __name__ == "__main__":
     app = create_magic_coder_graph()
-    result = app.invoke({
-        "messages": [{"role": "user", "content": "List the files in the current directory"}],
-        "workspace": "/tmp",
-        "mode": "live",
-        "model": None,
-    })
+    result = app.invoke(
+        {
+            "messages": [
+                {"role": "user", "content": "List the files in the current directory"}
+            ],
+            "workspace": "/tmp",
+            "mode": "live",
+            "model": None,
+        }
+    )
     print(result["code_response"])

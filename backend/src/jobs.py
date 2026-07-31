@@ -7,7 +7,7 @@ Clients poll `/api/jobs/{id}` for status and results.
 import threading
 import time
 import uuid
-from typing import Callable, Optional
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 
@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 class Job:
     id: str
     status: str  # "pending", "running", "completed", "failed"
-    result: Optional[str] = None
-    error: Optional[str] = None
+    result: str | None = None
+    error: str | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -32,7 +32,7 @@ def create_job() -> str:
     return job_id
 
 
-def get_job(job_id: str) -> Optional[Job]:
+def get_job(job_id: str) -> Job | None:
     with _lock:
         return _jobs.get(job_id)
 

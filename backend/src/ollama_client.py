@@ -1,8 +1,6 @@
 """Direct Ollama client helpers for local and cloud-hosted models."""
 
-import json
 import os
-from typing import List, Optional
 
 import requests
 
@@ -11,7 +9,7 @@ def _ollama_base_url() -> str:
     return os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
 
-def list_ollama_models(timeout: int = 5) -> List[dict]:
+def list_ollama_models(timeout: int = 5) -> list[dict]:
     """Return Ollama's /api/tags model list."""
     try:
         resp = requests.get(f"{_ollama_base_url()}/api/tags", timeout=timeout)
@@ -22,15 +20,15 @@ def list_ollama_models(timeout: int = 5) -> List[dict]:
         return []
 
 
-def list_ollama_cloud_models(timeout: int = 5) -> List[dict]:
+def list_ollama_cloud_models(timeout: int = 5) -> list[dict]:
     """Return models available through Ollama Cloud without exposing its key."""
     api_key = os.getenv("OLLAMA_API_KEY", "") or os.getenv("LLM_API_KEY", "")
     if not api_key:
         return []
 
-    base_url = os.getenv(
-        "CODING_OLLAMA_CLOUD_BASE_URL", "https://ollama.com"
-    ).rstrip("/")
+    base_url = os.getenv("CODING_OLLAMA_CLOUD_BASE_URL", "https://ollama.com").rstrip(
+        "/"
+    )
     try:
         resp = requests.get(
             f"{base_url}/api/tags",
@@ -47,8 +45,8 @@ def list_ollama_cloud_models(timeout: int = 5) -> List[dict]:
 def chat_ollama(
     message: str,
     model: str,
-    history: Optional[List[dict]] = None,
-    system: Optional[str] = None,
+    history: list[dict] | None = None,
+    system: str | None = None,
     timeout: int = 300,
 ) -> dict:
     """
@@ -65,7 +63,9 @@ def chat_ollama(
         messages.append({"role": "system", "content": system})
     if history:
         for m in history:
-            messages.append({"role": m.get("role", "user"), "content": m.get("content", "")})
+            messages.append(
+                {"role": m.get("role", "user"), "content": m.get("content", "")}
+            )
     messages.append({"role": "user", "content": message})
 
     payload = {

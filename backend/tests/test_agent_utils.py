@@ -5,12 +5,12 @@ both LangGraph SDK format (``{"type": "human"}``) and plain dict format
 (``{"role": "user"}``).
 """
 
-from src.agent_utils import get_user_query, get_conversation_history
-
+from src.agent_utils import get_conversation_history, get_user_query
 
 # ---------------------------------------------------------------------------
 # get_user_query
 # ---------------------------------------------------------------------------
+
 
 def test_type_human_format():
     """LangGraph SDK uses ``type: "human"`` for user messages."""
@@ -75,6 +75,7 @@ def test_returns_empty_for_non_dict():
 # get_conversation_history
 # ---------------------------------------------------------------------------
 
+
 def test_history_mixed_type_and_role():
     """Both ``type`` and ``role`` formats are accepted."""
     msgs = [
@@ -129,8 +130,10 @@ def test_history_ignores_non_dict():
 # trim_history
 # ---------------------------------------------------------------------------
 
+
 def test_trim_history_under_budget():
     from src.agent_utils import trim_history
+
     msgs = [
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "hello"},
@@ -141,6 +144,7 @@ def test_trim_history_under_budget():
 
 def test_trim_history_drops_oldest():
     from src.agent_utils import trim_history
+
     msgs = [{"role": "user", "content": f"msg {i}"} for i in range(50)]
     result = trim_history(msgs, max_tokens=50)
     assert len(result) < len(msgs)
@@ -149,11 +153,13 @@ def test_trim_history_drops_oldest():
 
 def test_trim_history_empty():
     from src.agent_utils import trim_history
+
     assert trim_history([], max_tokens=100) == []
 
 
 def test_trim_history_preserves_tool_pairs():
     from src.agent_utils import trim_history
+
     msgs = [
         {"role": "user", "content": "old question"},
         {"role": "assistant", "content": "old answer"},
@@ -181,6 +187,7 @@ def test_trim_history_preserves_tool_pairs():
 
 def test_trim_history_keeps_at_least_one_group():
     from src.agent_utils import trim_history
+
     msgs = [
         {"role": "user", "content": "hello"},
     ]

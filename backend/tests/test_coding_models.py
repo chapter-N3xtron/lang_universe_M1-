@@ -53,9 +53,7 @@ def test_ollama_cloud_model_uses_auth_header_without_logging_value(monkeypatch):
     llm.get_coding_llm("ollama-cloud/qwen3.5:397b")
 
     assert captured["base_url"] == "https://cloud.test"
-    assert captured["client_kwargs"]["headers"]["Authorization"].startswith(
-        "Bearer "
-    )
+    assert captured["client_kwargs"]["headers"]["Authorization"].startswith("Bearer ")
 
 
 def test_huggingface_model_builds_chat_endpoint(monkeypatch):
@@ -80,3 +78,58 @@ def test_huggingface_model_builds_chat_endpoint(monkeypatch):
 
     assert captured["endpoint"]["repo_id"] == "org/tool-model"
     assert captured["chat"]["model_id"] == "org/tool-model"
+
+
+def test_agent_model_preserves_legacy_unprefixed_chat_routing(monkeypatch):
+    from src import llm
+
+    expected = SimpleNamespace()
+    captured = {}
+
+    def get_llm(model_name):
+        captured["model_name"] = model_name
+        return expected
+
+    monkeypatch.setattr(llm, "get_llm", get_llm)
+
+    assert llm.get_agent_llm("glm-5.2") is expected
+    assert captured["model_name"] == "glm-5.2"
+
+
+def test_agent_model_routes_explicit_provider_models(monkeypatch):
+    from src import llm
+
+    expected = SimpleNamespace()
+    captured = {}
+
+    def get_coding_llm(model_name, **kwargs):
+        captured["model_name"] = model_name
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(llm, "get_coding_llm", get_coding_llm)
+
+    for model_name in (
+        "ollama/qwen3.5:27b",
+        "ollama-cloud/qwen3.5:397b",
+        "huggingface/org/tool-model",
+        "hf/org/tool-model",
+    ):
+        assert llm.get_agent_llm(model_name) is expected
+        assert captured["model_name"] == model_name
+        assert captured["num_predict"] == 2048
+
+
+def test_coding_model_keeps_the_shorter_default_generation_limit(monkeypatch):
+    from src import llm
+
+    captured = {}
+    monkeypatch.setattr(
+        llm,
+        "ChatOllama",
+        lambda **kwargs: captured.update(kwargs) or SimpleNamespace(),
+    )
+
+    llm.get_coding_llm("ollama/qwen3.5:27b")
+
+    assert captured["num_predict"] == 256

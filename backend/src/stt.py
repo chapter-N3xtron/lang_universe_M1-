@@ -25,13 +25,20 @@ def _decode_to_pcm(audio_bytes: bytes) -> np.ndarray:
             [
                 "ffmpeg",
                 "-nostdin",
-                "-loglevel", "error",
-                "-seekable", "0",
-                "-f", "webm",
-                "-i", tmp.name,
-                "-f", "s16le",
-                "-ac", "1",
-                "-ar", str(SAMPLE_RATE),
+                "-loglevel",
+                "error",
+                "-seekable",
+                "0",
+                "-f",
+                "webm",
+                "-i",
+                tmp.name,
+                "-f",
+                "s16le",
+                "-ac",
+                "1",
+                "-ar",
+                str(SAMPLE_RATE),
                 "-",
             ],
             stdout=subprocess.PIPE,
@@ -39,9 +46,7 @@ def _decode_to_pcm(audio_bytes: bytes) -> np.ndarray:
         )
         out, err = proc.communicate(timeout=30)
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg failed: {err.decode(errors='replace')}"
-        )
+        raise RuntimeError(f"ffmpeg failed: {err.decode(errors='replace')}")
     return np.frombuffer(out, dtype=np.int16).astype(np.float32) / 32768.0
 
 
@@ -71,13 +76,20 @@ def debug_decode(audio_bytes: bytes) -> dict:
             [
                 "ffmpeg",
                 "-nostdin",
-                "-loglevel", "error",
-                "-seekable", "0",
-                "-f", "webm",
-                "-i", tmp.name,
-                "-f", "s16le",
-                "-ac", "1",
-                "-ar", str(SAMPLE_RATE),
+                "-loglevel",
+                "error",
+                "-seekable",
+                "0",
+                "-f",
+                "webm",
+                "-i",
+                tmp.name,
+                "-f",
+                "s16le",
+                "-ac",
+                "1",
+                "-ar",
+                str(SAMPLE_RATE),
                 "-",
             ],
             stdout=subprocess.PIPE,

@@ -26,6 +26,12 @@ import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 import type { TodoSection } from "@/lib/types/todo";
+import type {
+  ConceptMapArtifact,
+  JasperResponse,
+  LayoutSuggestion,
+  ResponseDiagnostic,
+} from "@/lib/visual/jasper-response.generated";
 
 export type StateType = {
   messages: Message[];
@@ -44,6 +50,11 @@ export type StateType = {
   coding_text_preview?: string;
   coding_event_sequence?: number;
   coding_session_id?: string;
+  jasper_structured_response?: JasperResponse;
+  visual_artifacts?: ConceptMapArtifact[];
+  layout_suggestion?: LayoutSuggestion | null;
+  jasper_strategy?: "native" | "tool" | "two_pass" | "text";
+  jasper_diagnostic?: ResponseDiagnostic | null;
 };
 
 export type CodingEvent = {
@@ -89,6 +100,11 @@ const useTypedStream = useStream<
       coding_status?: string;
       coding_events?: CodingEvent[];
       coding_session_id?: string;
+      jasper_structured_response?: JasperResponse;
+      visual_artifacts?: ConceptMapArtifact[];
+      layout_suggestion?: LayoutSuggestion | null;
+      jasper_strategy?: "native" | "tool" | "two_pass" | "text";
+      jasper_diagnostic?: ResponseDiagnostic | null;
     };
     CustomEventType: UIMessage | RemoveUIMessage | CodingEvent;
   }

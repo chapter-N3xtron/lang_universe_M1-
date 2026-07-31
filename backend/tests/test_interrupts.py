@@ -43,19 +43,24 @@ def test_interrupt_fires_on_handoff():
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-fires"}}
 
-        result = asyncio.run(app.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "Research the latest AI news"}],
-                "workspace": "/tmp",
-                "target_agent": "",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [
+                        {"role": "user", "content": "Research the latest AI news"}
+                    ],
+                    "workspace": "/tmp",
+                    "target_agent": "",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
     state = app.get_state(config)
     assert state is not None
@@ -72,29 +77,36 @@ def test_interrupt_fires_on_handoff():
 
 
 def test_interrupt_approval_proceeds():
-    mock_llm = _create_mock_llm([
-        _make_llm_response("research"),
-        _make_llm_response("research"),
-        _make_llm_response("Here is the research result."),
-        _make_llm_response("done"),
-    ])
+    mock_llm = _create_mock_llm(
+        [
+            _make_llm_response("research"),
+            _make_llm_response("research"),
+            _make_llm_response("Here is the research result."),
+            _make_llm_response("done"),
+        ]
+    )
 
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-approve"}}
 
-        asyncio.run(app.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "Research the latest AI news"}],
-                "workspace": "/tmp",
-                "target_agent": "",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [
+                        {"role": "user", "content": "Research the latest AI news"}
+                    ],
+                    "workspace": "/tmp",
+                    "target_agent": "",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
         result = asyncio.run(app.ainvoke(Command(resume=True), config=config))
 
@@ -107,34 +119,43 @@ def test_interrupt_approval_proceeds():
 def test_interrupt_approval_proceeds_via_decision_dict():
     """Verify the approval node accepts the new HITL Decision dict format
     that the Agent Chat UI sends via {decisions: [{type: "approve"}]}."""
-    mock_llm = _create_mock_llm([
-        _make_llm_response("research"),
-        _make_llm_response("research"),
-        _make_llm_response("Here is the research result."),
-        _make_llm_response("done"),
-    ])
+    mock_llm = _create_mock_llm(
+        [
+            _make_llm_response("research"),
+            _make_llm_response("research"),
+            _make_llm_response("Here is the research result."),
+            _make_llm_response("done"),
+        ]
+    )
 
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-approve-dict"}}
 
-        asyncio.run(app.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "Research the latest AI news"}],
-                "workspace": "/tmp",
-                "target_agent": "",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [
+                        {"role": "user", "content": "Research the latest AI news"}
+                    ],
+                    "workspace": "/tmp",
+                    "target_agent": "",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
-        result = asyncio.run(app.ainvoke(
-            Command(resume=[{"type": "approve"}]),
-            config=config,
-        ))
+        result = asyncio.run(
+            app.ainvoke(
+                Command(resume=[{"type": "approve"}]),
+                config=config,
+            )
+        )
 
     assert len(result.get("handoff_history", [])) >= 1
     assert result["handoff_history"][0]["to"] == "research"
@@ -148,19 +169,24 @@ def test_interrupt_rejection_stops():
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-reject"}}
 
-        asyncio.run(app.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "Research the latest AI news"}],
-                "workspace": "/tmp",
-                "target_agent": "",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [
+                        {"role": "user", "content": "Research the latest AI news"}
+                    ],
+                    "workspace": "/tmp",
+                    "target_agent": "",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
         result = asyncio.run(app.ainvoke(Command(resume=False), config=config))
 
@@ -176,24 +202,31 @@ def test_interrupt_rejection_stops_via_decision_dict():
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-interrupt-reject-dict"}}
 
-        asyncio.run(app.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "Research the latest AI news"}],
-                "workspace": "/tmp",
-                "target_agent": "",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [
+                        {"role": "user", "content": "Research the latest AI news"}
+                    ],
+                    "workspace": "/tmp",
+                    "target_agent": "",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
-        result = asyncio.run(app.ainvoke(
-            Command(resume=[{"type": "reject", "message": "no thanks"}]),
-            config=config,
-        ))
+        result = asyncio.run(
+            app.ainvoke(
+                Command(resume=[{"type": "reject", "message": "no thanks"}]),
+                config=config,
+            )
+        )
 
     assert result.get("active_agent", "") == ""
     assert result.get("pending_approval", False) is False
@@ -203,58 +236,70 @@ def test_interrupt_rejection_stops_via_decision_dict():
 def test_supervisor_fallback_to_jasper_on_done():
     """When the supervisor LLM returns 'done' on the first message, the graph
     should fall back to jasper instead of ending with no response."""
-    mock_llm = _create_mock_llm([
-        _make_llm_response("done"),
-        _make_llm_response("Hi, I'm Jasper. How can I help?"),
-        _make_llm_response("done"),
-    ])
+    mock_llm = _create_mock_llm(
+        [
+            _make_llm_response("done"),
+            _make_llm_response("Hi, I'm Jasper. How can I help?"),
+            _make_llm_response("done"),
+        ]
+    )
 
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-fallback-jasper"}}
 
-        result = asyncio.run(app.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "hello"}],
-                "workspace": "/tmp",
-                "target_agent": "",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        result = asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "workspace": "/tmp",
+                    "target_agent": "",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
     # Should route through approval → jasper, producing an assistant message
     msgs = result.get("messages", [])
-    assert len(msgs) >= 1, "Expected at least one assistant message from jasper fallback"
+    assert len(msgs) >= 1, (
+        "Expected at least one assistant message from jasper fallback"
+    )
 
 
 def test_supervisor_fallback_on_unrecognized_agent():
     """When the supervisor LLM returns an unrecognized agent name, fall back to jasper."""
-    mock_llm = _create_mock_llm([
-        _make_llm_response("banana"),
-        _make_llm_response("Hi, I'm Jasper."),
-        _make_llm_response("done"),
-    ])
+    mock_llm = _create_mock_llm(
+        [
+            _make_llm_response("banana"),
+            _make_llm_response("Hi, I'm Jasper."),
+            _make_llm_response("done"),
+        ]
+    )
 
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
         config = {"configurable": {"thread_id": "test-fallback-unrecognized"}}
 
-        result = asyncio.run(app.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "hello"}],
-                "workspace": "/tmp",
-                "target_agent": "",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        result = asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "workspace": "/tmp",
+                    "target_agent": "",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
     # Should fall back to jasper, producing a message
     msgs = result.get("messages", [])

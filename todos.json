@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-30T03:36:05Z",
+  "updated_at": "2026-07-31T02:31:46Z",
   "updated_by": "opencode-desktop",
   "sections": [
     {
@@ -873,6 +873,267 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-07-30T03:31:49Z",
           "notes": "Completed the post-cutover production profile and all seven UI Lag remediation tasks. In the final concurrent browser suite, the Deep Agents maximum 128-event stream completes in 447 ms with a 54 ms maximum long task, a 59 ms maximum frame interval, and zero sampled historical-row rerenders. A 300-message persisted thread becomes ready in 378 ms while rendering only 80 rows, 1,915 DOM nodes, and 24.5 MB heap. Implemented stable stream action boundaries, row isolation, tool-safe 80-message windows, lightweight streaming text, dynamic syntax/math loading, and reduced-motion CSS layout transitions. Initial route size fell from 676 kB to 549 kB. Budgets and reproduction are in agent-chat-ui/PERFORMANCE.md and tests/performance.spec.ts."
+        }
+      ]
+    },
+    {
+      "id": "long-tts-playback-stability",
+      "title": "Long TTS Playback Stability",
+      "created_at": "2026-07-30T16:52:27Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "bound-tts-audio-queue",
+          "content": "Diagnose and fix chatter or breakup during long TTS playback by bounding queued Web Audio buffers, preserving gapless scheduling, handling cancellation cleanly, and adding a long-stream regression test.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T16:57:07Z",
+          "notes": "Confirmed the existing onended cleanup prevented a permanent leak but did not bound peak memory: every streamed chunk was scheduled immediately and retained until its future playback time. The frontend now coalesces small PCM chunks into half-second blocks, keeps PCM at its native 24 kHz so AudioContext handles device resampling without a second enlarged allocation, caps scheduled lookahead at three seconds, and prevents an older playback from clearing a newer playback's state. Added a synthetic 10-second browser regression proving the audio queue stays bounded. TypeScript, the optimized production build, the existing TTS play/stop test, and the new long-playback test pass."
+        }
+      ]
+    },
+    {
+      "id": "langchain-first-class-visual-workspace",
+      "title": "LangChain First-Class Visual Workspace",
+      "created_at": "2026-07-30T22:48:20Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "visual-workspace-architecture-contract",
+          "content": "Record the production architecture contract, framework boundaries, security limits, accessibility requirements, provider fallback policy, and release gates for a LangChain-backed first-class visual workspace.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T22:49:26Z",
+          "notes": "Added backend/VISUAL_WORKSPACE_ARCHITECTURE.md defining framework ownership, the user-control invariant, canonical response, deterministic provider strategies, strict resource limits, existing LangGraph transport, responsive workspace behavior, accessibility requirements, and the production release gate."
+        },
+        {
+          "id": "visual-response-schema",
+          "content": "Implement strict versioned Pydantic response and visual-artifact schemas, export JSON Schema, generate matching frontend types, and fail CI on schema drift.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T23:09:54Z",
+          "notes": "Added strict versioned Pydantic models, portable JSON Schema export, generated TypeScript types, Ajv runtime validation, semantic graph validation, size limits, and schema-drift tests."
+        },
+        {
+          "id": "jasper-langchain-agent-foundation",
+          "content": "Upgrade Jasper internally to LangChain create_agent, structured response formats, and middleware while preserving the outer LangGraph supervisor and thread lifecycle.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T23:09:54Z",
+          "notes": "Rebuilt Jasper internally with LangChain create_agent, structured response strategies, call and tool limits, retry middleware, and one canonical assistant message while retaining the outer supervisor. Smoke-test remediation keeps an explicit Jasper selection sticky across turns and refresh/retry paths, ends cleanly after the specialist response, and prevents concept-map requests from drifting to Magic Coder. New UI sessions now select Jasper by default while preserving Auto as an explicit user choice."
+        },
+        {
+          "id": "jasper-provider-fallback-matrix",
+          "content": "Implement and test deterministic native, ToolStrategy, two-pass, and safe text-only response paths using LangChain model profiles plus explicit verified overrides for local Ollama, Ollama Cloud, and Hugging Face.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T23:09:54Z",
+          "notes": "Implemented exact verified-model overrides plus native, ToolStrategy, conservative two-pass, incompatible-model text, invalid-structure, and sanitized provider-unavailable paths across explicit Ollama, Ollama Cloud, and Hugging Face routing. The two-pass path now treats draw_concept_map tool output as canonical, rejects formatter-invented artifacts, preserves validated maps when formatting fails, and gives Jasper a separate 2048-token structured-output budget. The UI model selector now binds to persisted thread state, labels the active provider as Local or Cloud, and has a browser regression proving a selected Ollama Cloud model is sent with its provider-qualified ID."
+        },
+        {
+          "id": "visual-artifact-langgraph-transport",
+          "content": "Carry validated structured artifacts through existing LangGraph state and useStream with message association, bounded retention, partial-state safety, reconnect behavior, and no parallel custom transport.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T23:09:54Z",
+          "notes": "Added structured fields to the existing outer LangGraph state and useStream values path, associated artifacts with message IDs, bounded responses, and verified checkpoint persistence, reconnect history, and malformed partial-state safety."
+        },
+        {
+          "id": "first-class-workspace-shell",
+          "content": "Replace the fixed artifact-sidebar assumption with accessible first-class chat and visual surfaces supporting focus, split, swap, resize, compact chat, responsive behavior, and per-thread user-controlled layout persistence.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T23:09:54Z",
+          "notes": "Added a human-controlled first-class workspace with per-thread persistence and opt-in agent suggestions. Post-smoke remediation removed conflicting collapsed-panel constraints and reduced the toolbar to three labeled modes: Chat, Split, and Visual. Split now opens at a clean 50/50, uses a visible draggable divider, keeps chat left and visual right, and resizes both surfaces without overlap. The message history scrolls independently while the bounded composer is a workspace-wide footer beneath both panes and remains visible in Chat, Split, and Visual modes."
+        },
+        {
+          "id": "concept-map-production-slice",
+          "content": "Deliver the production concept-map vertical slice from LangChain tool and structured response through LangGraph streaming to React Flow, with independent TTS voice text, human-only layout changes, validation, accessibility, payload limits, and end-to-end tests.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T23:09:54Z",
+          "notes": "Delivered draw_concept_map through Pydantic validation, Jasper structured output, LangGraph state, lazy-loaded React Flow/Dagre rendering, independent voice text, accessible outline, and end-to-end browser coverage. Visual-tool calls and their raw structured results are treated as internal artifact transport and omitted from chat while ordinary tool visibility remains configurable. The renderer preserves a left-to-right primary flow, excludes cyclic return edges from rank calculation, and routes those returns through distinct top or bottom outer lanes instead of overlapping forward edges, nodes, or labels. It also distinguishes primary flow from tool branches, gives node kinds distinct accessible styling, themes edge labels and controls for dark mode, and removes the low-value minimap. Pydantic and browser semantic validation require every multi-node concept map to be one weakly connected graph, causing disconnected tool output to be retried instead of rendered as separate islands."
+        },
+        {
+          "id": "visual-workspace-release-gate",
+          "content": "Pass backend, provider-strategy, schema-drift, TypeScript, optimized build, UI, accessibility, reconnect, long-session, and performance verification before expanding to Plotly, Tree-sitter, issue-list, or architecture renderers.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-30T23:09:54Z",
+          "notes": "Passed the original 116 backend tests, focused Ruff checks, schema drift, TypeScript, optimized Next.js build, and all 16 Playwright tests including reconnect, malformed data, TTS, long threads, and performance budgets. Post-smoke remediation passes 121 backend tests, clean production builds, and the full 16-test mocked browser suite. Layout coverage asserts 50/50 split, divider dragging, pane containment, pinned composer, three-mode focus switching, dark contrast, malformed-data safety, long-thread performance, streaming performance, and TTS. A fresh live local-Ollama run stayed on Jasper (route_to_jasper then done) and returned one validated concept-map artifact despite a recoverable formatter failure."
+        }
+      ]
+    },
+    {
+      "id": "grounded-interactive-visual-artifacts",
+      "title": "Grounded and Interactive Visual Artifacts",
+      "created_at": "2026-07-31T01:45:27Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "visual-evidence-contract-v2",
+          "content": "Version the visual artifact contract so repository, web-research, user-defined, proposed, and inferred claims carry inspectable provenance and cannot be confused with one another.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T01:45:41Z",
+          "notes": "Upgraded the canonical Pydantic and generated browser contract to version 2. Every node and edge now carries evidence references and an epistemic claim status: observed, researched, user_defined, proposed, or inferred. Repository observations require repository-file evidence, researched claims require web evidence, and proposed or user-defined claims require the current user message. Legacy ungrounded version-1 artifacts are intentionally rejected rather than presented as factual."
+        },
+        {
+          "id": "trusted-visual-evidence-registry",
+          "content": "Capture evidence only from repository reads, research tools, and the current user message; reject diagrams that cite unobserved or mismatched sources.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T01:45:41Z",
+          "notes": "Added a per-Jasper-run evidence registry. read_file and list_todos register relative repository sources; web_search and read_url register HTTP(S) sources; the current user message registers user-input evidence. draw_concept_map resolves source metadata only from this trusted registry and rejects invented IDs, mismatched grounding kinds, unsafe locators, unsupported nodes or edges, disconnected graphs, and incomplete narration order. Combined structured-output paths now discard artifacts that did not pass through draw_concept_map."
+        },
+        {
+          "id": "visual-source-inspection",
+          "content": "Show claim status, citations, relationships, repository paths, and web links in the visual outline.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T01:45:41Z",
+          "notes": "Nodes display claim status and citation numbers. The accessible outline lists node evidence, relationship evidence, repository paths, and clickable HTTP(S) research sources so users can audit what supports the diagram. Browser semantic validation independently rejects unknown evidence references and invalid narration order."
+        },
+        {
+          "id": "node-narration-and-discussion",
+          "content": "Tie grounded narration to node IDs, highlight nodes during playback, replay narration on node selection, and seed evidence-aware Jasper follow-up discussion.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T01:45:41Z",
+          "notes": "Every node has grounded voice-friendly narration and a validated narration order. Reading an associated Jasper response highlights each node while its segment plays. Clicking a node selects and narrates it; the node card can replay or stop audio and can seed the always-visible composer with a Jasper follow-up containing the node status and source locators."
+        },
+        {
+          "id": "grounded-visual-release-gate",
+          "content": "Pass schema drift, backend, production build, and browser regressions for grounded artifacts and node interactions.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T01:45:41Z",
+          "notes": "Focused Ruff and schema checks pass; all 128 backend tests pass; TypeScript and the optimized production build pass; all 6 visual-workspace Playwright tests pass, including source inspection, feedback routing, node narration, active-node highlighting, and evidence-aware Jasper follow-up. Repository evidence, proposed user architecture, unobserved-source rejection, and combined-output artifact bypasses have dedicated backend regressions."
+        }
+      ]
+    },
+    {
+      "id": "persistent-visual-workspace-access",
+      "title": "Persistent Visual Workspace Access",
+      "created_at": "2026-07-31T01:52:07Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "always-available-workspace-modes",
+          "content": "Keep Chat, Split, and Visual controls available with or without a current artifact and preserve the selected workspace mode across refreshes.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T01:54:09Z",
+          "notes": "Chat, Split, and Visual are now permanently available instead of being gated by a current artifact. The per-thread or new-thread selection remains in local storage, so Visual and Split survive refreshes even when the canvas is empty."
+        },
+        {
+          "id": "renderer-neutral-empty-surface",
+          "content": "Provide a useful renderer-neutral empty visual workspace that can later host grounded Tree-sitter code visualizations as well as concept maps.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T01:54:09Z",
+          "notes": "Added a renderer-neutral empty visual surface that explicitly accommodates concept maps and grounded code visualizations. Existing legacy artifacts remain supported, while the surface no longer disappears when no artifact is active."
+        },
+        {
+          "id": "persistent-workspace-regression",
+          "content": "Add browser coverage for empty visual access, split resizing, mode persistence, and the always-visible composer, then rebuild and restart the UI.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T01:54:09Z",
+          "notes": "Added a no-artifact browser regression covering permanent controls, Visual persistence across reload, empty-state rendering, Split mode, the resizable divider, and the visible composer. Updated malformed-artifact coverage to assert that rejected diagrams leave a usable empty canvas. The optimized build and all 7 visual-workspace browser tests pass; LangGraph, backend, and UI health checks are green."
+        }
+      ]
+    },
+    {
+      "id": "jasper-cloud-empty-response-recovery",
+      "title": "Jasper Cloud Empty-Response Recovery",
+      "created_at": "2026-07-31T02:09:44Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "classify-jasper-cloud-failures",
+          "content": "Distinguish actual Ollama Cloud transport failures from downstream Jasper agent or structured-response failures without exposing provider details or credentials.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:11:23Z",
+          "notes": "Confirmed from sanitized LangGraph logs that the failed qwen3.5:397b run received three HTTP 200 responses from Ollama Cloud; the provider was reachable. Jasper now classifies chained transport/provider exceptions separately from internal agent or response-validation failures and logs only category and exception type, never credential or provider response details."
+        },
+        {
+          "id": "recover-empty-cloud-final-answer",
+          "content": "Recover a final user-facing answer when a reasoning model completes cloud tool calls but returns an empty final content field.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:11:23Z",
+          "notes": "When a reasoning/tool loop finishes without user-facing content, Jasper now makes one tools-disabled finalization call with a separate 4096-token budget. If that still returns empty, Jasper emits an accurate deterministic retry message instead of raising a validation error and falsely reporting provider unavailability."
+        },
+        {
+          "id": "cloud-recovery-release-gate",
+          "content": "Pass Jasper and backend regressions, deploy the graph update, verify cloud health, and confirm no local Ollama model remains loaded.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:11:23Z",
+          "notes": "All 14 focused Jasper tests and the 53-test Jasper/supervisor/visual/tool regression set pass with clean Ruff checks. The full host suite reports 120 passes and 10 unrelated missing-optional-package failures for deepagents and langchain_huggingface. Restarted only the LangGraph API container; a live Ollama Cloud qwen3.5:397b Jasper smoke test returned exactly 'cloud ok'. LangGraph, sidecar, and UI health checks pass, and ollama ps confirms no local model remains loaded."
+        }
+      ]
+    },
+    {
+      "id": "canonical-environment-and-release-gate",
+      "title": "Canonical Environment and Release Gate",
+      "created_at": "2026-07-31T02:31:46Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "standardize-backend-environment",
+          "content": "Make the declared uv-managed backend environment the sole startup and test environment, including every runtime used by the startup script.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:31:46Z",
+          "notes": "Startup now uses backend/.venv for LangGraph and the sidecar. Deep Agents, Hugging Face, sidecar, test, and LangGraph CLI dependencies are declared and synchronized; uv.lock is committed for reproducible installs instead of relying on the obsolete host venv."
+        },
+        {
+          "id": "validate-complete-quality-gate",
+          "content": "Run backend and frontend linting, formatting, schema drift, type, build, unit, browser, performance, persistence, visual, and long-audio checks.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:31:46Z",
+          "notes": "Ruff and backend formatting pass; all 130 backend tests pass. Prettier, generated-schema drift, TypeScript, and ESLint complete with zero errors and 19 inherited warnings. The optimized Next.js build passes and all 22 deterministic Playwright tests pass. Invalid cloud-dependent browser tests were replaced with transport-faithful persistence tests."
+        },
+        {
+          "id": "restart-and-verify-production-services",
+          "content": "Restart the current LangGraph, sidecar, and optimized UI build, then verify service health without loading a local model.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:31:46Z",
+          "notes": "LangGraph, the FastAPI sidecar, and the tested production UI were restarted and returned healthy responses on ports 8123, 8000, and 3001. ollama ps is empty, confirming no local model is resident."
         }
       ]
     }

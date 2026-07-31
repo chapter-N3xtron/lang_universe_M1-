@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, FormEvent, useCallback, memo } from "react";
+import {
+  useState,
+  FormEvent,
+  useCallback,
+  memo,
+  useEffect,
+  useRef,
+} from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "../ui/button";
 import { Message } from "@langchain/langgraph-sdk";
@@ -40,6 +47,12 @@ const AGENT_OPTIONS = [
   { value: "magic-coder", label: "Magic Coder" },
 ] as const;
 
+const DEFAULT_AGENT = "jasper";
+
+function agentValue(targetAgent: string | undefined): string {
+  return targetAgent === undefined ? DEFAULT_AGENT : targetAgent;
+}
+
 interface ModelOption {
   value: string;
   label: string;
@@ -65,6 +78,8 @@ interface ChatInputProps {
   voicesLoadError: boolean;
   voiceOptions: { id: string; name: string }[];
   chatStarted: boolean;
+  targetAgent?: string;
+  targetModel?: string;
   streamActions: {
     getMessages: () => Message[];
     submit: StreamContextType["submit"];
@@ -96,32 +111,61 @@ function ChatInputImpl({
   voicesLoadError,
   voiceOptions,
   chatStarted,
+  targetAgent,
+  targetModel,
   streamActions,
   onStartSubmit,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState<string>("");
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [agentSelection, setAgentSelection] = useState({
+    source: targetAgent,
+    value: agentValue(targetAgent),
+  });
+  const selectedAgent =
+    agentSelection.source === targetAgent
+      ? agentSelection.value
+      : agentValue(targetAgent);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string>("");
   const [isPickingWorkspace, setIsPickingWorkspace] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [modelSelection, setModelSelection] = useState({
+    source: targetModel,
+    value: targetModel ?? "",
+  });
+  const selectedModel =
+    modelSelection.source === targetModel
+      ? modelSelection.value
+      : (targetModel ?? "");
   const effectiveSelectedModel = selectedModel || defaultModel;
+  const selectedModelLabel =
+    modelOptions.find((option) => option.value === effectiveSelectedModel)
+      ?.label ?? effectiveSelectedModel;
+  const selectedModelLocation =
+    modelProviders[effectiveSelectedModel] === "ollama" ? "Local" : "Cloud";
   const [executionMode, setExecutionMode] = useState<"read_only" | "approval">(
     "read_only",
   );
   const localModels = sortModelOptions(
-    modelOptions.filter(
-      (option) => modelProviders[option.value] === "ollama",
-    ),
+    modelOptions.filter((option) => modelProviders[option.value] === "ollama"),
   );
   const cloudModels = sortModelOptions(
-    modelOptions.filter(
-      (option) => modelProviders[option.value] !== "ollama",
-    ),
+    modelOptions.filter((option) => modelProviders[option.value] !== "ollama"),
   );
   const [hideToolCalls, setHideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
   );
+  useEffect(() => {
+    const discussNode = (event: Event) => {
+      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt;
+      if (!prompt) return;
+      setInput(prompt);
+      setAgentSelection({ source: targetAgent, value: "jasper" });
+      window.requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener("jasper:discuss-node", discussNode);
+    return () => window.removeEventListener("jasper:discuss-node", discussNode);
+  }, [targetAgent]);
   const {
     contentBlocks,
     setContentBlocks,
@@ -161,7 +205,7 @@ function ChatInputImpl({
         {
           messages: [...toolMessages, newHumanMessage],
           context: undefined,
-          target_agent: selectedAgent || undefined,
+          target_agent: selectedAgent,
           workspace: selectedWorkspace || undefined,
           model: effectiveSelectedModel || undefined,
           execution_mode: executionMode,
@@ -180,7 +224,7 @@ function ChatInputImpl({
           optimisticValues: (prev) => ({
             ...prev,
             context: undefined,
-            target_agent: selectedAgent || undefined,
+            target_agent: selectedAgent,
             workspace: selectedWorkspace || undefined,
             model: effectiveSelectedModel || undefined,
             execution_mode: executionMode,
@@ -213,13 +257,13 @@ function ChatInputImpl({
   );
 
   return (
-    <div className="bg-background sticky bottom-0 flex flex-col items-center gap-8">
+    <div className="bg-background flex shrink-0 flex-col items-center px-4 pt-2">
       {!chatStarted && null}
 
       <div
         ref={dropRef}
         className={cn(
-          "bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
+          "bg-muted relative z-10 mx-auto mb-4 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
           dragOver
             ? "border-primary border-2 border-dotted"
             : "border border-solid",
@@ -234,6 +278,7 @@ function ChatInputImpl({
             onRemove={removeBlock}
           />
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onPaste={handlePaste}
@@ -251,7 +296,7 @@ function ChatInputImpl({
               }
             }}
             placeholder="Type your message..."
-            className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
+            className="field-sizing-content max-h-40 resize-none overflow-y-auto border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
           />
 
           <div className="flex items-start justify-between gap-1.5 p-1.5 pt-3">
@@ -304,7 +349,8 @@ function ChatInputImpl({
                   } catch (error) {
                     console.error("[Repo picker] failed:", error);
                     toast.error("Could not open folder picker", {
-                      description: "Check that the sidecar is running and macOS allows Finder access.",
+                      description:
+                        "Check that the sidecar is running and macOS allows Finder access.",
                     });
                   } finally {
                     setIsPickingWorkspace(false);
@@ -321,9 +367,11 @@ function ChatInputImpl({
                   {isPickingWorkspace
                     ? "Opening…"
                     : selectedWorkspace
-                    ? selectedWorkspace.replace(/\/+$/, "").split("/").pop() ||
-                      selectedWorkspace
-                    : "Repo selector"}
+                      ? selectedWorkspace
+                          .replace(/\/+$/, "")
+                          .split("/")
+                          .pop() || selectedWorkspace
+                      : "Repo selector"}
                 </span>
               </button>
             </div>
@@ -332,7 +380,9 @@ function ChatInputImpl({
                 <span className="text-xs text-gray-600">Agent</span>
                 <Select
                   value={selectedAgent}
-                  onValueChange={setSelectedAgent}
+                  onValueChange={(value) =>
+                    setAgentSelection({ source: targetAgent, value })
+                  }
                 >
                   <SelectTrigger
                     className="h-7 w-[112px] text-xs"
@@ -380,14 +430,20 @@ function ChatInputImpl({
                       <span>
                         <Select
                           value={effectiveSelectedModel}
-                          onValueChange={setSelectedModel}
+                          onValueChange={(value) =>
+                            setModelSelection({ source: targetModel, value })
+                          }
                           disabled={modelsLoadError}
                         >
                           <SelectTrigger
                             className="h-7 w-[128px] text-xs"
                             aria-label="Select model"
                           >
-                            <SelectValue placeholder="Loading…" />
+                            <SelectValue placeholder="Loading…">
+                              {effectiveSelectedModel
+                                ? `${selectedModelLocation} · ${selectedModelLabel}`
+                                : undefined}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             {localModels.length > 0 && (

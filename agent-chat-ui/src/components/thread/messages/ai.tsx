@@ -17,6 +17,12 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 
+const VISUAL_ARTIFACT_TOOLS = new Set(["draw_concept_map"]);
+
+function isVisualArtifactTool(name: string | undefined): boolean {
+  return Boolean(name && VISUAL_ARTIFACT_TOOLS.has(name));
+}
+
 function CustomComponent({ message }: { message: Message }) {
   const artifact = useArtifact();
   const thread = useStreamContext();
@@ -150,15 +156,34 @@ function AssistantMessageImpl({
     "tool_calls" in message &&
     message.tool_calls &&
     message.tool_calls.length > 0;
+  const visibleToolCalls = hasToolCalls
+    ? message.tool_calls?.filter(
+        (toolCall) => !isVisualArtifactTool(toolCall.name),
+      )
+    : undefined;
   const toolCallsHaveContents =
-    hasToolCalls &&
-    message.tool_calls?.some(
-      (tc) => tc.args && Object.keys(tc.args).length > 0,
-    );
-  const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
+    visibleToolCalls &&
+    visibleToolCalls.some((tc) => tc.args && Object.keys(tc.args).length > 0);
+  const visibleAnthropicToolCalls = anthropicStreamedToolCalls?.filter(
+    (toolCall) => !isVisualArtifactTool(toolCall.name),
+  );
+  const hasVisibleToolCalls = Boolean(visibleToolCalls?.length);
+  const hasAnthropicToolCalls = Boolean(visibleAnthropicToolCalls?.length);
   const isToolResult = message?.type === "tool";
+  const isVisualToolResult = isToolResult && isVisualArtifactTool(message.name);
 
-  if (isToolResult && hideToolCalls) {
+  if (isVisualToolResult || (isToolResult && hideToolCalls)) {
+    return null;
+  }
+
+  if (
+    !isToolResult &&
+    contentString.length === 0 &&
+    !hasVisibleToolCalls &&
+    !hasAnthropicToolCalls &&
+    !hasCustomComponent &&
+    !threadInterrupt
+  ) {
     return null;
   }
 
@@ -189,14 +214,14 @@ function AssistantMessageImpl({
 
             {!hideToolCalls && (
               <>
-                {(hasToolCalls && toolCallsHaveContents && (
-                  <ToolCalls toolCalls={message.tool_calls} />
+                {(hasVisibleToolCalls && toolCallsHaveContents && (
+                  <ToolCalls toolCalls={visibleToolCalls} />
                 )) ||
                   (hasAnthropicToolCalls && (
-                    <ToolCalls toolCalls={anthropicStreamedToolCalls} />
+                    <ToolCalls toolCalls={visibleAnthropicToolCalls} />
                   )) ||
-                  (hasToolCalls && (
-                    <ToolCalls toolCalls={message.tool_calls} />
+                  (hasVisibleToolCalls && (
+                    <ToolCalls toolCalls={visibleToolCalls} />
                   ))}
               </>
             )}

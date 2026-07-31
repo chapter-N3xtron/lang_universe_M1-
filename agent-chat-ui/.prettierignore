@@ -1,6 +1,12 @@
 # Ignore artifacts:
 build
 coverage
+test-results
+
+# Generated from the backend's canonical Pydantic schema. These files are
+# validated byte-for-byte by `visual-schema:check`.
+src/lib/visual/jasper-response.generated.ts
+src/lib/visual/jasper-response.schema.json
 
 #
 pnpm-lock.yaml

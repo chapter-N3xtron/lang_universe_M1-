@@ -12,8 +12,6 @@ Messages arrive as dicts with either LangGraph SDK format
 
 from typing import TypedDict
 
-from langchain_core.messages import trim_messages
-
 
 class AgentState(TypedDict, total=False):
     messages: list[dict]
@@ -84,7 +82,9 @@ def trim_history(messages: list, max_tokens: int = 4000) -> list:
     while i < len(messages):
         msg = messages[i]
         content = msg if isinstance(msg, dict) else {}
-        is_tool_call = content.get("role") == "assistant" and bool(content.get("tool_calls", []))
+        is_tool_call = content.get("role") == "assistant" and bool(
+            content.get("tool_calls", [])
+        )
 
         if isinstance(msg, dict) and is_tool_call:
             group = [msg]

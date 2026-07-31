@@ -6,18 +6,18 @@ small set of filesystem/shell tools. Tool outputs are appended to the context
 and a final answer is generated.
 """
 
-import json
 import contextvars
+import json
 import os
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, List, Optional
 
-from src.ollama_client import _ollama_base_url, list_ollama_models
 import requests
 
+from src.ollama_client import _ollama_base_url, list_ollama_models
 
 INTENT_TOOL_NAMES = [
     "build_image_framework",
@@ -123,20 +123,24 @@ def _tool_read(path: str) -> str:
 def _tool_glob(pattern: str) -> str:
     try:
         p = _resolve(pattern)
-        matches = sorted(p.parent.glob(p.name)) if p.parent else sorted(Path(_workspace()).glob(pattern))
+        matches = (
+            sorted(p.parent.glob(p.name))
+            if p.parent
+            else sorted(Path(_workspace()).glob(pattern))
+        )
         lines = [str(m.relative_to(_workspace())) for m in matches]
         return "\n".join(lines[:200]) or "[no matches]"
     except Exception as e:
         return f"[error: {e}]"
 
 
-def _tool_grep(pattern: str, path: str, include: Optional[str] = None) -> str:
+def _tool_grep(pattern: str, path: str, include: str | None = None) -> str:
     try:
         target = _resolve(path)
         if target.is_file():
             text = target.read_text(encoding="utf-8", errors="replace")
             lines = [
-                f"{i+1}: {line}"
+                f"{i + 1}: {line}"
                 for i, line in enumerate(text.splitlines())
                 if re.search(pattern, line)
             ]
@@ -168,7 +172,7 @@ def _tool_grep(pattern: str, path: str, include: Optional[str] = None) -> str:
                         for i, line in enumerate(text.splitlines()):
                             if re.search(pattern, line):
                                 rel = fpath.relative_to(_workspace())
-                                lines.append(f"{rel}:{i+1}: {line}")
+                                lines.append(f"{rel}:{i + 1}: {line}")
                     except Exception:
                         continue
             return "\n".join(lines[:100]) or "[no matches]"
@@ -205,7 +209,9 @@ DEFAULT_ANIME_DIFFUSION_MODEL = "anima-base-v1.0.safetensors"
 DEFAULT_ANIME_TEXT_ENCODER = "qwen_3_06b_base.safetensors"
 DEFAULT_ANIME_VAE = "qwen_image_vae.safetensors"
 DEFAULT_ANIME_LORA = "dakota_anima_lora.safetensors"
-DEFAULT_IMAGE_ORDER_MODEL = os.getenv("IMAGE_ORDER_MODEL", "hf.co/concedo/Beepo-22B-GGUF:Q4_K_M")
+DEFAULT_IMAGE_ORDER_MODEL = os.getenv(
+    "IMAGE_ORDER_MODEL", "hf.co/concedo/Beepo-22B-GGUF:Q4_K_M"
+)
 DEFAULT_CHARACTER_REPO = os.path.expanduser("~/fun-multi-character-chats/characters")
 DEFAULT_IMAGE_RESOLUTION = (1216, 704)
 DEFAULT_ANIME_STYLE_PREFIX = (
@@ -321,7 +327,9 @@ def _tool_build_comfyui_workflow(
         workflow["6"] = {
             "inputs": {
                 "seed": 0 if seed_strategy == "random" else 42,
-                "control_after_generate": "randomize" if seed_strategy == "random" else "fixed",
+                "control_after_generate": "randomize"
+                if seed_strategy == "random"
+                else "fixed",
                 "steps": 28,
                 "cfg": 4.5,
                 "sampler_name": "dpmpp_2m",
@@ -489,7 +497,9 @@ if __name__ == "__main__":
     main()
 '''
 
-        (base / "workflow_api.json").write_text(json.dumps(workflow, indent=2), encoding="utf-8")
+        (base / "workflow_api.json").write_text(
+            json.dumps(workflow, indent=2), encoding="utf-8"
+        )
         (base / "README.md").write_text(readme, encoding="utf-8")
         (base / "queue.py").write_text(queue_script, encoding="utf-8")
         (base / "patch_and_queue.py").write_text(patcher_script, encoding="utf-8")
@@ -521,7 +531,12 @@ def _tool_build_image_framework(brief: str, output_dir: str = "image_framework")
             },
             "wardrobe": {
                 "default": "90s anime style crop top and high-waisted shorts",
-                "variants": ["lingerie", "casual home clothes", "work uniform", "evening dress"],
+                "variants": [
+                    "lingerie",
+                    "casual home clothes",
+                    "work uniform",
+                    "evening dress",
+                ],
             },
             "personality_tags": ["confident", "playful", "flirty"],
             "prompt_prefix": "1990s anime style, soft bloom, cel shading, vibrant colors, highly detailed,",
@@ -609,7 +624,9 @@ if __name__ == "__main__":
 
         scenes_placeholder = "# Add one scene per line. The batch generator will turn each into a prompt.\n"
 
-        (base / "character_sheet.json").write_text(json.dumps(character_sheet, indent=2), encoding="utf-8")
+        (base / "character_sheet.json").write_text(
+            json.dumps(character_sheet, indent=2), encoding="utf-8"
+        )
         (base / "prompt_engine.py").write_text(prompt_engine, encoding="utf-8")
         (base / "batch_generate.py").write_text(batch_script, encoding="utf-8")
         (base / "scenes.txt").write_text(scenes_placeholder, encoding="utf-8")
@@ -627,9 +644,7 @@ if __name__ == "__main__":
         return f"[error: {e}]"
 
 
-
-
-def _extract_tool_calls(text: str) -> List[dict]:
+def _extract_tool_calls(text: str) -> list[dict]:
     """Find tool calls in assistant output: either inside ```tool ... ``` blocks or as inline JSON objects.
 
     Accepts tool names that contain hyphens as well as underscores and letters.
@@ -655,10 +670,12 @@ def _extract_tool_calls(text: str) -> List[dict]:
         candidate = match.group(0)
         try:
             data = json.loads(candidate)
-            if isinstance(data, dict) and data.get("tool") in _TOOL_DISPATCH:
-                # Avoid duplicates from already-matched fences
-                if data not in calls:
-                    calls.append(data)
+            if (
+                isinstance(data, dict)
+                and data.get("tool") in _TOOL_DISPATCH
+                and data not in calls
+            ):
+                calls.append(data)
         except json.JSONDecodeError:
             continue
 
@@ -686,7 +703,7 @@ def _image_profile_dir(name: str) -> Path:
 def _read_json(path: Path) -> dict:
     if not path.exists():
         return {}
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         text = f.read()
     # Some SillyTavern lorebooks have trailing garbage; parse the first valid JSON object.
     decoder = json.JSONDecoder()
@@ -715,7 +732,10 @@ def _extract_physical_description(character_json: dict, lorebook_json: dict) -> 
         snippets.append(personality)
     for entry in lorebook_json.get("entries", []):
         keys = [k.lower() for k in entry.get("keys", [])]
-        if any(k in keys for k in ("body", "outfit", "appearance", "look", "hair", "eyes", "skin")):
+        if any(
+            k in keys
+            for k in ("body", "outfit", "appearance", "look", "hair", "eyes", "skin")
+        ):
             snippets.append(entry.get("content", ""))
     tags = ", ".join(character_json.get("tags", []))
     if tags:
@@ -757,7 +777,13 @@ def _extract_character_traits(character_json: dict, lorebook_json: dict) -> dict
         "blue": ["blue hair", "azure hair", "sapphire hair"],
         "pink": ["pink hair", "rose hair", "magenta hair"],
         "purple": ["purple hair", "violet hair", "lavender hair"],
-        "silver": ["silver hair", "white hair", "grey hair", "gray hair", "platinum hair"],
+        "silver": [
+            "silver hair",
+            "white hair",
+            "grey hair",
+            "gray hair",
+            "platinum hair",
+        ],
     }
     hair_color = max(hair_color_hits, key=lambda c: _score(hair_color_hits[c]))
     if _score(hair_color_hits[hair_color]) == 0:
@@ -798,13 +824,24 @@ def _extract_character_traits(character_json: dict, lorebook_json: dict) -> dict
 
     # Body / outfit / explicit keywords from lore.
     body_terms = []
-    if any(k in corpus for k in ("small tits", "small breasts", "perky tits", "small chest")):
+    if any(
+        k in corpus
+        for k in ("small tits", "small breasts", "perky tits", "small chest")
+    ):
         body_terms.append("small breasts")
-    if any(k in corpus for k in ("large breasts", "big tits", "huge tits", "big breasts", "busty")):
+    if any(
+        k in corpus
+        for k in ("large breasts", "big tits", "huge tits", "big breasts", "busty")
+    ):
         body_terms.append("large breasts")
-    if any(k in corpus for k in ("high round ass", "round ass", "big ass", "fat ass", "bubble butt")):
+    if any(
+        k in corpus
+        for k in ("high round ass", "round ass", "big ass", "fat ass", "bubble butt")
+    ):
         body_terms.append("high round ass")
-    if any(k in corpus for k in ("narrow waist", "small waist", "tiny waist", "hourglass")):
+    if any(
+        k in corpus for k in ("narrow waist", "small waist", "tiny waist", "hourglass")
+    ):
         body_terms.append("narrow waist")
     if any(k in corpus for k in ("full lips", "plump lips", "big lips", "lip fillers")):
         body_terms.append("full lips")
@@ -824,7 +861,10 @@ def _extract_character_traits(character_json: dict, lorebook_json: dict) -> dict
         outfit_terms.append("lingerie bodysuit")
     if any(k in corpus for k in ("schoolgirl skirt", "plaid skirt", "short skirt")):
         outfit_terms.append("short skirt")
-    if any(k in corpus for k in ("yoga shorts", "tight shorts", "gym shorts", "high-waist shorts")):
+    if any(
+        k in corpus
+        for k in ("yoga shorts", "tight shorts", "gym shorts", "high-waist shorts")
+    ):
         outfit_terms.append("tight shorts")
     if any(k in corpus for k in ("sports bra", "crop top", "cut-off tank")):
         outfit_terms.append("crop top")
@@ -833,7 +873,10 @@ def _extract_character_traits(character_json: dict, lorebook_json: dict) -> dict
 
     # Explicit/NSFW appearance tags (kept separate from the public identity prompt).
     explicit_terms = []
-    if any(k in corpus for k in ("neat pussy", "smooth pussy", "tight pussy", "pronounced lips")):
+    if any(
+        k in corpus
+        for k in ("neat pussy", "smooth pussy", "tight pussy", "pronounced lips")
+    ):
         explicit_terms.append("smooth shaven vulva")
     if any(k in corpus for k in ("pink asshole", "used asshole", "anal", "butt plug")):
         explicit_terms.append("pink anus")
@@ -851,7 +894,9 @@ def _extract_character_traits(character_json: dict, lorebook_json: dict) -> dict
         "hair": {
             "color": hair_color,
             "style": hair_style,
-            "length": "long" if "long" in hair_style else ("short" if hair_style == "short" else "medium"),
+            "length": "long"
+            if "long" in hair_style
+            else ("short" if hair_style == "short" else "medium"),
         },
         "eyes": {"color": eye_color, "makeup": "natural"},
         "skin": {"tone": skin_tone, "texture": "smooth"},
@@ -864,7 +909,7 @@ def _extract_character_traits(character_json: dict, lorebook_json: dict) -> dict
 def _tool_register_character(
     name: str,
     character_repo: str = DEFAULT_CHARACTER_REPO,
-    physical_description: Optional[str] = None,
+    physical_description: str | None = None,
 ) -> str:
     """Read a SillyTavern character card + lorebook and build a persistent image profile."""
     try:
@@ -887,7 +932,8 @@ def _tool_register_character(
             "source": str(char_dir),
             "personality_summary": character_json.get("personality", "")[:800],
             "scenario": character_json.get("scenario", "")[:800],
-            "physical_description": physical_description or _extract_physical_description(character_json, lorebook_json),
+            "physical_description": physical_description
+            or _extract_physical_description(character_json, lorebook_json),
             "structured_traits": structured_traits,
             "lore_entries": [
                 {"keys": e.get("keys", []), "content": e.get("content", "")[:500]}
@@ -897,7 +943,9 @@ def _tool_register_character(
             "tags": character_json.get("tags", []),
         }
 
-        (profile_dir / "profile.json").write_text(json.dumps(profile, indent=2), encoding="utf-8")
+        (profile_dir / "profile.json").write_text(
+            json.dumps(profile, indent=2), encoding="utf-8"
+        )
         return f"[registered character '{name}' in {profile_dir}]"
     except Exception as e:
         return f"[error: {e}]"
@@ -1043,7 +1091,7 @@ def _tool_place_image_order(
 
     By default the patched workflow is queued to ComfyUI immediately. Set dry_run=True
     to only write the order artifacts to disk without contacting ComfyUI.
-    
+
     All images are SFW and focused on cute/cool anime-style aesthetics.
     """
     try:
@@ -1062,20 +1110,25 @@ def _tool_place_image_order(
             )
 
         # If the user gave a free-form sentence and didn't fill structured fields, parse it.
-        if scene and not any([action, pose, clothing, location, interaction, social_context, mood]):
-            if len(scene.split()) > 5:
-                parse_result = run_image_order_parser(scene)
-                if parse_result["success"]:
-                    fields = parse_result["fields"]
-                    character = fields.get("character") or character
-                    scene = fields.get("scene", scene)
-                    action = fields.get("action", "")
-                    pose = fields.get("pose", "")
-                    clothing = fields.get("clothing", "")
-                    location = fields.get("location", "")
-                    interaction = fields.get("interaction", "")
-                    social_context = fields.get("social_context", "")
-                    mood = fields.get("mood", "")
+        if (
+            scene
+            and not any(
+                [action, pose, clothing, location, interaction, social_context, mood]
+            )
+            and len(scene.split()) > 5
+        ):
+            parse_result = run_image_order_parser(scene)
+            if parse_result["success"]:
+                fields = parse_result["fields"]
+                character = fields.get("character") or character
+                scene = fields.get("scene", scene)
+                action = fields.get("action", "")
+                pose = fields.get("pose", "")
+                clothing = fields.get("clothing", "")
+                location = fields.get("location", "")
+                interaction = fields.get("interaction", "")
+                social_context = fields.get("social_context", "")
+                mood = fields.get("mood", "")
 
         default_outfit = profile.get("structured_traits", {}).get("default_outfit", "")
         scene_sentence = _build_scene_sentence(
@@ -1101,7 +1154,7 @@ def _tool_place_image_order(
                 "Run build_comfyui_workflow first.]"
             )
 
-        with open(workflow_path, "r", encoding="utf-8") as f:
+        with open(workflow_path, encoding="utf-8") as f:
             workflow = json.load(f)
 
         workflow["7"]["inputs"]["text"] = positive
@@ -1110,11 +1163,14 @@ def _tool_place_image_order(
         # ComfyUI's LoadImage node only accepts filenames inside its input folder.
         # Copy the configured reference image into ComfyUI/input if needed.
         def _ensure_in_comfy_input(src_path: Path) -> str:
-            comfy_input = Path(_resolve("~/fun-multi-character-chats/ComfyUI/input").expanduser())
+            comfy_input = Path(
+                _resolve("~/fun-multi-character-chats/ComfyUI/input").expanduser()
+            )
             comfy_input.mkdir(parents=True, exist_ok=True)
             dest = comfy_input / src_path.name
             if not dest.exists():
                 import shutil
+
                 shutil.copy2(str(src_path), str(dest))
             return dest.name
 
@@ -1123,7 +1179,14 @@ def _tool_place_image_order(
         # image cannot be loaded, remove the IP-Adapter branch so the job still queues.
         ref_image = DEFAULT_IPADAPTER_REFERENCE_IMAGE
         if "20" in workflow:
-            ref_path = Path(ref_image) if Path(ref_image).is_absolute() else Path(_resolve("~/fun-multi-character-chats/ComfyUI/input").expanduser()) / ref_image
+            ref_path = (
+                Path(ref_image)
+                if Path(ref_image).is_absolute()
+                else Path(
+                    _resolve("~/fun-multi-character-chats/ComfyUI/input").expanduser()
+                )
+                / ref_image
+            )
             if ref_path.exists():
                 workflow["20"]["inputs"]["image"] = _ensure_in_comfy_input(ref_path)
             else:
@@ -1134,7 +1197,9 @@ def _tool_place_image_order(
 
         # If no pose hint image is provided, remove the ControlNet branch and
         # re-wire the KSampler to use the prompt nodes directly.
-        if "30" in workflow and workflow["30"]["inputs"].get("image", "").startswith("<"):
+        if "30" in workflow and workflow["30"]["inputs"].get("image", "").startswith(
+            "<"
+        ):
             for n in ["30", "31", "32", "33"]:
                 workflow.pop(n, None)
             workflow["6"]["inputs"]["positive"] = ["7", 0]
@@ -1147,23 +1212,29 @@ def _tool_place_image_order(
         order_dir.mkdir(parents=True, exist_ok=True)
         timestamp = int(time.time())
         order_prefix = order_dir / f"order_{timestamp}"
-        (order_prefix.with_suffix(".json")).write_text(json.dumps({
-            "character": character,
-            "scene": scene,
-            "action": action,
-            "pose": pose,
-            "clothing": clothing,
-            "location": location,
-            "interaction": interaction,
-            "social_context": social_context,
-            "mood": mood,
-            "positive_prompt": positive,
-            "negative_prompt": negative,
-            "ipadapter_reference": ref_image if "20" in workflow else None,
-        }, indent=2), encoding="utf-8")
-        (order_prefix.with_name(f"{order_prefix.name}_patched_workflow.json")).write_text(
-            json.dumps(workflow, indent=2), encoding="utf-8"
+        (order_prefix.with_suffix(".json")).write_text(
+            json.dumps(
+                {
+                    "character": character,
+                    "scene": scene,
+                    "action": action,
+                    "pose": pose,
+                    "clothing": clothing,
+                    "location": location,
+                    "interaction": interaction,
+                    "social_context": social_context,
+                    "mood": mood,
+                    "positive_prompt": positive,
+                    "negative_prompt": negative,
+                    "ipadapter_reference": ref_image if "20" in workflow else None,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
         )
+        (
+            order_prefix.with_name(f"{order_prefix.name}_patched_workflow.json")
+        ).write_text(json.dumps(workflow, indent=2), encoding="utf-8")
 
         if dry_run:
             return (
@@ -1186,13 +1257,15 @@ def _tool_place_image_order(
         # character's generations folder.
         copied = _copy_comfyui_output_to_character(character, prompt_id)
         if copied:
-            return f"[queued order for '{character}']\n{resp.text}\n\nSaved to: {copied}"
+            return (
+                f"[queued order for '{character}']\n{resp.text}\n\nSaved to: {copied}"
+            )
         return f"[queued order for '{character}']\n{resp.text}"
     except Exception as e:
         return f"[error: {e}]"
 
 
-def run_image_order_parser(message: str, model: Optional[str] = None) -> dict:
+def run_image_order_parser(message: str, model: str | None = None) -> dict:
     """Use a small local magic model to parse a user's image order.
 
     Returns structured fields:
@@ -1245,18 +1318,26 @@ Rules:
         # Try to extract JSON from the response
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if not match:
-            return {"success": False, "fields": {}, "error": f"No JSON found in parser output: {text}"}
+            return {
+                "success": False,
+                "fields": {},
+                "error": f"No JSON found in parser output: {text}",
+            }
         fields = json.loads(match.group(0))
         return {"success": True, "fields": fields, "error": None}
     except Exception as e:
-        return {"success": False, "fields": {}, "error": f"Image order parser error: {e}"}
+        return {
+            "success": False,
+            "fields": {},
+            "error": f"Image order parser error: {e}",
+        }
 
 
 def run_magic_coder(
     message: str,
-    history: Optional[List[dict]] = None,
-    model: Optional[str] = None,
-    workspace: Optional[str] = None,
+    history: list[dict] | None = None,
+    model: str | None = None,
+    workspace: str | None = None,
     max_turns: int = 10,
     timeout: int = 900,
 ) -> dict:
@@ -1287,7 +1368,11 @@ def run_magic_coder(
         elif available:
             model = next(iter(available))
         else:
-            return {"success": False, "text": "", "error": "No local Ollama models available."}
+            return {
+                "success": False,
+                "text": "",
+                "error": "No local Ollama models available.",
+            }
 
     if model.startswith("ollama/"):
         model = model.split("/", 1)[1]
@@ -1304,14 +1389,21 @@ def run_magic_coder(
     try:
         # --- Explicit /image slash-command fast path (before any classification) ---
         stripped = message.strip().lower()
-        slash_intent: Optional[str] = None
+        slash_intent: str | None = None
         if stripped.startswith("/image"):
             slash_intent = "place_image_order"
 
         intent = slash_intent or _classify_intent(message)
-        if intent in ("build_image_framework", "build_comfyui_workflow", "register_character",
-                      "update_physical_description", "place_image_order"):
-            fast_result = _run_image_intent(intent, message, model, force_queue=bool(slash_intent))
+        if intent in (
+            "build_image_framework",
+            "build_comfyui_workflow",
+            "register_character",
+            "update_physical_description",
+            "place_image_order",
+        ):
+            fast_result = _run_image_intent(
+                intent, message, model, force_queue=bool(slash_intent)
+            )
             if fast_result is not None:
                 # Slash commands return the raw tool output directly so the user
                 # can inspect prompts/artifacts without waiting for a summary.
@@ -1319,7 +1411,7 @@ def run_magic_coder(
                     return {"success": True, "text": fast_result, "error": None}
                 messages.append({"role": "assistant", "content": fast_result})
                 # Let the main model summarize the tool result in plain text.
-                for turn in range(max_turns):
+                for _turn in range(max_turns):
                     resp = requests.post(
                         f"{_ollama_base_url()}/api/chat",
                         json={
@@ -1341,10 +1433,15 @@ def run_magic_coder(
                     for call in nested:
                         result = _run_tool_call(call)
                         tool_name = call.get("tool", "unknown")
-                        messages.append({"role": "user", "content": f"Tool result for {tool_name}:\n\n{result}"})
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": f"Tool result for {tool_name}:\n\n{result}",
+                            }
+                        )
                 return {"success": True, "text": fast_result, "error": None}
 
-        for turn in range(max_turns):
+        for _turn in range(max_turns):
             resp = requests.post(
                 f"{_ollama_base_url()}/api/chat",
                 json={
@@ -1396,22 +1493,24 @@ def run_magic_coder(
 
 
 # Populate the tool dispatch table once all tool functions are defined.
-_TOOL_DISPATCH.update({
-    "bash": _tool_bash,
-    "read": _tool_read,
-    "glob": _tool_glob,
-    "grep": _tool_grep,
-    "edit": _tool_edit,
-    "write": _tool_write,
-    "build_image_framework": _tool_build_image_framework,
-    "build_comfyui_workflow": _tool_build_comfyui_workflow,
-    "register_character": _tool_register_character,
-    "update_physical_description": _tool_update_physical_description,
-    "place_image_order": _tool_place_image_order,
-})
+_TOOL_DISPATCH.update(
+    {
+        "bash": _tool_bash,
+        "read": _tool_read,
+        "glob": _tool_glob,
+        "grep": _tool_grep,
+        "edit": _tool_edit,
+        "write": _tool_write,
+        "build_image_framework": _tool_build_image_framework,
+        "build_comfyui_workflow": _tool_build_comfyui_workflow,
+        "register_character": _tool_register_character,
+        "update_physical_description": _tool_update_physical_description,
+        "place_image_order": _tool_place_image_order,
+    }
+)
 
 
-def _classify_intent(message: str, model: Optional[str] = None) -> str:
+def _classify_intent(message: str, model: str | None = None) -> str:
     """Classify a user message into an image-generation intent or chat.
 
     Uses a small cheap local model. Returns one of INTENT_TOOL_NAMES.
@@ -1455,12 +1554,12 @@ Category:"""
             if intent in text:
                 return intent
         return "chat"
-    except Exception as e:
+    except Exception:
         # If classifier fails, fall back to chat and let the main LLM decide.
         return "chat"
 
 
-def _extract_image_order_fields(message: str, model: Optional[str] = None) -> dict:
+def _extract_image_order_fields(message: str, model: str | None = None) -> dict:
     """Use a small local model to parse a user's image order into structured fields."""
     model = model or os.getenv("IMAGE_ORDER_MODEL", "dolphin-llama3:8b")
     parser_prompt = """You are an image order parser. Read the user's message and extract structured fields for an anime-style image generation request.
@@ -1513,7 +1612,9 @@ Rules:
         return {}
 
 
-def _run_image_intent(intent: str, message: str, model: Optional[str] = None, force_queue: bool = False) -> Optional[str]:
+def _run_image_intent(
+    intent: str, message: str, model: str | None = None, force_queue: bool = False
+) -> str | None:
     """Execute the image-generation intent directly without relying on the LLM to emit JSON.
 
     Args:
@@ -1591,7 +1692,9 @@ def _run_image_intent(intent: str, message: str, model: Optional[str] = None, fo
     return None
 
 
-def _copy_comfyui_output_to_character(character: str, prompt_id: Optional[str], max_wait: float = 120.0) -> Optional[str]:
+def _copy_comfyui_output_to_character(
+    character: str, prompt_id: str | None, max_wait: float = 120.0
+) -> str | None:
     """Poll ComfyUI for a finished job and copy the output image into the SillyTavern character folder.
 
     Destination: ~/fun-multi-character-chats/characters/<character>/generations/
@@ -1601,7 +1704,13 @@ def _copy_comfyui_output_to_character(character: str, prompt_id: Optional[str], 
         return None
     server = "http://127.0.0.1:8188"
     comfy_output_dir = Path.home() / "fun-multi-character-chats" / "ComfyUI" / "output"
-    char_gen_dir = Path.home() / "fun-multi-character-chats" / "characters" / character / "generations"
+    char_gen_dir = (
+        Path.home()
+        / "fun-multi-character-chats"
+        / "characters"
+        / character
+        / "generations"
+    )
     char_gen_dir.mkdir(parents=True, exist_ok=True)
 
     start = time.time()
@@ -1626,9 +1735,14 @@ def _copy_comfyui_output_to_character(character: str, prompt_id: Optional[str], 
                     img_info = images[0]
                     filename = img_info["filename"]
                     subfolder = img_info.get("subfolder", "")
-                    src = comfy_output_dir / subfolder / filename if subfolder else comfy_output_dir / filename
+                    src = (
+                        comfy_output_dir / subfolder / filename
+                        if subfolder
+                        else comfy_output_dir / filename
+                    )
                     if src.exists():
                         import shutil
+
                         dest = char_gen_dir / filename
                         counter = 1
                         while dest.exists():
@@ -1645,26 +1759,30 @@ def _copy_comfyui_output_to_character(character: str, prompt_id: Optional[str], 
     return None
 
 
-def _rerun_last_image_order(dry_run: bool = False) -> Optional[str]:
+def _rerun_last_image_order(dry_run: bool = False) -> str | None:
     """Find the most recent image order in image_orders/ and re-queue or re-dry-run it."""
     try:
         base = _resolve("image_orders")
         if not base.exists():
             return None
         candidates = sorted(
-            [p for p in base.rglob("order_*.json") if "_patched_workflow" not in p.name],
+            [
+                p
+                for p in base.rglob("order_*.json")
+                if "_patched_workflow" not in p.name
+            ],
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
         if not candidates:
             return None
         latest = candidates[0]
-        with open(latest, "r", encoding="utf-8") as f:
+        with open(latest, encoding="utf-8") as f:
             order = json.load(f)
         patched_path = latest.with_name(f"{latest.stem}_patched_workflow.json")
         if not patched_path.exists():
             return None
-        with open(patched_path, "r", encoding="utf-8") as f:
+        with open(patched_path, encoding="utf-8") as f:
             workflow = json.load(f)
         character = order.get("character", "character")
         if dry_run:
@@ -1676,7 +1794,10 @@ def _rerun_last_image_order(dry_run: bool = False) -> Optional[str]:
             )
         resp = requests.post(
             "http://127.0.0.1:8188/prompt",
-            json={"prompt": workflow, "client_id": f"rerun-{character}-{int(time.time())}"},
+            json={
+                "prompt": workflow,
+                "client_id": f"rerun-{character}-{int(time.time())}",
+            },
             timeout=60,
         )
         resp.raise_for_status()
@@ -1685,7 +1806,7 @@ def _rerun_last_image_order(dry_run: bool = False) -> Optional[str]:
         return f"[error re-running order: {e}]"
 
 
-def _guess_character_name(message: str) -> Optional[str]:
+def _guess_character_name(message: str) -> str | None:
     """Naive character-name extractor: first capitalized word after common markers."""
     lowered = message.lower()
     # Known characters from the workspace

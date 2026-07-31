@@ -4,6 +4,3 @@
 
 # Test environment
 .testenv/
-
-# uv lock (generated locally)
-uv.lock

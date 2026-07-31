@@ -17,7 +17,10 @@ export function useSTT() {
 
   useEffect(() => {
     return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state === "recording"
+      ) {
         mediaRecorderRef.current.stop();
       }
       if (cachedStreamRef.current) {
@@ -28,7 +31,12 @@ export function useSTT() {
   }, []);
 
   const getStream = useCallback(async (): Promise<MediaStream> => {
-    if (cachedStreamRef.current && cachedStreamRef.current.getAudioTracks().some((t) => t.readyState === "live")) {
+    if (
+      cachedStreamRef.current &&
+      cachedStreamRef.current
+        .getAudioTracks()
+        .some((t) => t.readyState === "live")
+    ) {
       return cachedStreamRef.current;
     }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -54,9 +62,14 @@ export function useSTT() {
       fetch(`${STT_API_BASE}/api/stt`, { method: "POST", body: formData })
         .then((res) => {
           if (!res.ok) {
-            return res.json().catch(() => ({})).then((body) => {
-              throw new Error(`STT failed (${res.status}): ${body.detail || "unknown"}`);
-            });
+            return res
+              .json()
+              .catch(() => ({}))
+              .then((body) => {
+                throw new Error(
+                  `STT failed (${res.status}): ${body.detail || "unknown"}`,
+                );
+              });
           }
           return res.json();
         })
@@ -87,8 +100,13 @@ export function useSTT() {
   );
 
   const startRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-      console.warn("[STT] startRecording called while already recording — ignoring");
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state === "recording"
+    ) {
+      console.warn(
+        "[STT] startRecording called while already recording — ignoring",
+      );
       return;
     }
     chunksRef.current = [];
@@ -101,13 +119,16 @@ export function useSTT() {
           setIsAcquiring(false);
           return;
         }
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "audio/mp4";
         const recorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = recorder;
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) chunksRef.current.push(e.data);
         };
-        recorder.onerror = (e) => console.error("[STT] MediaRecorder error:", e);
+        recorder.onerror = (e) =>
+          console.error("[STT] MediaRecorder error:", e);
         recorder.onstop = () => handleStop(recorder);
         recorder.start(1000);
         setIsRecording(true);
@@ -147,5 +168,11 @@ export function useSTT() {
     [isAcquiring],
   );
 
-  return { startRecording, stopRecording, isRecording, isProcessing, isAcquiring };
+  return {
+    startRecording,
+    stopRecording,
+    isRecording,
+    isProcessing,
+    isAcquiring,
+  };
 }

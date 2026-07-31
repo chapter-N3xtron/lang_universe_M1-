@@ -156,9 +156,7 @@ def _build_deep_agent(
     execution_mode: str = "read_only",
     checkpointer: Any = False,
 ):
-    permission_type, backend_type, create_deep_agent = (
-        _deep_agent_components()
-    )
+    permission_type, backend_type, create_deep_agent = _deep_agent_components()
     approval_mode = _execution_mode(execution_mode) == "approval"
     permissions = [
         permission_type(
@@ -180,7 +178,9 @@ def _build_deep_agent(
         else "This deployment is read-only: never write, edit, delete, or execute files."
     )
     memory = ["/AGENTS.md"] if (workspace / "AGENTS.md").is_file() else None
-    skills = ["/.agents/skills/"] if (workspace / ".agents" / "skills").is_dir() else None
+    skills = (
+        ["/.agents/skills/"] if (workspace / ".agents" / "skills").is_dir() else None
+    )
 
     return create_deep_agent(
         model=get_coding_llm(model_name),
@@ -199,9 +199,7 @@ def _build_deep_agent(
     )
 
 
-async def _session_agent(
-    workspace: Path, model_name: str | None, execution_mode: str
-):
+async def _session_agent(workspace: Path, model_name: str | None, execution_mode: str):
     mode = _execution_mode(execution_mode)
     key = (str(workspace), model_name or "", mode)
     if key in _SESSION_AGENT_CACHE:
@@ -235,16 +233,13 @@ async def export_coding_session_state(
         user_identity=user_identity,
     )
     app = await _session_agent(workspace, model_name, "read_only")
-    snapshot = await app.aget_state(
-        {"configurable": {"thread_id": session_id}}
-    )
+    snapshot = await app.aget_state({"configurable": {"thread_id": session_id}})
     return {
         "session_id": session_id,
         "exists": bool(snapshot.values),
         "created_at": getattr(snapshot, "created_at", None),
         "messages": [
-            _export_message(message)
-            for message in snapshot.values.get("messages", [])
+            _export_message(message) for message in snapshot.values.get("messages", [])
         ],
     }
 
@@ -313,13 +308,9 @@ async def _invoke_session(
         has_history = bool(snapshot.values.get("messages"))
         latest_user = _last_user_message(input_messages)
         messages = (
-            [latest_user]
-            if has_history and latest_user is not None
-            else input_messages
+            [latest_user] if has_history and latest_user is not None else input_messages
         )
-        result = await _stream_session(
-            app, {"messages": messages}, config, emitter
-        )
+        result = await _stream_session(app, {"messages": messages}, config, emitter)
 
     approval_expired = False
     while interruptions := result.get("__interrupt__"):
@@ -353,15 +344,17 @@ async def _invoke_session(
                     for _action in request.get("action_requests", [])
                 ]
             }
-        decision_types = [
-            decision.get("type", "unknown")
-            for decision in review.get("decisions", [])
-            if isinstance(decision, dict)
-        ] if isinstance(review, dict) else []
-        emitter.emit("approval", "resolved", decisions=decision_types)
-        result = await _stream_session(
-            app, Command(resume=review), config, emitter
+        decision_types = (
+            [
+                decision.get("type", "unknown")
+                for decision in review.get("decisions", [])
+                if isinstance(decision, dict)
+            ]
+            if isinstance(review, dict)
+            else []
         )
+        emitter.emit("approval", "resolved", decisions=decision_types)
+        result = await _stream_session(app, Command(resume=review), config, emitter)
     return result, approval_expired
 
 
@@ -465,8 +458,7 @@ async def deep_agents_coding_node(state: CodingAgentState) -> dict[str, Any]:
         "messages": [
             AIMessage(
                 content=(
-                    "The coding agent could not complete this request "
-                    f"({error_code})."
+                    f"The coding agent could not complete this request ({error_code})."
                 )
             )
         ],

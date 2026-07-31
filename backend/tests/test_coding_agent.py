@@ -31,6 +31,7 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
         ToolMessage(content="contents", tool_call_id="call-1"),
         AIMessage(content="Repository summary"),
     ]
+
     async def session_agent(*_args):
         return _FakeApp(output)
 
@@ -54,11 +55,15 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
     )
     assert result["coding_status"] == "completed"
     assert [event["status"] for event in result["coding_events"]] == [
-        "running", "running", "completed", "completed"
+        "running",
+        "running",
+        "completed",
+        "completed",
     ]
     assert all(event["type"] == "coding_event" for event in result["coding_events"])
     assert result["coding_events"][1]["data"] == {
-        "name": "read_file", "tool_call_id": "call-1"
+        "name": "read_file",
+        "tool_call_id": "call-1",
     }
 
 

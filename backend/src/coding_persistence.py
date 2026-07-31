@@ -28,9 +28,7 @@ def coding_session_id(
     thread_key = str(thread_identity)
     user_key = str(user_identity or "anonymous")
     resolved = workspace.resolve(strict=True)
-    material = "\0".join(
-        ("coding-session-v1", user_key, thread_key, str(resolved))
-    )
+    material = "\0".join(("coding-session-v1", user_key, thread_key, str(resolved)))
     digest = hashlib.sha256(material.encode()).hexdigest()
     return f"coding-v1-{digest}"
 

@@ -24,9 +24,7 @@ def test_text_is_batched_and_bounded():
     emitter.text("x" * (MAX_TRANSIENT_TEXT_CHARS * 2))
     emitter.flush_text()
     emitted = sum(
-        len(event["data"]["content"])
-        for event in written
-        if event["kind"] == "text"
+        len(event["data"]["content"]) for event in written if event["kind"] == "text"
     )
     assert emitted == MAX_TRANSIENT_TEXT_CHARS
 
@@ -54,11 +52,13 @@ def test_native_events_are_summarized_without_tool_payloads():
                 "agent": {
                     "messages": AIMessage(
                         content="",
-                        tool_calls=[{
-                            "name": "approved_write_file",
-                            "id": "call-1",
-                            "args": {"secret": "must-not-leak"},
-                        }],
+                        tool_calls=[
+                            {
+                                "name": "approved_write_file",
+                                "id": "call-1",
+                                "args": {"secret": "must-not-leak"},
+                            }
+                        ],
                     )
                 }
             },

@@ -24,13 +24,15 @@ export function ThemeToggle() {
   useEffect(() => setMounted(true), []);
 
   if (!mounted) {
-    return (
-      <div className="size-6 p-1" />
-    );
+    return <div className="size-6 p-1" />;
   }
 
   const currentTheme = theme ?? "system";
-  const nextTheme = THEMES[(THEMES.indexOf(currentTheme as typeof THEMES[number]) + 1) % THEMES.length];
+  const nextTheme =
+    THEMES[
+      (THEMES.indexOf(currentTheme as (typeof THEMES)[number]) + 1) %
+        THEMES.length
+    ];
   const Icon = THEME_ICONS[currentTheme as keyof typeof THEME_ICONS] ?? Monitor;
 
   return (

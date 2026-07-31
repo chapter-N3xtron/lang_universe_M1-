@@ -72,7 +72,7 @@ test.describe("UI controls render and respond", () => {
     const trigger = page.locator('button[aria-label="Select agent"]');
     await expect(trigger).toBeVisible({ timeout: 10000 });
 
-    await expect(trigger).toHaveText("Auto");
+    await expect(trigger).toHaveText("Jasper");
 
     await trigger.click();
     const dropdown = page.locator('[data-slot="select-content"]');
@@ -93,7 +93,7 @@ test.describe("UI controls render and respond", () => {
     const trigger = page.locator('button[aria-label="Select model"]');
     await expect(trigger).toBeVisible({ timeout: 10000 });
 
-    await expect(trigger).toHaveText("ollama-cloud/qwen3.5:397b");
+    await expect(trigger).toHaveText("Cloud · ollama-cloud/qwen3.5:397b");
 
     await trigger.click();
     const dropdown = page.locator('[data-slot="select-content"]');
@@ -121,7 +121,52 @@ test.describe("UI controls render and respond", () => {
     ]);
 
     await dropdown.getByText("ollama-cloud/qwen3.5:397b").click();
-    await expect(trigger).toContainText("ollama-cloud/qwen3.5:397b");
+    await expect(trigger).toHaveText("Cloud · ollama-cloud/qwen3.5:397b");
+  });
+
+  test("selected cloud model is sent in the run payload", async ({ page }) => {
+    await page.route("**/threads", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          thread_id: "cloud-model-thread",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          metadata: {},
+          status: "idle",
+        }),
+      });
+    });
+    await page.route("**/threads/*/runs/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "",
+      }),
+    );
+
+    await page.goto("/");
+    const modelTrigger = page.locator('button[aria-label="Select model"]');
+    await modelTrigger.click();
+    await page
+      .locator('[data-slot="select-content"]')
+      .getByText("glm-5.2", { exact: true })
+      .click();
+    await expect(modelTrigger).toHaveText("Cloud · glm-5.2");
+
+    const runRequest = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" && request.url().includes("/runs/stream"),
+    );
+    await page.locator("textarea").fill("Use the selected cloud model");
+    await page.locator("textarea").press("Enter");
+
+    const body = (await runRequest).postDataJSON();
+    expect(body.input.model).toBe("ollama-cloud/glm-5.2");
   });
 
   test("repo selector opens and displays the selected folder", async ({

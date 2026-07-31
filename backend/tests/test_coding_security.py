@@ -28,9 +28,7 @@ class ToolCallingModel(BaseChatModel):
         return self
 
     def _generate(self, _messages, stop=None, run_manager=None, **_kwargs):
-        return ChatResult(
-            generations=[ChatGeneration(message=self._responses.pop(0))]
-        )
+        return ChatResult(generations=[ChatGeneration(message=self._responses.pop(0))])
 
 
 def _write_model(file_path="/approved.txt", content="approved"):
@@ -81,9 +79,7 @@ def test_approval_executes_workspace_confined_write(monkeypatch, tmp_path):
 
     assert request["action_requests"][0]["name"] == "approved_write_file"
     asyncio.run(
-        app.ainvoke(
-            Command(resume={"decisions": [{"type": "approve"}]}), config=config
-        )
+        app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
     )
 
     assert (tmp_path / "approved.txt").read_text() == "approved"
@@ -100,9 +96,7 @@ def test_edit_decision_is_revalidated_and_writes_edited_action(monkeypatch, tmp_
             "args": {"file_path": "/edited.txt", "content": "edited"},
         },
     }
-    asyncio.run(
-        app.ainvoke(Command(resume={"decisions": [decision]}), config=config)
-    )
+    asyncio.run(app.ainvoke(Command(resume={"decisions": [decision]}), config=config))
 
     assert not (tmp_path / "approved.txt").exists()
     assert (tmp_path / "edited.txt").read_text() == "edited"
@@ -116,9 +110,7 @@ def test_reject_decision_does_not_write(monkeypatch, tmp_path):
         app.ainvoke(
             Command(
                 resume={
-                    "decisions": [
-                        {"type": "reject", "message": "change not approved"}
-                    ]
+                    "decisions": [{"type": "reject", "message": "change not approved"}]
                 }
             ),
             config=config,
@@ -144,7 +136,9 @@ def test_edited_action_cannot_escape_workspace(monkeypatch, tmp_path):
     )
 
     assert not (tmp_path.parent / "escaped.txt").exists()
-    tool_messages = [message for message in result["messages"] if message.type == "tool"]
+    tool_messages = [
+        message for message in result["messages"] if message.type == "tool"
+    ]
     assert tool_messages[-1].status == "error"
 
 
@@ -244,9 +238,7 @@ def test_command_timeout_terminates_process_group(monkeypatch, tmp_path):
 
     with pytest.raises(secure_coding_tools.CodingPolicyError, match="command_timeout"):
         asyncio.run(
-            secure_coding_tools._run_command(
-                tmp_path, ["git", "status"], timeout=0.001
-            )
+            secure_coding_tools._run_command(tmp_path, ["git", "status"], timeout=0.001)
         )
     assert killed == [(4321, secure_coding_tools.signal.SIGKILL)]
 
@@ -255,6 +247,7 @@ def test_production_wrapper_surfaces_and_resumes_approval(monkeypatch, tmp_path)
     from src import coding_agent
 
     nested = _approval_app(monkeypatch, tmp_path, _write_model())
+
     async def session_agent(*_args):
         return nested
 
@@ -275,9 +268,7 @@ def test_production_wrapper_surfaces_and_resumes_approval(monkeypatch, tmp_path)
     first = asyncio.run(app.ainvoke(initial, config=config))
     assert len(first["__interrupt__"]) == 1
     result = asyncio.run(
-        app.ainvoke(
-            Command(resume={"decisions": [{"type": "approve"}]}), config=config
-        )
+        app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
     )
 
     assert result["coding_status"] == "completed"
@@ -288,6 +279,7 @@ def test_expired_approval_is_rejected_without_writing(monkeypatch, tmp_path):
     from src import coding_agent
 
     nested = _approval_app(monkeypatch, tmp_path, _write_model())
+
     async def session_agent(*_args):
         return nested
 
@@ -311,9 +303,7 @@ def test_expired_approval_is_rejected_without_writing(monkeypatch, tmp_path):
     first = asyncio.run(app.ainvoke(initial, config=config))
     assert "expires_at" in first["__interrupt__"][0].value
     result = asyncio.run(
-        app.ainvoke(
-            Command(resume={"decisions": [{"type": "approve"}]}), config=config
-        )
+        app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
     )
 
     assert result["coding_status"] == "cancelled"
@@ -368,6 +358,7 @@ def test_coding_node_returns_sanitized_timeout(monkeypatch, tmp_path):
             await asyncio.sleep(10)
 
     monkeypatch.setenv("CODING_AGENT_TIMEOUT_SECONDS", "0")
+
     async def session_agent(*_args):
         return SlowApp()
 

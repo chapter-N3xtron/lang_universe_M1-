@@ -30,34 +30,39 @@ def test_thread_memory_accumulates_messages():
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
         thread_id = "test-memory-thread"
         config = {"configurable": {"thread_id": thread_id}}
 
-        asyncio.run(app.ainvoke(
-            {
-                "messages": [
-                    {"role": "assistant", "content": "welcome"},
-                    {"role": "user", "content": "turn one"},
-                ],
-                "workspace": "/tmp",
-                "target_agent": "jasper",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [
+                        {"role": "assistant", "content": "welcome"},
+                        {"role": "user", "content": "turn one"},
+                    ],
+                    "workspace": "/tmp",
+                    "target_agent": "jasper",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
-        result = asyncio.run(app.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "turn two"}],
-                "workspace": "/tmp",
-                "target_agent": "jasper",
-                "mode": "live",
-                "model": None,
-            },
-            config=config,
-        ))
+        result = asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [{"role": "user", "content": "turn two"}],
+                    "workspace": "/tmp",
+                    "target_agent": "jasper",
+                    "mode": "live",
+                    "model": None,
+                },
+                config=config,
+            )
+        )
 
     contents = [m["content"] for m in result["messages"]]
     assert "turn one" in contents
@@ -79,20 +84,23 @@ def test_thread_isolation():
     _clear_src_modules()
     with patch("src.llm.ChatOllama", return_value=mock_llm):
         from src.chat_ui import create_chat_ui
+
         app = _compile(create_chat_ui())
 
         def run_turns(thread_id: str, phrase: str):
             config = {"configurable": {"thread_id": thread_id}}
-            asyncio.run(app.ainvoke(
-                {
-                    "messages": [{"role": "user", "content": phrase}],
-                    "workspace": "/tmp",
-                    "target_agent": "jasper",
-                    "mode": "live",
-                    "model": None,
-                },
-                config=config,
-            ))
+            asyncio.run(
+                app.ainvoke(
+                    {
+                        "messages": [{"role": "user", "content": phrase}],
+                        "workspace": "/tmp",
+                        "target_agent": "jasper",
+                        "mode": "live",
+                        "model": None,
+                    },
+                    config=config,
+                )
+            )
             snapshot = app.get_state(config)
             return [m["content"] for m in snapshot.values["messages"]]
 

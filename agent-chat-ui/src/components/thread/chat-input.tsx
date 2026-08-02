@@ -38,6 +38,7 @@ import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { DOCUMENT_ACCEPT } from "@/lib/multimodal-utils";
 
 const AGENT_OPTIONS = [
   { value: "", label: "Auto" },
@@ -319,16 +320,14 @@ function ChatInputImpl({
                 className="flex cursor-pointer items-center gap-1.5"
               >
                 <Plus className="size-4 text-gray-600" />
-                <span className="text-xs text-gray-600">
-                  Upload PDF, EPUB, or Image
-                </span>
+                <span className="text-xs text-gray-600">Upload file</span>
               </Label>
               <input
                 id="file-input"
                 type="file"
                 onChange={handleFileUpload}
                 multiple
-                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,application/epub+zip,.epub"
+                accept={`image/jpeg,image/png,image/gif,image/webp,${DOCUMENT_ACCEPT}`}
                 className="hidden"
               />
               <button

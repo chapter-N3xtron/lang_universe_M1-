@@ -211,7 +211,7 @@ test.describe("UI controls render and respond", () => {
   test("file attachment label is visible", async ({ page }) => {
     await page.goto("/");
 
-    const uploadLabel = page.getByText("Upload PDF, EPUB, or Image");
+    const uploadLabel = page.getByText("Upload file");
     await expect(uploadLabel).toBeVisible({ timeout: 10000 });
   });
 
@@ -219,19 +219,17 @@ test.describe("UI controls render and respond", () => {
     page,
   }) => {
     await page.route(
-      "http://127.0.0.1:8000/api/attachments/epub",
+      "http://127.0.0.1:8000/api/attachments/document",
       async (route) => {
         expect(route.request().postData()).not.toContain("/Users/");
         await route.fulfill({
           contentType: "application/json",
           body: JSON.stringify({
             filename: "selected.epub",
-            title: "Selected Publication",
-            author: "Human Author",
+            format: "epub",
             text: "## Chapter 1 [chapter.xhtml]\n\nSelected content",
-            chapters: [{ index: 1, source: "chapter.xhtml", characters: 16 }],
+            segments: [{ id: "publication", characters: 16 }],
             truncated: false,
-            content_profile: { textual: true, images: 0 },
           }),
         });
       },

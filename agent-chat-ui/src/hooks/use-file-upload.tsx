@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect, ChangeEvent } from "react";
 import { toast } from "sonner";
 import { ContentBlock } from "@langchain/core/messages";
-import { fileToContentBlock, isEpubFile } from "@/lib/multimodal-utils";
+import {
+  fileToContentBlock,
+  isExtractableDocumentFile,
+} from "@/lib/multimodal-utils";
 
 export const SUPPORTED_FILE_TYPES = [
   "image/jpeg",
@@ -13,7 +16,7 @@ export const SUPPORTED_FILE_TYPES = [
 ];
 
 const isSupportedFile = (file: File) =>
-  SUPPORTED_FILE_TYPES.includes(file.type) || isEpubFile(file);
+  SUPPORTED_FILE_TYPES.includes(file.type) || isExtractableDocumentFile(file);
 
 async function filesToContentBlocks(files: File[]) {
   const results = await Promise.allSettled(files.map(fileToContentBlock));
@@ -36,7 +39,7 @@ export function useFileUpload({
   const dragCounter = useRef(0);
 
   const isDuplicate = (file: File, blocks: ContentBlock.Multimodal.Data[]) => {
-    if (isEpubFile(file)) {
+    if (isExtractableDocumentFile(file)) {
       return blocks.some(
         (block) =>
           block.type === "text-plain" && block.metadata?.filename === file.name,
@@ -76,7 +79,7 @@ export function useFileUpload({
 
     if (invalidFiles.length > 0) {
       toast.error(
-        "Unsupported file type. Please upload a JPEG, PNG, GIF, WEBP, PDF, or EPUB file.",
+        "Unsupported file type. Select a supported document, text, code, data, publication, or image file.",
       );
     }
     if (duplicateFiles.length > 0) {
@@ -132,7 +135,7 @@ export function useFileUpload({
 
       if (invalidFiles.length > 0) {
         toast.error(
-          "Unsupported file type. Please upload a JPEG, PNG, GIF, WEBP, PDF, or EPUB file.",
+          "Unsupported file type. Select a supported document, text, code, data, publication, or image file.",
         );
       }
       if (duplicateFiles.length > 0) {
@@ -226,7 +229,7 @@ export function useFileUpload({
     const validFiles = files.filter(isSupportedFile);
     const invalidFiles = files.filter((file) => !isSupportedFile(file));
     const isDuplicate = (file: File) => {
-      if (isEpubFile(file)) {
+      if (isExtractableDocumentFile(file)) {
         return contentBlocks.some(
           (block) =>
             block.type === "text-plain" &&
@@ -255,7 +258,7 @@ export function useFileUpload({
     const uniqueFiles = validFiles.filter((file) => !isDuplicate(file));
     if (invalidFiles.length > 0) {
       toast.error(
-        "Unsupported file type. Please paste a JPEG, PNG, GIF, WEBP, PDF, or EPUB file.",
+        "Unsupported file type. Paste a supported document, text, code, data, publication, or image file.",
       );
     }
     if (duplicateFiles.length > 0) {

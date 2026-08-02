@@ -20,7 +20,8 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
 }) => {
   if (block.type === "text-plain") {
     const filename =
-      block.metadata?.filename || block.title || "EPUB publication";
+      block.metadata?.filename || block.title || "Selected document";
+    const format = String(block.metadata?.format || "document").toUpperCase();
     return (
       <div
         className={cn(
@@ -33,14 +34,16 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
           <div className="text-sm break-all text-gray-800">
             {String(filename)}
           </div>
-          <div className="text-xs text-gray-600">EPUB · extracted safely</div>
+          <div className="text-xs text-gray-600">
+            {format} · extracted safely
+          </div>
         </div>
         {removable && (
           <button
             type="button"
             className="ml-2 self-start rounded-full bg-gray-200 p-1 text-teal-700 hover:bg-gray-300"
             onClick={onRemove}
-            aria-label="Remove EPUB"
+            aria-label="Remove document"
           >
             <XIcon className="h-4 w-4" />
           </button>

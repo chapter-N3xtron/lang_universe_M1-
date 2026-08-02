@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-02T16:31:00Z",
+  "updated_at": "2026-08-02T17:06:00Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -1953,6 +1953,24 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-08-02T16:31:00Z",
           "notes": "Implemented the operating-system file picker as the authorization boundary for EPUB. Extension-aware detection accepts legitimate .epub files even when the browser reports an empty or generic MIME type. A bounded read-only sidecar adapter validates the EPUB container, rejects encryption, unsafe paths, malformed metadata, oversized entries, excessive expansion, and excess entry counts, removes script/style content, and returns publication metadata, chapter source labels, content-profile information, and capped extracted text. Agent Chat UI converts that result into LangChain's documented PlainText content block; Jasper receives no absolute path or directory authority. Validation passed: 136 backend tests, TypeScript, production build, and 10 UI-control browser tests. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "broad-local-document-ingestion",
+      "title": "Broad Local Document Ingestion",
+      "created_at": "2026-08-02T16:40:46Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "implement-bounded-document-loader-registry",
+          "content": "Implement a broad, local, explicitly selected file-ingestion registry using LangChain's loader and Document contracts, normalizing supported formats into bounded PlainText attachment blocks without filesystem browsing authority.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-02T17:06:00Z",
+          "notes": "Implemented one bounded SelectedFileLoader using LangChain BaseLoader and Document contracts, with UI normalization to a documented PlainText content block. Supported families include PDF, DOCX, XLSX, PPTX, ODT/ODS/ODP, RTF, HTML/XHTML/XML, EML, IPYNB, EPUB, text/data/markup/subtitle formats, and broad source-code/configuration extensions. The file picker remains the authorization boundary; the backend accepts bytes and a basename, never a local path. Size, expansion, segment, and total-text limits apply. Scripts, XML entities, unsafe archive paths, macros, encrypted containers, generic archives, executables, and .lcpl licenses are rejected. Lightweight parsers avoid automatic OCR/model downloads. Validation passed: 146 backend tests, TypeScript, production build, and 10 UI-control browser tests. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

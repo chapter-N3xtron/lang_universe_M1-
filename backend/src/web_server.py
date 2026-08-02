@@ -21,6 +21,12 @@ from src.coding_agent import (
     export_coding_session_state,
     reset_coding_session_state,
 )
+from src.document_attachments import (
+    MAX_ATTACHMENT_BYTES,
+    DocumentAttachmentError,
+    load_selected_document,
+    supported_extensions,
+)
 from src.epub_attachments import (
     MAX_EPUB_BYTES,
     EpubAttachmentError,
@@ -202,6 +208,22 @@ async def extract_epub_attachment(publication: UploadFile) -> dict:
     try:
         return extract_epub(data, publication.filename or "publication.epub")
     except EpubAttachmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/attachments/formats")
+def attachment_formats() -> dict:
+    return {"extensions": supported_extensions()}
+
+
+@app.post("/api/attachments/document")
+async def extract_document_attachment(document: UploadFile) -> dict:
+    """Normalize one explicitly uploaded file; local paths are never accepted."""
+
+    data = await document.read(MAX_ATTACHMENT_BYTES + 1)
+    try:
+        return load_selected_document(data, document.filename or "attachment")
+    except DocumentAttachmentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

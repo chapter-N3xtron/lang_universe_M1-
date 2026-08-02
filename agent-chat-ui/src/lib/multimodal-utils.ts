@@ -1,12 +1,99 @@
 import { ContentBlock } from "@langchain/core/messages";
 import { toast } from "sonner";
 
-const EPUB_MIME_TYPE = "application/epub+zip";
+export const EXTRACTABLE_DOCUMENT_EXTENSIONS = [
+  ".txt",
+  ".text",
+  ".md",
+  ".markdown",
+  ".mdx",
+  ".rst",
+  ".adoc",
+  ".asciidoc",
+  ".tex",
+  ".bib",
+  ".csv",
+  ".tsv",
+  ".json",
+  ".jsonl",
+  ".ndjson",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".ini",
+  ".cfg",
+  ".conf",
+  ".log",
+  ".sql",
+  ".graphql",
+  ".gql",
+  ".py",
+  ".pyi",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".java",
+  ".kt",
+  ".kts",
+  ".go",
+  ".rs",
+  ".rb",
+  ".php",
+  ".swift",
+  ".scala",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".fish",
+  ".ps1",
+  ".bat",
+  ".cmd",
+  ".c",
+  ".h",
+  ".cc",
+  ".cpp",
+  ".hpp",
+  ".cs",
+  ".dart",
+  ".lua",
+  ".r",
+  ".jl",
+  ".ex",
+  ".exs",
+  ".erl",
+  ".hrl",
+  ".clj",
+  ".cljs",
+  ".vue",
+  ".svelte",
+  ".vtt",
+  ".srt",
+  ".pdf",
+  ".docx",
+  ".xlsx",
+  ".pptx",
+  ".odt",
+  ".ods",
+  ".odp",
+  ".rtf",
+  ".html",
+  ".htm",
+  ".xhtml",
+  ".xml",
+  ".eml",
+  ".ipynb",
+  ".epub",
+] as const;
 
-export function isEpubFile(file: File): boolean {
-  return (
-    file.type === EPUB_MIME_TYPE ||
-    file.name.toLocaleLowerCase().endsWith(".epub")
+export const DOCUMENT_ACCEPT = EXTRACTABLE_DOCUMENT_EXTENSIONS.join(",");
+
+export function isExtractableDocumentFile(file: File): boolean {
+  const name = file.name.toLocaleLowerCase();
+  return EXTRACTABLE_DOCUMENT_EXTENSIONS.some((extension) =>
+    name.endsWith(extension),
   );
 }
 
@@ -22,30 +109,27 @@ export async function fileToContentBlock(
   ];
   const supportedFileTypes = [...supportedImageTypes, "application/pdf"];
 
-  if (isEpubFile(file)) {
+  if (isExtractableDocumentFile(file)) {
     const body = new FormData();
-    body.append("publication", file, file.name);
-    const response = await fetch("http://127.0.0.1:8000/api/attachments/epub", {
-      method: "POST",
-      body,
-    });
+    body.append("document", file, file.name);
+    const response = await fetch(
+      "http://127.0.0.1:8000/api/attachments/document",
+      { method: "POST", body },
+    );
     const result = (await response.json()) as {
       detail?: string;
       filename?: string;
-      title?: string;
-      author?: string;
+      format?: string;
       text?: string;
-      chapters?: Array<{ index: number; source: string; characters: number }>;
+      segments?: Array<Record<string, unknown>>;
       truncated?: boolean;
-      content_profile?: Record<string, unknown>;
     };
     if (!response.ok) {
-      const message = result.detail || "The EPUB could not be read safely.";
+      const message = result.detail || "The document could not be read safely.";
       toast.error(message);
       throw new Error(message);
     }
-    const title = result.title || file.name;
-    const author = result.author ? ` by ${result.author}` : "";
+    const title = result.filename || file.name;
     const limitation = result.truncated
       ? " The extracted text was truncated at the attachment safety limit."
       : "";
@@ -56,14 +140,14 @@ export async function fileToContentBlock(
       type: "text-plain",
       text: result.text || "",
       title,
-      context: `Selected EPUB ${title}${author}.${limitation}`,
+      context: `Selected ${result.format || "document"} file ${title}.${limitation}`,
       mimeType: "text/markdown",
       metadata: {
         filename: result.filename || file.name,
-        originalMimeType: EPUB_MIME_TYPE,
-        chapters: result.chapters || [],
+        originalMimeType: file.type || "application/octet-stream",
+        format: result.format || "document",
+        segments: result.segments || [],
         truncated: Boolean(result.truncated),
-        contentProfile: result.content_profile || {},
       },
     } as unknown as ContentBlock.Multimodal.PlainText;
   }

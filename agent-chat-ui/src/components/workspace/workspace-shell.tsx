@@ -8,6 +8,7 @@ import {
   Separator,
   useDefaultLayout,
 } from "react-resizable-panels";
+import type { LayoutStorage } from "react-resizable-panels";
 import type { LayoutSuggestion } from "@/lib/visual/jasper-response.generated";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,17 @@ const MODE_LAYOUTS: Record<WorkspaceMode, { chat: number; visual: number }> = {
   compact_chat: { chat: 28, visual: 72 },
 };
 
+const browserLayoutStorage: LayoutStorage = {
+  getItem(key) {
+    return typeof window === "undefined" ? null : window.localStorage.getItem(key);
+  },
+  setItem(key, value) {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(key, value);
+    }
+  },
+};
+
 export function WorkspaceShell({
   threadId,
   chat,
@@ -52,6 +64,7 @@ export function WorkspaceShell({
     id: `visual-workspace-panels:v2:${threadId || "new-thread"}:${effectiveMode}:chat-first`,
     panelIds: ["chat", "visual"],
     onlySaveAfterUserInteractions: true,
+    storage: browserLayoutStorage,
   });
 
   const focusedSurface =

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, ChangeEvent } from "react";
 import { toast } from "sonner";
 import { ContentBlock } from "@langchain/core/messages";
-import { fileToContentBlock } from "@/lib/multimodal-utils";
+import { fileToContentBlock, isEpubFile } from "@/lib/multimodal-utils";
 
 export const SUPPORTED_FILE_TYPES = [
   "image/jpeg",
@@ -9,7 +9,18 @@ export const SUPPORTED_FILE_TYPES = [
   "image/gif",
   "image/webp",
   "application/pdf",
+  "application/epub+zip",
 ];
+
+const isSupportedFile = (file: File) =>
+  SUPPORTED_FILE_TYPES.includes(file.type) || isEpubFile(file);
+
+async function filesToContentBlocks(files: File[]) {
+  const results = await Promise.allSettled(files.map(fileToContentBlock));
+  return results.flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : [],
+  );
+}
 
 interface UseFileUploadOptions {
   initialBlocks?: ContentBlock.Multimodal.Data[];
@@ -25,6 +36,12 @@ export function useFileUpload({
   const dragCounter = useRef(0);
 
   const isDuplicate = (file: File, blocks: ContentBlock.Multimodal.Data[]) => {
+    if (isEpubFile(file)) {
+      return blocks.some(
+        (block) =>
+          block.type === "text-plain" && block.metadata?.filename === file.name,
+      );
+    }
     if (file.type === "application/pdf") {
       return blocks.some(
         (b) =>
@@ -48,12 +65,8 @@ export function useFileUpload({
     const files = e.target.files;
     if (!files) return;
     const fileArray = Array.from(files);
-    const validFiles = fileArray.filter((file) =>
-      SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const invalidFiles = fileArray.filter(
-      (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-    );
+    const validFiles = fileArray.filter(isSupportedFile);
+    const invalidFiles = fileArray.filter((file) => !isSupportedFile(file));
     const duplicateFiles = validFiles.filter((file) =>
       isDuplicate(file, contentBlocks),
     );
@@ -63,7 +76,7 @@ export function useFileUpload({
 
     if (invalidFiles.length > 0) {
       toast.error(
-        "You have uploaded invalid file type. Please upload a JPEG, PNG, GIF, WEBP image or a PDF.",
+        "Unsupported file type. Please upload a JPEG, PNG, GIF, WEBP, PDF, or EPUB file.",
       );
     }
     if (duplicateFiles.length > 0) {
@@ -73,7 +86,7 @@ export function useFileUpload({
     }
 
     const newBlocks = uniqueFiles.length
-      ? await Promise.all(uniqueFiles.map(fileToContentBlock))
+      ? await filesToContentBlocks(uniqueFiles)
       : [];
     setContentBlocks((prev) => [...prev, ...newBlocks]);
     e.target.value = "";
@@ -108,12 +121,8 @@ export function useFileUpload({
       if (!e.dataTransfer) return;
 
       const files = Array.from(e.dataTransfer.files);
-      const validFiles = files.filter((file) =>
-        SUPPORTED_FILE_TYPES.includes(file.type),
-      );
-      const invalidFiles = files.filter(
-        (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-      );
+      const validFiles = files.filter(isSupportedFile);
+      const invalidFiles = files.filter((file) => !isSupportedFile(file));
       const duplicateFiles = validFiles.filter((file) =>
         isDuplicate(file, contentBlocks),
       );
@@ -123,7 +132,7 @@ export function useFileUpload({
 
       if (invalidFiles.length > 0) {
         toast.error(
-          "You have uploaded invalid file type. Please upload a JPEG, PNG, GIF, WEBP image or a PDF.",
+          "Unsupported file type. Please upload a JPEG, PNG, GIF, WEBP, PDF, or EPUB file.",
         );
       }
       if (duplicateFiles.length > 0) {
@@ -133,7 +142,7 @@ export function useFileUpload({
       }
 
       const newBlocks = uniqueFiles.length
-        ? await Promise.all(uniqueFiles.map(fileToContentBlock))
+        ? await filesToContentBlocks(uniqueFiles)
         : [];
       setContentBlocks((prev) => [...prev, ...newBlocks]);
     };
@@ -214,13 +223,16 @@ export function useFileUpload({
       return;
     }
     e.preventDefault();
-    const validFiles = files.filter((file) =>
-      SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const invalidFiles = files.filter(
-      (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-    );
+    const validFiles = files.filter(isSupportedFile);
+    const invalidFiles = files.filter((file) => !isSupportedFile(file));
     const isDuplicate = (file: File) => {
+      if (isEpubFile(file)) {
+        return contentBlocks.some(
+          (block) =>
+            block.type === "text-plain" &&
+            block.metadata?.filename === file.name,
+        );
+      }
       if (file.type === "application/pdf") {
         return contentBlocks.some(
           (b) =>
@@ -243,7 +255,7 @@ export function useFileUpload({
     const uniqueFiles = validFiles.filter((file) => !isDuplicate(file));
     if (invalidFiles.length > 0) {
       toast.error(
-        "You have pasted an invalid file type. Please paste a JPEG, PNG, GIF, WEBP image or a PDF.",
+        "Unsupported file type. Please paste a JPEG, PNG, GIF, WEBP, PDF, or EPUB file.",
       );
     }
     if (duplicateFiles.length > 0) {
@@ -252,7 +264,7 @@ export function useFileUpload({
       );
     }
     if (uniqueFiles.length > 0) {
-      const newBlocks = await Promise.all(uniqueFiles.map(fileToContentBlock));
+      const newBlocks = await filesToContentBlocks(uniqueFiles);
       setContentBlocks((prev) => [...prev, ...newBlocks]);
     }
   };

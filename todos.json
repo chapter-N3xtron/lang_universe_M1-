@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-02T10:20:46Z",
+  "updated_at": "2026-08-02T16:31:00Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -1935,6 +1935,24 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-07-31T19:12:26Z",
           "notes": "Added contract, integration, and browser coverage for native compiled Research/Fact-Checker orchestration, confidence calibration, enforced source independence, claim links, replay-stable numbering, voice/visual separation, redirects, duplicates, retractions/corrections, contradictory evidence schema, paywalls, empty/rate-limited/provider-failure states, untrusted prompt-injection text, bookmarks, and restored-session rendering. Final full backend and Playwright gates pass."
+        }
+      ]
+    },
+    {
+      "id": "bounded-local-file-attachments",
+      "title": "Bounded Local File Attachments",
+      "created_at": "2026-08-02T16:19:48Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "support-safe-epub-attachments",
+          "content": "Allow the human to attach an explicitly selected EPUB without granting Jasper filesystem or directory access, validate the publication container, and provide bounded extracted publication content with source structure.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-02T16:31:00Z",
+          "notes": "Implemented the operating-system file picker as the authorization boundary for EPUB. Extension-aware detection accepts legitimate .epub files even when the browser reports an empty or generic MIME type. A bounded read-only sidecar adapter validates the EPUB container, rejects encryption, unsafe paths, malformed metadata, oversized entries, excessive expansion, and excess entry counts, removes script/style content, and returns publication metadata, chapter source labels, content-profile information, and capped extracted text. Agent Chat UI converts that result into LangChain's documented PlainText content block; Jasper receives no absolute path or directory authority. Validation passed: 136 backend tests, TypeScript, production build, and 10 UI-control browser tests. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

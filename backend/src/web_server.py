@@ -21,6 +21,11 @@ from src.coding_agent import (
     export_coding_session_state,
     reset_coding_session_state,
 )
+from src.epub_attachments import (
+    MAX_EPUB_BYTES,
+    EpubAttachmentError,
+    extract_epub,
+)
 from src.ollama_client import list_ollama_cloud_models, list_ollama_models
 from src.stt import transcribe
 
@@ -187,6 +192,17 @@ def stt(audio: UploadFile) -> dict:
         return {"transcript": text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/attachments/epub")
+async def extract_epub_attachment(publication: UploadFile) -> dict:
+    """Extract only the explicitly uploaded EPUB; no local path is accepted."""
+
+    data = await publication.read(MAX_EPUB_BYTES + 1)
+    try:
+        return extract_epub(data, publication.filename or "publication.epub")
+    except EpubAttachmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 class FSPickResponse(BaseModel):

@@ -1,6 +1,15 @@
 import { ContentBlock } from "@langchain/core/messages";
 import { toast } from "sonner";
 
+const EPUB_MIME_TYPE = "application/epub+zip";
+
+export function isEpubFile(file: File): boolean {
+  return (
+    file.type === EPUB_MIME_TYPE ||
+    file.name.toLocaleLowerCase().endsWith(".epub")
+  );
+}
+
 // Returns a Promise of a typed multimodal block for images or PDFs
 export async function fileToContentBlock(
   file: File,
@@ -12,6 +21,52 @@ export async function fileToContentBlock(
     "image/webp",
   ];
   const supportedFileTypes = [...supportedImageTypes, "application/pdf"];
+
+  if (isEpubFile(file)) {
+    const body = new FormData();
+    body.append("publication", file, file.name);
+    const response = await fetch("http://127.0.0.1:8000/api/attachments/epub", {
+      method: "POST",
+      body,
+    });
+    const result = (await response.json()) as {
+      detail?: string;
+      filename?: string;
+      title?: string;
+      author?: string;
+      text?: string;
+      chapters?: Array<{ index: number; source: string; characters: number }>;
+      truncated?: boolean;
+      content_profile?: Record<string, unknown>;
+    };
+    if (!response.ok) {
+      const message = result.detail || "The EPUB could not be read safely.";
+      toast.error(message);
+      throw new Error(message);
+    }
+    const title = result.title || file.name;
+    const author = result.author ? ` by ${result.author}` : "";
+    const limitation = result.truncated
+      ? " The extracted text was truncated at the attachment safety limit."
+      : "";
+    // LangChain's documented PlainText block uses `text` without a second
+    // base64 copy. The installed declaration still inherits a DataRecord
+    // requirement, so keep the standards-compliant runtime shape explicit.
+    return {
+      type: "text-plain",
+      text: result.text || "",
+      title,
+      context: `Selected EPUB ${title}${author}.${limitation}`,
+      mimeType: "text/markdown",
+      metadata: {
+        filename: result.filename || file.name,
+        originalMimeType: EPUB_MIME_TYPE,
+        chapters: result.chapters || [],
+        truncated: Boolean(result.truncated),
+        contentProfile: result.content_profile || {},
+      },
+    } as unknown as ContentBlock.Multimodal.PlainText;
+  }
 
   if (!supportedFileTypes.includes(file.type)) {
     toast.error(

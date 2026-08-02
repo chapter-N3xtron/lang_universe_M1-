@@ -18,6 +18,37 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   className,
   size = "md",
 }) => {
+  if (block.type === "text-plain") {
+    const filename =
+      block.metadata?.filename || block.title || "EPUB publication";
+    return (
+      <div
+        className={cn(
+          "relative flex items-start gap-2 rounded-md border bg-gray-100 px-3 py-2",
+          className,
+        )}
+      >
+        <File className="h-7 w-7 flex-shrink-0 text-teal-700" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm break-all text-gray-800">
+            {String(filename)}
+          </div>
+          <div className="text-xs text-gray-600">EPUB · extracted safely</div>
+        </div>
+        {removable && (
+          <button
+            type="button"
+            className="ml-2 self-start rounded-full bg-gray-200 p-1 text-teal-700 hover:bg-gray-300"
+            onClick={onRemove}
+            aria-label="Remove EPUB"
+          >
+            <XIcon className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    );
+  }
+
   // Image block
   if (
     block.type === "image" &&

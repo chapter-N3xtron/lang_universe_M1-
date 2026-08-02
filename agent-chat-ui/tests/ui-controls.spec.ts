@@ -208,11 +208,46 @@ test.describe("UI controls render and respond", () => {
     );
   });
 
-  test("Upload PDF or Image label is visible", async ({ page }) => {
+  test("file attachment label is visible", async ({ page }) => {
     await page.goto("/");
 
-    const uploadLabel = page.getByText("Upload PDF or Image");
+    const uploadLabel = page.getByText("Upload PDF, EPUB, or Image");
     await expect(uploadLabel).toBeVisible({ timeout: 10000 });
+  });
+
+  test("accepts an extension-identified EPUB without exposing a local path", async ({
+    page,
+  }) => {
+    await page.route(
+      "http://127.0.0.1:8000/api/attachments/epub",
+      async (route) => {
+        expect(route.request().postData()).not.toContain("/Users/");
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            filename: "selected.epub",
+            title: "Selected Publication",
+            author: "Human Author",
+            text: "## Chapter 1 [chapter.xhtml]\n\nSelected content",
+            chapters: [{ index: 1, source: "chapter.xhtml", characters: 16 }],
+            truncated: false,
+            content_profile: { textual: true, images: 0 },
+          }),
+        });
+      },
+    );
+    await page.goto("/");
+
+    await page.locator("#file-input").setInputFiles({
+      name: "selected.epub",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("selected publication bytes"),
+    });
+
+    await expect(
+      page.getByText("selected.epub", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("EPUB · extracted safely")).toBeVisible();
   });
 
   test("Voice and Send buttons visible", async ({ page }) => {

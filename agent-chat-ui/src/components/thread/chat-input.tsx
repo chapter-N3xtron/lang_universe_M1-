@@ -320,7 +320,7 @@ function ChatInputImpl({
               >
                 <Plus className="size-4 text-gray-600" />
                 <span className="text-xs text-gray-600">
-                  Upload PDF or Image
+                  Upload PDF, EPUB, or Image
                 </span>
               </Label>
               <input
@@ -328,7 +328,7 @@ function ChatInputImpl({
                 type="file"
                 onChange={handleFileUpload}
                 multiple
-                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,application/epub+zip,.epub"
                 className="hidden"
               />
               <button

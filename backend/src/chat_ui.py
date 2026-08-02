@@ -7,6 +7,7 @@ from typing import Annotated, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import START, StateGraph
+from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
 from src.agent_utils import get_conversation_history, get_user_query
@@ -15,6 +16,7 @@ from src.jasper_agent import create_jasper_graph
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
 from src.research_agent import create_research_graph
+from src.session_catalog import record_session_projection
 
 
 class State(TypedDict):
@@ -306,7 +308,9 @@ def create_chat_ui():
 
     async def run_research(state):
         input_count = len(state["messages"])
-        result = await research_app.ainvoke({"messages": state["messages"]})
+        result = await research_app.ainvoke(
+            {"messages": state["messages"], "model": state.get("model", "")}
+        )
         new_messages = result["messages"][input_count:]
         return {"messages": _base_messages_to_dicts(new_messages)}
 
@@ -323,17 +327,27 @@ def create_chat_ui():
         new_messages = result["messages"][input_count:]
         return {"messages": _base_messages_to_dicts(new_messages)}
 
+    async def record_session(
+        state: State, config: RunnableConfig, runtime: Runtime
+    ) -> dict:
+        """Persist the completed turn without adding another model call."""
+
+        await record_session_projection(state, config, runtime)
+        return {}
+
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("approval", approval_node)
     graph.add_node("jasper", run_jasper)
     graph.add_node("coding", run_coding)
     graph.add_node("research", run_research)
     graph.add_node("magic-coder", run_magic_coder_node)
+    graph.add_node("record_session", record_session)
 
     graph.add_edge(START, "supervisor")
 
     for specialist in ["jasper", "coding", "research", "magic-coder"]:
-        graph.add_edge(specialist, "supervisor")
+        graph.add_edge(specialist, "record_session")
+    graph.add_edge("record_session", "supervisor")
 
     return graph
 

@@ -6,8 +6,10 @@ import os
 
 from fastapi import FastAPI
 
+from src.session_catalog_routes import router as session_catalog_router
 
 app = FastAPI()
+app.include_router(session_catalog_router)
 
 
 @app.get("/runtime-identity")

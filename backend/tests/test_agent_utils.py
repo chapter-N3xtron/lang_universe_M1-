@@ -5,6 +5,8 @@ both LangGraph SDK format (``{"type": "human"}``) and plain dict format
 (``{"role": "user"}``).
 """
 
+from langchain_core.messages import AIMessage, HumanMessage
+
 from src.agent_utils import get_conversation_history, get_user_query
 
 # ---------------------------------------------------------------------------
@@ -71,6 +73,15 @@ def test_returns_empty_for_non_dict():
     assert get_user_query(msgs) == "real query"
 
 
+def test_reads_langchain_human_message_after_add_messages_reducer():
+    msgs = [
+        HumanMessage(content="current visual request"),
+        AIMessage(content="prior answer"),
+    ]
+
+    assert get_user_query(msgs) == "current visual request"
+
+
 # ---------------------------------------------------------------------------
 # get_conversation_history
 # ---------------------------------------------------------------------------
@@ -124,6 +135,17 @@ def test_history_returns_empty_list_when_no_messages():
 def test_history_ignores_non_dict():
     msgs = [42, None, {"role": "user", "content": "valid"}]
     assert get_conversation_history(msgs) == [{"role": "user", "content": "valid"}]
+
+
+def test_history_reads_langchain_base_messages():
+    history = get_conversation_history(
+        [HumanMessage(content="question"), AIMessage(content="answer")]
+    )
+
+    assert history == [
+        {"role": "user", "content": "question"},
+        {"role": "assistant", "content": "answer"},
+    ]
 
 
 # ---------------------------------------------------------------------------

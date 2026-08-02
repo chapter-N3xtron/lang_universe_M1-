@@ -19,6 +19,18 @@ function storageKey(threadId: string | null): string {
   return `visual-workspace:v1:${threadId || "new-thread"}`;
 }
 
+export function setWorkspaceModeForThread(
+  threadId: string,
+  mode: WorkspaceMode,
+) {
+  const existing = parsePreferences(window.localStorage.getItem(storageKey(threadId)));
+  window.localStorage.setItem(
+    storageKey(threadId),
+    JSON.stringify({ ...existing, mode }),
+  );
+  window.dispatchEvent(new Event(EVENT_NAME));
+}
+
 function parsePreferences(raw: string | null): WorkspacePreferences {
   if (!raw) return DEFAULT_PREFERENCES;
   try {

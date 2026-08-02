@@ -401,3 +401,89 @@ def test_exact_verified_model_override_is_used(monkeypatch):
         module.select_response_strategy(MagicMock(profile=None), "ollama/not-tested")
         == "two_pass"
     )
+
+
+def test_jasper_delegates_web_access_to_research_without_direct_web_tools():
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    research_agent = MagicMock()
+
+    with patch.object(module, "create_research_agent", return_value=research_agent):
+        tools = module._active_tools(MagicMock())
+
+    assert [tool.name for tool in tools] == [
+        "list_todos",
+        "read_file",
+        "draw_concept_map",
+        "research",
+    ]
+
+
+def test_jasper_research_tool_returns_specialist_final_answer():
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    research_agent = MagicMock()
+    research_agent.invoke.return_value = {
+        "messages": [AIMessage(content="SIFT findings with evidence web-123.")]
+    }
+
+    with patch.object(module, "create_research_agent", return_value=research_agent):
+        research = module._research_tool(MagicMock())
+        result = research.invoke({"query": "Research the SIFT method."})
+
+    assert result == "SIFT findings with evidence web-123."
+    research_agent.invoke.assert_called_once_with(
+        {"messages": [{"role": "user", "content": "Research the SIFT method."}]}
+    )
+
+
+def test_jasper_returns_tool_validation_failures_to_model_for_correction():
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+
+    retry = next(
+        middleware
+        for middleware in module._middleware()
+        if type(middleware).__name__ == "ToolRetryMiddleware"
+    )
+
+    assert retry.max_retries == 1
+    assert retry.on_failure == "continue"
+
+
+def test_jasper_prompt_names_the_stable_user_input_evidence_id():
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+
+    assert 'exact evidence ID "user-input"' in module.SYSTEM_PROMPT
+    assert 'stable evidence ID "user-input"' in module.draw_concept_map.description
+
+
+def test_second_visual_request_returns_the_new_tool_artifact():
+    module = importlib.import_module("src.jasper_agent")
+    previous = _concept_map("Previous scientific method map")
+    current = _concept_map("New SIFT map").model_copy(
+        update={"artifact_id": "sift-map"}
+    )
+    evidence = [
+        ToolMessage(
+            name="draw_concept_map",
+            tool_call_id="draw-sift",
+            content=json.dumps(current.model_dump(mode="json")),
+        )
+    ]
+    model = MagicMock()
+    model.with_structured_output.return_value.invoke.return_value = JasperResponse(
+        voice_text="Here is the SIFT map.",
+        artifacts=[current],
+    )
+    history = [
+        {"role": "user", "content": "Draw the scientific method."},
+        {"role": "assistant", "content": previous.title},
+        {"role": "user", "content": "Now add a SIFT visualization."},
+    ]
+
+    with patch.object(module, "_invoke_plain", return_value=(evidence, "Done")):
+        result = module._invoke_two_pass(model, history)
+
+    assert [artifact.artifact_id for artifact in result.artifacts] == ["sift-map"]

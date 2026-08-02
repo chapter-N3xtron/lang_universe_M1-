@@ -178,15 +178,12 @@ test("workspace modes remain available and persistent without an artifact", asyn
 
   await page.getByRole("button", { name: "Focus visual" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-mode", "visual");
-  await expect(page.getByText("Visual workspace ready")).toBeVisible();
-  await expect(
-    page.getByText(/Concept maps and grounded code visualizations/),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
   await expect(page.locator("textarea")).toBeVisible();
 
   await page.reload();
   await expect(workspace).toHaveAttribute("data-workspace-mode", "visual");
-  await expect(page.getByText("Visual workspace ready")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
 
   await page.getByRole("button", { name: "Split chat and visual" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-mode", "split");
@@ -537,7 +534,7 @@ test("malformed visual data is rejected without breaking chat", async ({
     page.getByRole("button", { name: "Focus visual" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Focus visual" }).click();
-  await expect(page.getByText("Visual workspace ready")).toBeVisible();
+  await expect(page.getByText("No saved visualization in this session")).toBeVisible();
 });
 
 test("a disconnected request-flow artifact is rejected", async ({ page }) => {
@@ -655,5 +652,5 @@ test("a disconnected request-flow artifact is rejected", async ({ page }) => {
     page.getByRole("button", { name: "Focus visual" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Focus visual" }).click();
-  await expect(page.getByText("Visual workspace ready")).toBeVisible();
+  await expect(page.getByText("No saved visualization in this session")).toBeVisible();
 });

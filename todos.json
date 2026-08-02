@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-02T17:27:21Z",
+  "updated_at": "2026-08-02T20:00:24Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -22,20 +22,20 @@
         {
           "id": "define-workspace-session-relationship-contract",
           "content": "Define the production many-to-many Workspace, Session, WorkspaceSessionLink, and profile-agnostic AgentParticipation contracts so one workspace can retain many sessions, one knowledge-work session can reference several workspaces, and Jasper, Coding, Research, or any future approved profile can contribute with explicit roles, versions, delegations, revisions, time bounds, decisions, outcomes, and artifacts.",
-          "status": "pending",
+          "status": "in_progress",
           "agent": "coding",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Keep portable workspace identity separate from device-local filesystem bindings. Agent participation uses stable profile IDs and versions rather than fixed Jasper/Coding/Research columns, preserving future profiles and historical readability. Git remains code authority; LangGraph checkpoints retain thread state; Store retains owner-scoped relationships and manifests. Do not infer a primary workspace or authorization to clone, bind, or modify it. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "Implementation began 2026-08-02 under the Visual Session Library plan. Keep portable workspace identity separate from device-local filesystem bindings. Agent participation uses stable profile IDs and versions rather than fixed Jasper/Coding/Research columns, preserving future profiles and historical readability. LangGraph checkpoints retain thread state; Store retains owner-scoped relationships and manifests; an application-owned PostgreSQL catalog is a disposable, rebuildable query projection and must never query or modify LangGraph internal tables. Do not infer a primary workspace or authorization to clone, bind, or modify it. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "design-human-knowledge-work-review",
           "content": "Design a clear human-controlled review surface for sessions and workspaces showing names, editable summaries, observed active time, pauses, every participating agent profile and delegation, decisions, outcomes, artifacts, and cross-workspace relationships without productivity scoring or coercive optimization.",
-          "status": "pending",
+          "status": "in_progress",
           "agent": "jasper",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "The human must be able to inspect, correct, export, archive, and apply retention choices to their own knowledge-work record. Observed, idle, paused, and inferred time must remain distinguishable. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "Implementation began 2026-08-02 as a visual-pane session library using TanStack Table, React Query Builder, TanStack Query, and nuqs rather than a custom grid or filter language. The human must be able to inspect, correct, export, archive, and apply retention choices to their own knowledge-work record. Observed, idle, paused, and inferred time must remain distinguishable. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "define-workspace-model-efficiency-ledger",
@@ -152,7 +152,7 @@
           "agent": "jasper",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Use the existing renderer-neutral NarrationTrack/NarrationCue contract and LangGraph thread/checkpoint state; do not split speakers with regexes or duplicate raw tool output into chat. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "Use the existing renderer-neutral NarrationTrack/NarrationCue contract and LangGraph thread/checkpoint state; do not split speakers with regexes or duplicate raw tool output into chat. Desired library handoff recorded 2026-08-02: Jasper neutrally checks understanding when intent is not already clear, explicitly introduces the Research transition (for example, 'let me run to the library'), and retains Jasper-authored context in the Jasper voice. Research returns typed specialist narration with speaker_profile=research plus separate reference/list/visual artifacts; the UI gives those segments visible Research provenance and TTS uses the configured Research voice. Node deep dives must preserve artifact provenance and let the human explicitly continue with Research, Coding, Jasper, or another available profile rather than inferring a handoff from attention alone. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "live-cloud-model-persistence",
@@ -242,7 +242,7 @@
           "agent": "coding",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Current evidence: ConceptMapPayload permits top_to_bottom and left_to_right, while ConceptMapRenderer explicitly maps top_to_bottom to ELK DOWN. Acceptance: every concept-map smoke fixture renders left-to-right, with no model-dependent orientation. Decide the contract before editing schema or renderer code. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "Current evidence: ConceptMapPayload permits top_to_bottom and left_to_right, while ConceptMapRenderer explicitly maps top_to_bottom to ELK DOWN. The live SIFT artifact created on 2026-08-02 was produced by ollama-cloud/glm-5.2 using Jasper's two-pass response strategy and was reported as visually disorganized despite successful validation. Acceptance: every node-based concept-map smoke fixture renders left-to-right, with no model-dependent orientation. Decide the contract before editing schema or renderer code. Cross-reference visual-model-tool-capability-matrix-and-guidance. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "measure-narration-node-linking",
@@ -280,6 +280,15 @@
       "planned_by_model": "openai/gpt-5",
       "planned_by_agent": "deep-agent",
       "todos": [
+        {
+          "id": "repeat-visual-tool-calls-in-one-thread",
+          "content": "Investigate and prove repeated draw_concept_map tool invocation and artifact publication within the same Jasper thread before enabling any automatic visual policy.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Production evidence from fork 9b24745a-3d27-4b3a-b1d4-6ac8f8abaf6c disproved the suspected one-visual-per-session rule: no such prompt, schema, processor, or tool language exists. The failed SIFT turn exhausted a global ToolCallLimitMiddleware after repeated Jina 403 responses before draw_concept_map. The documented LangChain supervisor pattern is now restored: Jasper owns draw_concept_map and delegates external evidence to a Research subagent tool; Research owns Tavily web_search and Jina read_url. A second regression was found in ToolRetryMiddleware(on_failure=error), which aborted malformed visual arguments instead of returning a corrective ToolMessage, and a third in get_user_query, which ignored HumanMessage objects produced by LangGraph add_messages and therefore failed to register user-input evidence. Focused validation passes (76 tests). Live production thread 019fc3f8-9278-7043-815c-9ee5784bddb2 using ollama-cloud/glm-5.2 and the two-pass strategy created map A (visual-d7919574f3f54f7c808d48689698abdd), then delegated SIFT research and created distinct grounded map B (visual-658843f0fe7d4a04ad253d12d05ecde6) with eight web evidence records. The production session catalog returns both artifacts after the second turn. Production fork a258c65e-78e3-4cb3-ad78-e34256295f3e retained both inherited maps and successfully created a third distinct Plan-Act-Review map (visual-40f017df424a45b69b7b3d72be4a7592); its catalog reports two inherited artifacts and one created artifact. Remaining acceptance: focus or revise map A, refresh the UI, and recall all artifacts without substitution or loss. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
         {
           "id": "clickable-sentence-transcript",
           "content": "Render model narration as a clickable sentence-level transcript linked to stable NarrationCue segment IDs.",
@@ -333,15 +342,6 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": "Use a typed LangGraph interrupt with equally presented choices such as this node, another visual area, a side question, or a different concept/session. Silence and inaction are not consent; no option is inferred or preselected. Governance reference: GOVERNANCE_FRAMEWORK.md."
-        },
-        {
-          "id": "repeat-visual-tool-calls-in-one-thread",
-          "content": "Investigate and prove repeated draw_concept_map tool invocation and artifact publication within the same Jasper thread before enabling any automatic visual policy.",
-          "status": "pending",
-          "agent": "coding",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "Known evidence to test: Jasper's prompt contains ambiguous 'call draw_concept_map once' wording; artifact recovery scans conversation-wide ToolMessages and keeps the first four; visual_artifacts currently has overwrite-style state; and a live ollama-cloud/glm-5.1 trace ended with a construction preamble instead of the registered tool call. These are findings and candidate failure mechanisms, not yet a single proven root cause. Acceptance: in one fresh thread, create map A, focus or revise map A, create map B, inspect Studio traces for every expected tool call, refresh, and recall both artifacts without substitution or loss. Record model ID and response strategy for every run. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     },
@@ -477,6 +477,78 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-08-02T02:45:17Z",
           "notes": "Created GOVERNANCE_FRAMEWORK.md as a sourced working governance draft covering authority, typed enforcement, case-law retrieval, editorial ownership, interaction principles, staged adoption, and unresolved questions. It is explicitly not the ratified constitution and remains linked to implementation work through stable rule and todo IDs."
+        }
+      ]
+    },
+    {
+      "id": "session-library-and-visual-ui-followups",
+      "title": "Session Library and Visual Workspace UI Follow-ups",
+      "created_at": "2026-08-02T19:44:00Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "visual-model-tool-capability-matrix-and-guidance",
+          "content": "Measure concept-map construction quality across selectable local and cloud models, identify the minimum reliable tool-calling and structured-argument capability, and determine whether the visual board requires a declared model capability or clearer model-visible tool guidance.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Start from the messy SIFT artifact created by ollama-cloud/glm-5.2 with Jasper's two-pass strategy. Evaluate factual structure, node count, edge semantics, cycles, labels, evidence linkage, left-to-right readability, repair attempts, latency, and token cost. Test guidance improvements before restricting user model choice; any capability gate must be evidence-based, visible, and explain why a selected model cannot safely produce the requested artifact. Cross-reference define-horizontal-layout-contract and repeat-visual-tool-calls-in-one-thread."
+        },
+        {
+          "id": "edit-session-metadata-from-list-and-close-review",
+          "content": "Allow the human to edit the session name and long description both from the session library and inside the close-session review dialog, with the same validated durable record updated from either surface.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Observed defect: both surfaces display metadata but do not permit correction. Preserve human editorial ownership, show save/cancel explicitly, and never silently replace human-reviewed text with a later model summary. Cross-reference design-human-knowledge-work-review and implement-session-review-fork-and-visual-timeline."
+        },
+        {
+          "id": "jasper-session-resumption-orientation",
+          "content": "When a saved session is reopened, let Jasper provide a concise welcome-back orientation using the durable session summary, tent-pole count, visual-artifact count, connected workspace, participating agents, and unfinished work, then ask what the human would like to do next.",
+          "status": "pending",
+          "agent": "jasper",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Example shape: welcome the human back, give the short thread summary, say how many tent poles and visual boards are available, and neutrally offer review without assuming it. The human may resume with Jasper, request the tent poles, reopen a visual or specification, or explicitly engage Research, Coding, or another available profile. Reopening must not automatically invoke specialists, rerun tools, alter the session, infer intent, or consume a new model call merely to reconstruct facts already stored in the session catalog. Voice playback follows the human's existing playback/autoplay preference rather than starting without authorization. Cross-reference show-tent-poles-in-close-review, jasper-specialist-narration-handoff, node-selection-is-attention-not-authorization, and design-human-knowledge-work-review. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "show-tent-poles-in-close-review",
+          "content": "Replace the close-session dialog's tent-pole count-only display with the actual ordered bullet list, using bounded previews and an accessible way to inspect longer entries before closing.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Observed defect: the dialog reports only a count such as '10 tent poles'. Evaluate line clamping plus keyboard-accessible expansion or disclosure; do not rely on hover alone. The human must be able to review and correct the material being retained."
+        },
+        {
+          "id": "place-visual-timeline-as-right-rail",
+          "content": "Evaluate and implement the saved-visual timeline as a right-side rail within the visual workspace so multiple visualizations remain discoverable without covering the active board.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The session board and multiple-visual timeline are generally working. Measure responsive widths, keyboard navigation, board viewport impact, and collapse behavior before choosing the final rail dimensions."
+        },
+        {
+          "id": "make-todo-panel-reversibly-closeable",
+          "content": "Provide an obvious keyboard- and pointer-accessible way to close the todo panel after it has been opened and restore focus without losing panel state.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Observed UI defect: the todo list can be opened but not closed. Reuse the established disclosure/dialog primitive if one already owns the panel; do not add another competing state store."
+        },
+        {
+          "id": "move-workspace-mode-controls-to-divider",
+          "content": "Move the Chat, Split, and Visual workspace controls out of the top bar and stack compact icon controls vertically on the draggable divider, while retaining accessible labels and a usable small-screen fallback.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Initial icon direction: chat bubble for Chat, combined chat/eye treatment for Split, and eye or visual-board icon for Visual. Validate comprehension before treating those icons as final; tooltips, visible focus, selected state, and screen-reader names remain required. Divider controls must not interfere with dragging."
         }
       ]
     },
@@ -1971,6 +2043,60 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-08-02T17:06:00Z",
           "notes": "Implemented one bounded SelectedFileLoader using LangChain BaseLoader and Document contracts, with UI normalization to a documented PlainText content block. Supported families include PDF, DOCX, XLSX, PPTX, ODT/ODS/ODP, RTF, HTML/XHTML/XML, EML, IPYNB, EPUB, text/data/markup/subtitle formats, and broad source-code/configuration extensions. The file picker remains the authorization boundary; the backend accepts bytes and a basename, never a local path. Size, expansion, segment, and total-text limits apply. Scripts, XML entities, unsafe archive paths, macros, encrypted containers, generic archives, executables, and .lcpl licenses are rejected. Lightweight parsers avoid automatic OCR/model downloads. Validation passed: 146 backend tests, TypeScript, production build, and 10 UI-control browser tests. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "visual-session-library",
+      "title": "Visual Session Library",
+      "created_at": "2026-08-02T18:56:26Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "add-rebuildable-session-catalog-projection",
+          "content": "Add an application-owned PostgreSQL session-catalog projection that is rebuildable from public LangGraph checkpoint and Store APIs without querying or modifying LangGraph internal tables.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-02T18:56:26Z",
+          "notes": "Added normalized session, workspace-link, agent-participation, observed-activity, artifact, summary-revision, tent-pole, and migration records. Imported 73 production threads idempotently and verified normalized content equality across repeated rebuilds."
+        },
+        {
+          "id": "implement-typed-session-catalog-query-route",
+          "content": "Implement owner-scoped Agent Server routes that validate nested filters, sorting, pagination, search, saved views, session review, and fork requests while rejecting browser-supplied SQL and unauthorized fields.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-02T18:56:26Z",
+          "notes": "Added strict Pydantic contracts, allowlisted parameterized PostgreSQL compilation, Store-backed named views, review/close data, and native Agent Server thread copying with parent provenance. Live nested-filter, multi-sort, cursor, raw-SQL rejection, saved-view, fork, and close checks passed."
+        },
+        {
+          "id": "replace-thread-sidebar-with-visual-session-library",
+          "content": "Replace the mounted thread-history sidebar with a filterable, sortable, paginated session library in the visual pane using TanStack Table, React Query Builder Shadcn controls, TanStack Query, and nuqs.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-02T18:56:26Z",
+          "notes": "Implemented URL-restorable filters, combined sorting, search, column order and visibility, Store-backed named views, keyboard-openable semantic rows, workspace/agent/time/status/visual fields, and removed the old sidebar wiring only after navigation parity passed. React Flow remains limited to actual visual artifacts."
+        },
+        {
+          "id": "implement-session-review-fork-and-visual-timeline",
+          "content": "Implement human-reviewed session closing, neutral observed-time reminders, native checkpoint forks, and an in-session timeline for saved visual artifacts and deep-dive relationships.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-02T18:56:26Z",
+          "notes": "Added explicit summary and tent-pole review with no implicit commit or push, a configurable 90-observed-minute neutral reminder, native copy without tool replay, parent provenance, all-session return navigation, and validated visual recall. Human-reviewed Store lifecycle fields survive catalog rebuilds."
+        },
+        {
+          "id": "verify-visual-session-library-release-gate",
+          "content": "Verify migration, restart recovery, typed filters, joins, multi-sort, pagination, saved views, URL restoration, fork provenance, idle exclusion, visual recall, SQL isolation, and keyboard and screen-reader semantics.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-02T18:56:26Z",
+          "notes": "Passed 155 backend tests, eight focused catalog tests, the Next.js production build, ten focused Playwright tests, and live canonical-server contract checks. The final two-pass production rebuild used public APIs and a normalized per-table content fingerprint across 73 threads; exact readback preserved the human-reviewed summary, closed status, native parent provenance, and tent poles. Semantic table, dialog, labels, focus, and keyboard activation are browser-tested."
         }
       ]
     }

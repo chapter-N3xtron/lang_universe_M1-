@@ -10,7 +10,7 @@ Messages arrive as dicts with either LangGraph SDK format
 (``{"role": "user", "content": "..."}``).  Both are handled here.
 """
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 
 class AgentState(TypedDict, total=False):
@@ -26,13 +26,16 @@ class AgentState(TypedDict, total=False):
     coding_events: list[dict]
 
 
-def _msg_role(m: dict) -> str | None:
+def _msg_role(m: Any) -> str | None:
     """Normalise a message dict to ``"user"`` / ``"assistant"`` / ``"tool"`` / ``None``.
 
     LangGraph SDK serialises messages with ``"type": "human"`` while
     plain-dict messages use ``"role": "user"``.  Accept either.
     """
-    raw = m.get("role") or m.get("type")
+    if isinstance(m, dict):
+        raw = m.get("role") or m.get("type")
+    else:
+        raw = getattr(m, "type", None)
     if raw in ("human", "user"):
         return "user"
     if raw in ("ai", "assistant"):
@@ -42,27 +45,37 @@ def _msg_role(m: dict) -> str | None:
     return None
 
 
-def get_user_query(messages: list[dict]) -> str:
+def _msg_content(message: Any) -> Any:
+    return (
+        message.get("content", "")
+        if isinstance(message, dict)
+        else getattr(message, "content", "")
+    )
+
+
+def get_user_query(messages: list) -> str:
     """Return the most recent user message content."""
     for m in reversed(messages):
-        if isinstance(m, dict) and _msg_role(m) == "user":
-            content = m.get("content", "")
+        if _msg_role(m) == "user":
+            content = _msg_content(m)
             if isinstance(content, str):
                 return content
-            if isinstance(content, list) and content:
-                return content[0].get("text", "")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, str):
+                        return block
+                    if isinstance(block, dict) and isinstance(block.get("text"), str):
+                        return block["text"]
     return ""
 
 
-def get_conversation_history(messages: list[dict]) -> list[dict]:
+def get_conversation_history(messages: list) -> list[dict]:
     """Return all user and assistant turns as a clean list of {role, content} dicts."""
     result = []
     for m in messages:
-        if not isinstance(m, dict):
-            continue
         role = _msg_role(m)
         if role in ("user", "assistant"):
-            result.append({"role": role, "content": m.get("content", "")})
+            result.append({"role": role, "content": _msg_content(m)})
     return result
 
 

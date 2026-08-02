@@ -13,11 +13,11 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     ModelRetryMiddleware,
-    ToolCallLimitMiddleware,
     ToolRetryMiddleware,
 )
 from langchain.agents.structured_output import ProviderStrategy, ToolStrategy
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from langchain_core.tools import tool
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 
@@ -28,10 +28,9 @@ from src.jasper_tools import (
     draw_concept_map,
     list_todos,
     read_file,
-    read_url,
-    web_search,
 )
 from src.llm import get_agent_llm
+from src.research_agent import create_research_agent
 from src.visual_models import (
     ConceptMapArtifact,
     JasperResponse,
@@ -70,16 +69,32 @@ class State(TypedDict, total=False):
     workspace: str
 
 
-ACTIVE_TOOLS = [list_todos, read_file, read_url, draw_concept_map]
+ACTIVE_TOOLS = [list_todos, read_file, draw_concept_map]
 
 
-def _active_tools():
-    """Return tools available to Jasper, checking optional services at runtime."""
+def _research_tool(model):
+    research_agent = create_research_agent(model)
 
-    tools = list(ACTIVE_TOOLS)
-    if os.getenv("TAVILY_API_KEY"):
-        tools.append(web_search)
-    return tools
+    @tool(
+        "research",
+        description=(
+            "Delegate web research and URL reading to the Research specialist. "
+            "Returns concise findings with evidence IDs for grounded answers and visuals."
+        ),
+    )
+    def research(query: str) -> str:
+        result = research_agent.invoke(
+            {"messages": [{"role": "user", "content": query}]}
+        )
+        return _message_text(result["messages"][-1])
+
+    return research
+
+
+def _active_tools(model):
+    """Return Jasper's direct tools plus the documented Research subagent tool."""
+
+    return [*ACTIVE_TOOLS, _research_tool(model)]
 
 
 SYSTEM_PROMPT = """You are Jasper, a dependable daily-driver assistant.
@@ -91,11 +106,12 @@ decorate a simple answer.
 
 Every diagram must be evidence-grounded. Before drawing a repository or code diagram,
 read the relevant repository files and cite the evidence IDs returned by read_file on
-every node and edge. Before drawing a research diagram, use web_search and preferably
-read_url on authoritative sources, then cite returned web evidence IDs on every node
-and edge. Use grounding_kind="repo" for repository diagrams and "web" for researched
+every node and edge. Before drawing a research diagram, delegate the evidence search
+to Research with the research tool, then cite the returned web evidence IDs on every
+node and edge. Use grounding_kind="repo" for repository diagrams and "web" for researched
 claims. The user-input evidence may support only claims explicitly stated by the user;
-it is not evidence for repository structure or external facts. If adequate evidence
+cite it with the exact evidence ID "user-input". It is not evidence for repository
+structure or external facts. If adequate evidence
 cannot be obtained, explain the limitation and do not draw the diagram.
 
 Label every node and edge with an honest claim_status: "observed" for repository
@@ -155,16 +171,15 @@ def select_response_strategy(model, requested: str | None = None) -> ResponseStr
 def _middleware():
     return [
         ModelCallLimitMiddleware(run_limit=8, exit_behavior="error"),
-        ToolCallLimitMiddleware(run_limit=8, exit_behavior="error"),
         ModelRetryMiddleware(max_retries=2, on_failure="error"),
-        ToolRetryMiddleware(max_retries=1, on_failure="error"),
+        ToolRetryMiddleware(max_retries=1),
     ]
 
 
 def _build_agent(model, response_format=None, *, tools=None):
     return create_agent(
         model=model,
-        tools=_active_tools() if tools is None else tools,
+        tools=_active_tools(model) if tools is None else tools,
         system_prompt=SYSTEM_PROMPT,
         middleware=_middleware(),
         response_format=response_format,

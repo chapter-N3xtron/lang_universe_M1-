@@ -9,21 +9,13 @@ import {
 } from "react";
 import { cn } from "@/lib/utils";
 import { useStreamContext, type StreamContextType } from "@/providers/Stream";
-import { Button } from "../ui/button";
 import { LangGraphLogoSVG } from "../icons/langgraph";
 import { TooltipIconButton } from "./tooltip-icon-button";
-import {
-  List,
-  ListX,
-  PanelRightOpen,
-  PanelRightClose,
-  SquarePen,
-} from "lucide-react";
-import { useQueryState, parseAsBoolean } from "nuqs";
+import { List, ListX, SquarePen } from "lucide-react";
+import { useQueryState, parseAsBoolean, parseAsStringLiteral } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { toast } from "sonner";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { GitHubSVG } from "../icons/github";
 import {
   Tooltip,
@@ -44,14 +36,13 @@ import dynamic from "next/dynamic";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
 import type { JasperResponse } from "@/lib/visual/jasper-response.generated";
 
-const ThreadHistory = dynamic(() => import("./history"), { ssr: false });
 const TodoList = dynamic(() => import("./todos").then((m) => m.TodoList), {
   ssr: false,
 });
-const VisualSurface = dynamic(
+const SessionVisualPane = dynamic(
   () =>
-    import("@/components/workspace/visual-surface").then(
-      (module) => module.VisualSurface,
+    import("@/components/workspace/session-visual-pane").then(
+      (module) => module.SessionVisualPane,
     ),
   { ssr: false },
 );
@@ -109,10 +100,16 @@ function ThreadImpl() {
   const [artifactOpen, closeArtifact] = useArtifactOpen();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
-  const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
-    "chatHistoryOpen",
-    parseAsBoolean.withDefault(false),
+  const [, setSessionView] = useQueryState(
+    "sessionView",
+    parseAsStringLiteral(["library", "session"] as const),
   );
+  const [apiUrl] = useQueryState("apiUrl", {
+    defaultValue: process.env.NEXT_PUBLIC_API_URL || "",
+  });
+  const [authScheme] = useQueryState("authScheme", {
+    defaultValue: process.env.NEXT_PUBLIC_AUTH_SCHEME || "",
+  });
   const [todosOpen, setTodosOpen] = useQueryState(
     "todosOpen",
     parseAsBoolean.withDefault(false),
@@ -130,8 +127,6 @@ function ThreadImpl() {
   } = useModelAndVoices();
 
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
-  const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-
   const stream = useStreamContext();
   const streamRef = useRef(stream);
   useEffect(() => {
@@ -154,10 +149,11 @@ function ThreadImpl() {
   const setThreadId = useCallback(
     (id: string | null) => {
       _setThreadId(id);
+      setSessionView(id ? "session" : "library");
       closeArtifact();
       setArtifactContext({});
     },
-    [_setThreadId, closeArtifact, setArtifactContext],
+    [_setThreadId, closeArtifact, setArtifactContext, setSessionView],
   );
 
   useEffect(() => {
@@ -231,27 +227,10 @@ function ThreadImpl() {
       : null;
   const visualArtifacts = validatedJasperResponse?.artifacts ?? [];
   const latestVisualArtifact = visualArtifacts.at(-1);
-  const visualAvailable = Boolean(latestVisualArtifact || artifactOpen);
+  const visualAvailable = true;
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      <div className="relative hidden lg:flex">
-        <div
-          className="bg-background absolute z-20 h-full overflow-hidden border-r transition-transform duration-200 motion-reduce:transition-none"
-          style={{
-            width: 300,
-            transform: `translateX(${chatHistoryOpen ? 0 : -300}px)`,
-          }}
-        >
-          <div
-            className="relative h-full"
-            style={{ width: 300 }}
-          >
-            <ThreadHistory />
-          </div>
-        </div>
-      </div>
-
       <div
         className="absolute top-0 right-0 z-20 hidden h-full transition-transform duration-200 motion-reduce:transition-none lg:flex"
         style={{ transform: `translateX(${todosOpen ? 0 : 300}px)` }}
@@ -274,27 +253,10 @@ function ThreadImpl() {
               "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-200 motion-reduce:transition-none",
               !chatStarted && "grid-rows-[1fr]",
             )}
-            style={{
-              marginLeft: chatHistoryOpen && isLargeScreen ? 300 : 0,
-            }}
           >
             {!chatStarted && (
               <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-                <div>
-                  {(!chatHistoryOpen || !isLargeScreen) && (
-                    <Button
-                      className="hover:bg-gray-100"
-                      variant="ghost"
-                      onClick={() => setChatHistoryOpen((p) => !p)}
-                    >
-                      {chatHistoryOpen ? (
-                        <PanelRightOpen className="size-5" />
-                      ) : (
-                        <PanelRightClose className="size-5" />
-                      )}
-                    </Button>
-                  )}
-                </div>
+                <div />
                 <div className="absolute top-2 right-4 flex items-center">
                   <TooltipIconButton
                     size="lg"
@@ -317,25 +279,9 @@ function ThreadImpl() {
             {chatStarted && (
               <div className="relative z-10 flex items-center justify-between gap-3 p-2">
                 <div className="relative flex items-center justify-start gap-2">
-                  <div className="absolute left-0 z-10">
-                    {(!chatHistoryOpen || !isLargeScreen) && (
-                      <Button
-                        className="hover:bg-gray-100"
-                        variant="ghost"
-                        onClick={() => setChatHistoryOpen((p) => !p)}
-                      >
-                        {chatHistoryOpen ? (
-                          <PanelRightOpen className="size-5" />
-                        ) : (
-                          <PanelRightClose className="size-5" />
-                        )}
-                      </Button>
-                    )}
-                  </div>
                   <button
-                    className="flex cursor-pointer items-center gap-2 transition-[margin] duration-200 motion-reduce:transition-none"
+                    className="flex cursor-pointer items-center gap-2"
                     onClick={() => setThreadId(null)}
-                    style={{ marginLeft: !chatHistoryOpen ? 48 : 0 }}
                   >
                     <LangGraphLogoSVG
                       width={32}
@@ -409,12 +355,16 @@ function ThreadImpl() {
           </div>
         }
         visual={
-          <VisualSurface
-            artifact={latestVisualArtifact}
+          <SessionVisualPane
+            apiUrl={apiUrl}
+            authScheme={authScheme || undefined}
+            threadId={threadId}
+            latestArtifact={latestVisualArtifact}
             selectedVoice={selectedVoice}
             legacyActive={artifactOpen}
             legacyTitle={<ArtifactTitle className="truncate overflow-hidden" />}
             legacyContent={<ArtifactContent className="relative h-full" />}
+            onSelectThread={(selectedThreadId) => setThreadId(selectedThreadId)}
           />
         }
         composer={

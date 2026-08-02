@@ -1,37 +1,55 @@
 import operator
-import os
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
+from langchain.agents import create_agent
 from langgraph.graph import END, START, StateGraph
 
 from src.agent_utils import get_conversation_history
-from src.llm import get_llm
+from src.jasper_tools import read_url, web_search
+from src.llm import get_agent_llm
 
 load_dotenv()
 
 
-class State(TypedDict):
+class State(TypedDict, total=False):
     messages: Annotated[list[dict], operator.add]
     research_findings: str
+    model: str
+
+
+RESEARCH_PROMPT = """You are Research, Jasper's web-research specialist.
+
+Use web_search for current or externally verifiable claims. Use read_url when the
+full content of an authoritative result is needed. If a page cannot be read, use the
+available search evidence or another authoritative result rather than repeatedly
+requesting the same unavailable page. Preserve the evidence IDs returned by tools in
+your findings so Jasper can cite them in a grounded visualization. State limitations
+and uncertainty plainly. Never invent a source or claim to have read a page that a
+tool could not retrieve."""
+
+
+def create_research_agent(model=None):
+    """Build the documented LangChain subagent used for web research."""
+
+    return create_agent(
+        model=model or get_agent_llm(),
+        tools=[web_search, read_url],
+        system_prompt=RESEARCH_PROMPT,
+        name="research",
+    )
 
 
 def research_agent(state: State):
-    """Research agent - powered by GLM via LiteLLM proxy"""
+    """Run Research as a standalone profile in the outer LangGraph."""
     messages = state["messages"]
     history = get_conversation_history(messages)
 
-    llm = get_llm()
-
-    firecrawl_key = os.getenv("FIRECRAWL_API_KEY")
-
-    if firecrawl_key:
-        system_prompt = "You are a research assistant with web scraping capabilities. Use your knowledge to provide accurate, well-researched information."
-    else:
-        system_prompt = "You are a research assistant. Provide accurate, well-researched information based on your training data. Note: Set FIRECRAWL_API_KEY in .env to enable live web scraping."
-
     try:
-        response = llm.invoke([{"role": "system", "content": system_prompt}] + history)
+        result = create_research_agent(
+            get_agent_llm(state.get("model"))
+        ).invoke({"messages": history})
+        response = result["messages"][-1]
         return {
             "messages": [{"role": "assistant", "content": response.content}],
             "research_findings": response.content,

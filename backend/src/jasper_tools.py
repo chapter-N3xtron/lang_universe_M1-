@@ -332,7 +332,9 @@ def draw_concept_map(
     """Create a validated concept map when a visual would materially aid understanding.
 
     Every node and edge must cite evidence IDs returned by read_file, web_search,
-    read_url, or the current user-input evidence. Repository maps use
+    read_url, or the current user-input evidence. The current user message has the
+    stable evidence ID "user-input" and may support only claims explicitly supplied
+    by the user. Repository maps use
     grounding_kind="repo" and claim_status="observed" or "inferred". Research maps
     use grounding_kind="web" and claim_status="researched" or "inferred". Processes
     supplied by the user use "user_defined"; future designs use "proposed". Never

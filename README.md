@@ -37,10 +37,14 @@ only in approval mode and every mutation pauses for human review.
 Backend graph:
 
 ```bash
-cd backend
-uv sync --extra sidecar
-UV_CACHE_DIR=/tmp/deep-agent-uv-cache uv run langgraph dev --port 8123
+./start_image_pipeline.sh start
 ```
+
+The application UI requires the canonical Docker-backed Agent Server started by this
+launcher. It rejects `langgraph dev` and other unverified runtimes so an in-memory
+server on port 8123 cannot silently present a different thread catalog. Studio-only
+development servers must use a separate port and are not accepted by the application
+UI.
 
 Sidecar:
 

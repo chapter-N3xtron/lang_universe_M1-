@@ -24,7 +24,6 @@ import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
-import { toast } from "sonner";
 import type { TodoSection } from "@/lib/types/todo";
 import type {
   ConceptMapArtifact,
@@ -121,7 +120,7 @@ async function checkGraphStatus(
   apiUrl: string,
   apiKey: string | null,
   authScheme?: string,
-): Promise<boolean> {
+): Promise<{ ok: boolean; reason?: string }> {
   try {
     const headers = new Headers();
     if (apiKey) headers.set("X-Api-Key", apiKey);
@@ -130,13 +129,89 @@ async function checkGraphStatus(
     const res = await fetch(`${apiUrl}/info`, {
       headers,
     });
+    if (!res.ok) return { ok: false, reason: "The Agent Server is unavailable." };
 
-    return res.ok;
+    const identityResponse = await fetch(`${apiUrl}/runtime-identity`, { headers });
+    if (!identityResponse.ok) {
+      return {
+        ok: false,
+        reason: "The server did not provide a durable runtime identity.",
+      };
+    }
+    const identity = (await identityResponse.json()) as {
+      runtime_id?: unknown;
+      durable?: unknown;
+      persistence?: unknown;
+    };
+    if (
+      identity.runtime_id !== "backend-postgres-v1" ||
+      identity.durable !== true ||
+      identity.persistence !== "postgres"
+    ) {
+      return {
+        ok: false,
+        reason:
+          "This is not the canonical PostgreSQL-backed Agent Server. The UI will not connect to a development session store.",
+      };
+    }
+
+    return { ok: true };
   } catch (e) {
     console.error(e);
-    return false;
+    return { ok: false, reason: "The Agent Server could not be reached." };
   }
 }
+
+const DurableRuntimeBoundary = ({
+  children,
+  apiKey,
+  apiUrl,
+  authScheme,
+}: {
+  children: ReactNode;
+  apiKey: string | null;
+  apiUrl: string;
+  authScheme?: string;
+}) => {
+  const [status, setStatus] = useState<{
+    checking: boolean;
+    ok: boolean;
+    reason?: string;
+  }>({ checking: true, ok: false });
+
+  useEffect(() => {
+    let active = true;
+    checkGraphStatus(apiUrl, apiKey, authScheme).then((result) => {
+      if (active) setStatus({ checking: false, ...result });
+    });
+    return () => {
+      active = false;
+    };
+  }, [apiKey, apiUrl, authScheme]);
+
+  if (status.checking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <p className="text-muted-foreground">Verifying durable session storage…</p>
+      </div>
+    );
+  }
+  if (!status.ok) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="max-w-xl rounded-lg border p-6">
+          <h1 className="text-lg font-semibold">Session storage unavailable</h1>
+          <p className="text-muted-foreground mt-2">{status.reason}</p>
+          <p className="text-muted-foreground mt-2 text-sm">
+            Start the canonical Docker-backed Agent Server, then refresh this page.
+            No development runtime has been connected.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return children;
+};
 
 const StreamSession = ({
   children,
@@ -215,24 +290,6 @@ const StreamSession = ({
       sleep().then(() => getThreads().then(setThreads).catch(console.error));
     },
   });
-
-  useEffect(() => {
-    checkGraphStatus(apiUrl, apiKey, authScheme).then((ok) => {
-      if (!ok) {
-        toast.error("Failed to connect to LangGraph server", {
-          description: () => (
-            <p>
-              Please ensure your graph is running at <code>{apiUrl}</code> and
-              your API key is correctly set (if connecting to a deployed graph).
-            </p>
-          ),
-          duration: 10000,
-          richColors: true,
-          closeButton: true,
-        });
-      }
-    });
-  }, [apiKey, apiUrl, authScheme]);
 
   return (
     <StreamContext.Provider value={streamValue}>
@@ -409,14 +466,21 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   }
 
   return (
-    <StreamSession
+    <DurableRuntimeBoundary
+      key={`${finalApiUrl}|${finalAuthScheme}|${apiKey}`}
       apiKey={apiKey}
       apiUrl={finalApiUrl}
-      assistantId={finalAssistantId}
       authScheme={finalAuthScheme || undefined}
     >
-      {children}
-    </StreamSession>
+      <StreamSession
+        apiKey={apiKey}
+        apiUrl={finalApiUrl}
+        assistantId={finalAssistantId}
+        authScheme={finalAuthScheme || undefined}
+      >
+        {children}
+      </StreamSession>
+    </DurableRuntimeBoundary>
   );
 };
 

@@ -6,5 +6,8 @@
   "graphs": {
     "chat_ui": "./src/chat_ui.py:create_chat_ui"
   },
+  "http": {
+    "app": "./src/runtime_identity.py:app"
+  },
   "env": "./.env"
 }

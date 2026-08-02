@@ -9,3 +9,5 @@ services:
       - TODOS_FILE=/workspace/todos.json
       - CODING_OLLAMA_BASE_URL=http://host.docker.internal:11434
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - SESSION_RUNTIME_MODE=durable
+      - SESSION_RUNTIME_ID=backend-postgres-v1

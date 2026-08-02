@@ -67,6 +67,16 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/info", (route) =>
     route.fulfill({ contentType: "application/json", body: "{}" }),
   );
+  await page.route("**/runtime-identity", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        runtime_id: "backend-postgres-v1",
+        durable: true,
+        persistence: "postgres",
+      }),
+    }),
+  );
   await page.route("**/api/models", (route) =>
     route.fulfill({
       contentType: "application/json",

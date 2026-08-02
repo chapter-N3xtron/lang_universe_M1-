@@ -78,6 +78,16 @@ test("long TTS playback keeps the Web Audio queue bounded", async ({
       body: JSON.stringify({ assistant_id: "chat_ui", graph_id: "chat_ui" }),
     }),
   );
+  await page.route("http://127.0.0.1:8123/runtime-identity", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        runtime_id: "backend-postgres-v1",
+        durable: true,
+        persistence: "postgres",
+      }),
+    }),
+  );
   await page.route("http://127.0.0.1:8123/threads", (route) =>
     route.fulfill({
       contentType: "application/json",

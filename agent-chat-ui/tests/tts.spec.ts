@@ -12,6 +12,19 @@ import { test, expect } from "@playwright/test";
 
 test.describe("TTS play/stop button", () => {
   test.beforeEach(async ({ page }) => {
+    await page.route("http://127.0.0.1:8123/info", (route) =>
+      route.fulfill({ contentType: "application/json", body: "{}" }),
+    );
+    await page.route("http://127.0.0.1:8123/runtime-identity", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          runtime_id: "backend-postgres-v1",
+          durable: true,
+          persistence: "postgres",
+        }),
+      }),
+    );
     // LangGraph SDK polls threads on mount; mock it so the Suspense layout resolves.
     await page.route("**/threads/search", async (route) => {
       await route.fulfill({
@@ -75,20 +88,10 @@ test.describe("TTS play/stop button", () => {
     await textarea.fill("Hello");
 
     // Mock the LangGraph stream with a single assistant message.
-    // Because the frontend calls the langgraph dev server at port 8123,
-    // we need to intercept the SDK request. The SDK posts to /threads/{thread_id}/runs
+    // The SDK posts to /threads/{thread_id}/runs
     // with streamMode=["values"]; a minimal event-stream response is enough to produce
     // an AI message in the thread.
     // Mock the LangGraph server endpoints so the test doesn't need a real graph.
-    await page.route("http://127.0.0.1:8123/info", async (route) => {
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({
-          assistant_id: "chat_ui",
-          graph_id: "chat_ui",
-        }),
-      });
-    });
     await page.route("http://127.0.0.1:8123/threads", async (route) => {
       await route.fulfill({
         contentType: "application/json",

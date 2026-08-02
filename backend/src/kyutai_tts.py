@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 VOICE_REPO = "kyutai/pocket-tts-without-voice-cloning"
 VOICE_DIR = "languages/english/embeddings"
 LOCAL_VOICE_DIR = Path(__file__).resolve().parent.parent / "voices"
+CPU_DEVICE = torch.device("cpu")
 
 TARGET_PEAK = 10 ** (-4.8 / 20)  # -4.8 dBFS (matches predefined voice level)
 CLONE_TARGET = 10 ** (-5 / 20)  # -5 dBFS for cloned voices
@@ -83,7 +84,7 @@ class PocketTTSEngine:
         self._voice_cache: dict[str, dict] = {}
         self._voice_mtimes: dict[str, float] = {}
         self._available_voices: list[str] = []
-        self._device = torch.device("cpu")
+        self._device = CPU_DEVICE
         self._local_voices = self._scan_local_voices()
 
     @staticmethod
@@ -99,8 +100,12 @@ class PocketTTSEngine:
         if self._model is None:
             logger.info(f"Loading Pocket TTS model: {self.model_name}...")
             self._model = TTSModel.load_model(self.model_name)
+            self._model.to(device=CPU_DEVICE)
             self._device = next(self._model.parameters()).device
-            logger.info("Pocket TTS model loaded")
+            if self._device.type != "cpu":
+                self._model = None
+                raise RuntimeError("Pocket TTS must run on CPU")
+            logger.info("Pocket TTS model loaded on CPU")
 
     async def list_voices(self) -> list[str]:
         if not self._available_voices:

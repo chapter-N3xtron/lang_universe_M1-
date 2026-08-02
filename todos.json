@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-02T17:06:00Z",
+  "updated_at": "2026-08-02T17:27:21Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -62,7 +62,7 @@
           "agent": "coding",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Coding=Murrow_2 and Research/reference/Fact-Checker=Lorde routing, three-minute queue stability, cloud-only endpoint isolation, recoverable malformed visuals, provider sanitization, and durable voice manifests are implemented and tested. Restarted the UI and sidecar persistently, verified UI HTTP 200, 34 voices including Murrow_2 and Lorde, and generated 164,980 bytes of SSE audio for a short Murrow_2 smoke phrase without an LLM call. The requested devstral-small-2:24b-cloud entry was briefly configured but removed after the authoritative Ollama CLI reported that devstral-small-2:24b was retired on 2026-07-15; authenticated Cloud discovery currently offers qwen3.5:397b and kimi-k2.7-code as coding models. Unloaded mistral-small:22b from GPU and verified ollama ps is empty. Reverted an incorrect Cloud-only sidecar policy attempt: the sidecar remains discovery-only, while agent profiles and the UI selector own model choice. A real segmented Jasper-to-specialist narration handoff still needs an end-to-end live assertion before this item can be completed. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "Coding=Murrow_2 and Research/reference/Fact-Checker=Lorde routing, three-minute queue stability, cloud-only endpoint isolation, recoverable malformed visuals, provider sanitization, and durable voice manifests are implemented and tested. Restarted the UI and sidecar persistently, verified UI HTTP 200, 34 voices including Murrow_2 and Lorde, and generated 164,980 bytes of SSE audio for a short Murrow_2 smoke phrase without an LLM call. The requested devstral-small-2:24b-cloud entry was briefly configured but removed after the authoritative Ollama CLI reported that devstral-small-2:24b was retired on 2026-07-15; authenticated Cloud discovery currently offers qwen3.5:397b and kimi-k2.7-code as coding models. Unloaded mistral-small:22b from GPU and verified ollama ps is empty. Reverted an incorrect Cloud-only sidecar policy attempt: the sidecar remains discovery-only, while agent profiles and the UI selector own model choice. On 2026-08-02, repaired the reproducibility defect that allowed uv sync to remove manually installed Kyutai dependencies: pinned pocket-tts 2.1.0 in the sidecar extra and lockfile, which durably includes safetensors and its declared runtime dependencies. Pocket TTS is now explicitly moved to CPU and refuses startup if its parameters remain on another device. Verified 34 live voices, 19 SSE chunks from Juno_2, empty Ollama residency, no TTS GPU residency, two CPU-contract tests, and all 148 backend tests. A real segmented Jasper-to-specialist narration handoff still needs an end-to-end live assertion before this item can be completed. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "real-fifteen-step-release-gate",

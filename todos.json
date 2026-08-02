@@ -1,8 +1,548 @@
 {
   "version": 1,
-  "updated_at": "2026-07-31T02:31:46Z",
-  "updated_by": "opencode-desktop",
+  "updated_at": "2026-08-02T10:20:46Z",
+  "updated_by": "deep-agent",
   "sections": [
+    {
+      "id": "human-value-session-continuity",
+      "title": "Human Value and Multi-Agent Session Continuity",
+      "created_at": "2026-08-02T09:44:10Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "restore-durable-jasper-session-persistence",
+          "content": "Identify and correct the session-persistence discontinuity so a human can reliably return to Jasper, Coding, Research, and future agent-profile conversations, decisions, visual artifacts, and workspace context across server and UI restarts.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Top-priority blocker because session continuity preserves the human's prior worktime, attention, mental energy, and token cost. Root cause correction on 2026-08-02: the Docker PostgreSQL database retained Jasper thread 019fbf63-9194-7ca3-843d-1eea1acab82a with 91 checkpoints and retained the requested governance conversation 019fbf91-b2af-7012-83cf-2ca48ae09d88. A manually started langgraph dev process on the same port exposed a separate local catalog, creating a false appearance of data loss. Added a documented Agent Server custom /runtime-identity route marked only by the Docker deployment; the UI now verifies backend-postgres-v1 before constructing the LangGraph SDK stream and blocks unverified development runtimes. Removed the root README dev-server launch path, restored the Docker/PostgreSQL Agent Server, and verified the recovered Jasper thread through the API. Focused backend, TypeScript, production-build, lint, and browser guard tests pass. The broader acceptance remains: durable production backing must recover transcripts, all agent-participation records and delegations, many-to-many workspace relationships, decisions, model-use records, and visual artifacts after process and machine restarts. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "define-workspace-session-relationship-contract",
+          "content": "Define the production many-to-many Workspace, Session, WorkspaceSessionLink, and profile-agnostic AgentParticipation contracts so one workspace can retain many sessions, one knowledge-work session can reference several workspaces, and Jasper, Coding, Research, or any future approved profile can contribute with explicit roles, versions, delegations, revisions, time bounds, decisions, outcomes, and artifacts.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Keep portable workspace identity separate from device-local filesystem bindings. Agent participation uses stable profile IDs and versions rather than fixed Jasper/Coding/Research columns, preserving future profiles and historical readability. Git remains code authority; LangGraph checkpoints retain thread state; Store retains owner-scoped relationships and manifests. Do not infer a primary workspace or authorization to clone, bind, or modify it. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "design-human-knowledge-work-review",
+          "content": "Design a clear human-controlled review surface for sessions and workspaces showing names, editable summaries, observed active time, pauses, every participating agent profile and delegation, decisions, outcomes, artifacts, and cross-workspace relationships without productivity scoring or coercive optimization.",
+          "status": "pending",
+          "agent": "jasper",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The human must be able to inspect, correct, export, archive, and apply retention choices to their own knowledge-work record. Observed, idle, paused, and inferred time must remain distinguishable. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "define-workspace-model-efficiency-ledger",
+          "content": "Define a workspace- and session-linked model-use evidence ledger that records model/provider, local or cloud execution, agent profile, workflow version, measured versus estimated tokens and resources, verification outcomes, and human selection decisions.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Use the ledger to help the human identify when deterministic workflows and as-built knowledge make a smaller model sufficient. Jasper may explain or recommend; only the model selector or an explicitly approved agent profile selects. Prefer existing local capacity, never encourage hardware purchase, never silently load or switch models, and never turn minimum compute into a score imposed on the human. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "real-smoke-release-remediation",
+      "title": "Real Smoke Release Remediation",
+      "created_at": "2026-07-31T21:16:00Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "repair-voice-handoff-and-failures",
+          "content": "Complete Coding and Research voice routing, Jasper specialist narration handoff, long-playback stability, local-model isolation, and concise recoverable failure handling.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Coding=Murrow_2 and Research/reference/Fact-Checker=Lorde routing, three-minute queue stability, cloud-only endpoint isolation, recoverable malformed visuals, provider sanitization, and durable voice manifests are implemented and tested. Restarted the UI and sidecar persistently, verified UI HTTP 200, 34 voices including Murrow_2 and Lorde, and generated 164,980 bytes of SSE audio for a short Murrow_2 smoke phrase without an LLM call. The requested devstral-small-2:24b-cloud entry was briefly configured but removed after the authoritative Ollama CLI reported that devstral-small-2:24b was retired on 2026-07-15; authenticated Cloud discovery currently offers qwen3.5:397b and kimi-k2.7-code as coding models. Unloaded mistral-small:22b from GPU and verified ollama ps is empty. Reverted an incorrect Cloud-only sidecar policy attempt: the sidecar remains discovery-only, while agent profiles and the UI selector own model choice. A real segmented Jasper-to-specialist narration handoff still needs an end-to-end live assertion before this item can be completed. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "real-fifteen-step-release-gate",
+          "content": "Run focused unit and browser regressions, full backend and frontend suites, then all fifteen real smoke checks in order without mocked routes or dev-only runtime overrides.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Historical gates passed the frontend production build, generated-schema checks, TypeScript, 27 Playwright tests, Research citations, and Research visual placement. The latest focused Jasper suite passed 52 tests and an earlier full backend run passed 236. This gate is currently open: live repository grounding passes, but grounded visualization regressed\u2014Jasper reads repository files without calling draw_concept_map or publishing an artifact. The final ordered no-mock sweep must be rerun after the Jasper contract is corrected, and still requires the segmented handoff and continuous real three-minute audio run. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "repair-agent-server-runtime-and-envelopes",
+          "content": "Fix normal Agent Server execution without allow-blocking, Python 3.11 schema compatibility, stale-thread recovery, and prevent internal JSON/tool envelopes from leaking into visible chat.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T21:41:34Z",
+          "notes": "Removed the blocking eager workspace fallback, migrated runtime TypedDict schemas to typing_extensions, sanitized stale-thread and provider errors, stopped subgraph streaming, filtered outer messages to the final assistant response, and defaulted internal tool calls to hidden. Verified on the normal Agent Server without allow-blocking and with focused envelope regressions."
+        },
+        {
+          "id": "repair-grounding-visuals-layout-recall",
+          "content": "Make the selected repository readable through the grounded Explainer boundary, render validated request-flow artifacts, preserve them across modes and refresh, and restore functional split-pane resizing.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T21:41:34Z",
+          "notes": "Separated host repository tools from Deep Agents virtual filesystem names, added bounded safe repository listing, preserved validated artifacts in outer state, added deterministic grounded request-flow recovery, disabled pointer events on hidden mobile panes, and verified real evidence plus browser artifact recall, node labels, pane modes, composer visibility, and a genuine 100-pixel divider drag. Follow-up regression on 2026-07-31 found get_user_query ignored LangChain HumanMessage objects, disabling deterministic grounding and visual intent detection. The adapter now supports dict and BaseMessage forms; mandatory repository preflight and sanitized jasper_debug evidence diagnostics were added. Studio debug streaming then observed list_repository_files, read_repository_file, and draw_concept_map across nested Jasper/model/tools namespaces. Dynamic supervisor destinations were declared so Studio renders all specialist routes. Final live visual used 13 evidence sources, returned one artifact, and had no diagnostic error."
+        },
+        {
+          "id": "bound-research-and-render-comparisons",
+          "content": "Bound Research and Fact-Checker connector/model fan-out, handle rate limits efficiently, retain clickable citations, and place requested structured comparisons in the visual surface.",
+          "status": "completed",
+          "agent": "research",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T21:41:34Z",
+          "notes": "Wired profile model/tool call limits into middleware, added configurable 45-second Research and 25-second verification ceilings, retained fail-closed numbered citations, and generated validated evidence-linked comparison artifacts for the visual pane. Live checks returned seven references in 75.5 seconds and a visual artifact; ceilings were tightened afterward and unit/browser contracts pass."
+        }
+      ]
+    },
+    {
+      "id": "jasper-first-supervisor-repair",
+      "title": "Jasper-First Supervisor Repair",
+      "created_at": "2026-08-01T01:45:57Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "restore-agent-driven-grounding-and-visuals",
+          "content": "Remove repository preloading and require Jasper to perform real repository tool calls before publishing one validated parent-level concept map.",
+          "status": "in_progress",
+          "agent": "jasper",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Do not synthesize missing artifacts or treat deterministic preflight as proof of Jasper tool use. Removed Jasper's call-limit middleware and tools-disabled recovery call so the standard create_agent ReAct loop owns tool execution and completion. After restart, live grounded visual thread 019fbb51-c590-7013-a629-a55f9b42daff successfully called repository tools and registered eight evidence sources, but ollama-cloud/glm-5.1 returned a final assistant preamble ('Let me now construct...') instead of a draw_concept_map tool call. Artifact count remained zero. No custom limit or recovery middleware participated in this run. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "run-real-jasper-release-gate",
+          "content": "Verify Jasper's exact visible tools, repository grounding, visual publication, sanitized failure behavior, and Agent Server traces with real smoke prompts.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Mock-only tests are insufficient; completion requires live runtime evidence. Jasper now uses the standard create_agent loop, is the default supervisor, and has Research and approval-gated Coding through SubAgentMiddleware. The compiled graph exposes the expected ten direct tools plus task. Focused tests and lint pass, and the restarted API is healthy. Live visual thread 019fbb51-c590-7013-a629-a55f9b42daff still failed because ollama-cloud/glm-5.1 emitted final text instead of calling the registered draw_concept_map tool; no artifact was published. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "correct-jasper-tool-contract",
+          "content": "Remove the Explainer agent and give Jasper one explicit model-visible tool contract for safe repository reads, general visual publication, Research delegation, memory, and profile handoff.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-01T02:57:40Z",
+          "notes": "Replaced the custom JasperToolContractMiddleware and hidden task rejection with an agent-scoped LangChain create_agent graph plus the official Deep Agents SubAgentMiddleware. Removed duplicate per-repository-tool limits, the Jasper call-limit middleware, and the tools-disabled recovery call. Jasper is now the default supervisor with Research and approval-gated Coding as its two declared compiled subagents. Compiled ToolNode inspection proves exactly Jasper's ten declared direct tools plus task, with no general-purpose, filesystem, execute, or direct network tools. Focused graph tests and lint pass."
+        }
+      ]
+    },
+    {
+      "id": "live-smoke-remediation-and-profile-voices",
+      "title": "Live Smoke Remediation and Profile-Aware Voice Playback",
+      "created_at": "2026-07-31T20:20:26Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "jasper-specialist-narration-handoff",
+          "content": "Transport structured specialist narration through Jasper delegation so Jasper can introduce the work with sufficient context in Jasper's voice, then replay the specialist's bounded voice-safe segments in that specialist's voice with artifact, claim, citation, node, thread, and checkpoint provenance.",
+          "status": "pending",
+          "agent": "jasper",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Use the existing renderer-neutral NarrationTrack/NarrationCue contract and LangGraph thread/checkpoint state; do not split speakers with regexes or duplicate raw tool output into chat. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "live-cloud-model-persistence",
+          "content": "Verify against the production UI and real sidecar that a selected Ollama Cloud model survives refresh without falling back to a local model.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T20:24:24Z",
+          "notes": "Verified in an isolated browser against the live production UI and real model sidecar: ollama-cloud/glm-5.2 remained selected in the control and localStorage after refresh. The full 27-test browser suite also passes."
+        },
+        {
+          "id": "jasper-tool-validation-recovery",
+          "content": "Make malformed visualization tool arguments recoverable inside Jasper's LangChain agent loop so one rejected tool payload cannot abort the complete response.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T20:24:24Z",
+          "notes": "Changed ToolRetryMiddleware failure handling from run-aborting error propagation to a sanitized corrective ToolMessage, allowing Jasper to repair invalid visualization arguments without exposing model/provider payloads. Added regression coverage."
+        },
+        {
+          "id": "research-citation-fail-closed",
+          "content": "Recover validated authoritative connector records into numbered clickable references when Research structured synthesis fails, and never expose an uncited model draft as sourced research or render inline charts in chat.",
+          "status": "completed",
+          "agent": "research",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T20:24:24Z",
+          "notes": "Research now recovers validated ConnectorResult records from real Deep Agents ToolMessages into stable claim-linked clickable references when structured synthesis fails. With no retrieved evidence it refuses to expose uncited draft prose. The Research profile explicitly forbids inline Mermaid, ASCII, and markdown-table charts."
+        },
+        {
+          "id": "specialist-default-voice-routing",
+          "content": "Attribute assistant messages and narration segments to their speaker profile; use Murrow_2 for Coding and Lorde for Research, references, and Fact-Checker playback while Jasper retains the user's Jasper voice.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T20:24:24Z",
+          "notes": "Added stable defaults Coding=Murrow_2 and Research/reference/Fact-Checker=Lorde. Outer LangGraph messages preserve speaker_profile metadata; chat playback and code-architecture narration resolve specialist voices while Jasper retains its selected voice. Browser coverage verifies Lorde routing, and the performance gate confirms historical rows remain memoized."
+        },
+        {
+          "id": "ollama-cloud-instructed-json-validation",
+          "content": "Enforce the documented Ollama Cloud limitation: never send native structured-output format or response_format parameters to ollama-cloud models. Generate instructed JSON as ordinary text, extract one bounded JSON object deterministically, validate it with Pydantic, perform bounded schema-directed repair, and fail closed for Jasper, Research, and Fact-Checker.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T20:27:11Z",
+          "notes": "Confirmed against Ollama's official Structured Outputs documentation. Added a provider guard that forces ollama-cloud models onto ordinary instructed JSON text, bounded object extraction, Pydantic validation, two-attempt field/type-directed repair, and fail-closed fallback. Jasper cannot select ProviderStrategy/ToolStrategy for Cloud; Research and Fact-Checker omit Deep Agents response_format for Cloud. Full backend suite passes: 220 tests."
+        },
+        {
+          "id": "explainer-session-voice-manifest",
+          "content": "Add a versioned voice manifest to the durable ExplainerSession design. Persist semantic speaker_profile on every narration segment plus the session-time profile-to-voice snapshot, support original-voice and current-preference replay modes, and define missing-voice fallback without mutating immutable artifacts.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T21:41:34Z",
+          "notes": "Added an immutable, versioned VoiceManifest to ExplainerSession with a session-time profile-to-voice snapshot, original/current-preference replay modes, deterministic missing-voice fallback, generated JSON Schema and TypeScript contracts, and resolver tests. NarrationSegment continues to persist semantic speaker_profile rather than synthesized audio or prose-derived identity."
+        },
+        {
+          "id": "live-grounded-repo-and-research-gate",
+          "content": "Add a real Agent Server release gate for selected-repository architecture summaries, grounded visual artifact persistence, citation panels, and profile-aware audio. Use a non-secret fixture repository or explicit authorization before sending repository content to any cloud model.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T21:41:34Z",
+          "notes": "Ran the real local Agent Server against the user-authorized repository and configured Ollama Cloud provider. Jasper returned grounded architecture evidence with no invalid_workspace, and a freshly restarted server returned one validated request-flow artifact with 11 nodes and seven real source files. Live Research returned seven stable clickable references without URLs in voice text and a visual-surface artifact."
+        }
+      ]
+    },
+    {
+      "id": "visual-workspace-presentation-audit",
+      "title": "Visual Workspace Presentation and Narration Audit",
+      "created_at": "2026-08-01T22:37:00Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "capture-initial-visual-overlay",
+          "content": "Reproduce the transient graph-over-chat frame in a fresh production UI thread and capture the workspace mode, panel dimensions, React Flow viewport readiness, and artifact arrival order before and after the first render.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Acceptance evidence: a timestamped browser trace or frame sequence identifies the first invalid layout transition; do not change CSS or panel state before the cause is observed. Compare against React Flow viewport/node initialization and react-resizable-panels documented SSR layout behavior. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "define-horizontal-layout-contract",
+          "content": "Make left-to-right the measurable presentation contract for concept maps and determine whether direction should remain model-authored data or become renderer-owned presentation state.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Current evidence: ConceptMapPayload permits top_to_bottom and left_to_right, while ConceptMapRenderer explicitly maps top_to_bottom to ELK DOWN. Acceptance: every concept-map smoke fixture renders left-to-right, with no model-dependent orientation. Decide the contract before editing schema or renderer code. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "measure-narration-node-linking",
+          "content": "Verify the existing narration-to-node contract end to end: message playback follows narration_order, emits each artifact and node ID, highlights exactly one matching node, and clears the highlight when playback stops.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The current implementation already dispatches visual:narration-node and renders an active-node ring. Measure it before extending it. Acceptance: a browser test observes the expected active node sequence for at least three nodes and confirms cancellation cleanup. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "evaluate-narration-viewport-follow",
+          "content": "Evaluate documented React Flow node-scoped fitView or viewport APIs for keeping the currently narrated node visible without overriding user control unnecessarily.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Acceptance: document one chosen behavior and its tradeoff, then test that the active node is visible at readable scale during narration. No implementation until the existing highlight behavior and initial-layout trace are measured. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "visual-presentation-regression-gate",
+          "content": "After the preceding evidence is complete, apply only the smallest documentation-supported corrections and run fresh-artifact, mode-switch, refresh-recall, horizontal-layout, narration-highlight, cancellation, and manual-pan regression tests.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "This is the implementation gate. It remains blocked on the three observational tasks above so speculative UI changes do not accumulate. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "intent-aware-narration-and-visual-tool-reliability",
+      "title": "Intent-Aware Narration and Visual Tool Reliability",
+      "created_at": "2026-08-01T23:54:11Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "clickable-sentence-transcript",
+          "content": "Render model narration as a clickable sentence-level transcript linked to stable NarrationCue segment IDs.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Acceptance: each visible sentence maps to exactly one replayable cue, and selecting a sentence starts playback from that sentence without duplicating the response or node narration. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "exact-current-sentence-indicator",
+          "content": "Expose the exact transcript sentence currently being spoken using authoritative playback state rather than elapsed-time guessing.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Acceptance: the indicator advances only when the corresponding cue begins, remains correct through pause and resume, and clears on stop, cancellation, completion, or playback failure. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "pause-resume-and-sentence-start",
+          "content": "Support pause, resume, and playback beginning from any sentence in the transcript.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Use the renderer-neutral NarrationTrack/NarrationCue contract and retained audio/playback offsets. Acceptance requires correct continuation after pause and deterministic restart from every tested sentence. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "soft-transcript-and-node-highlighting",
+          "content": "Add soft, visually calm highlighting transitions for the active transcript sentence and its associated visual node.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Avoid harsh borders, flashing, rapid animation, and forced viewport movement. Respect reduced-motion preferences and verify that presentation changes never alter artifact content. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "node-selection-is-attention-not-authorization",
+          "content": "Represent node selection as evidence of human attention, never as authorization or an instruction that silently overrides the human's written or spoken prompt.",
+          "status": "pending",
+          "agent": "jasper",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Persist active artifact and selected node as typed context distinct from messages and consent state. A related prompt may use the context; an unrelated or ambiguous prompt must not be reinterpreted to fit the selection. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "neutral-node-prompt-clarification",
+          "content": "When selected-node context conflicts with or is ambiguous relative to the next prompt, pause and ask a neutral clarification before changing focus or acting.",
+          "status": "pending",
+          "agent": "jasper",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Use a typed LangGraph interrupt with equally presented choices such as this node, another visual area, a side question, or a different concept/session. Silence and inaction are not consent; no option is inferred or preselected. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "repeat-visual-tool-calls-in-one-thread",
+          "content": "Investigate and prove repeated draw_concept_map tool invocation and artifact publication within the same Jasper thread before enabling any automatic visual policy.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Known evidence to test: Jasper's prompt contains ambiguous 'call draw_concept_map once' wording; artifact recovery scans conversation-wide ToolMessages and keeps the first four; visual_artifacts currently has overwrite-style state; and a live ollama-cloud/glm-5.1 trace ended with a construction preamble instead of the registered tool call. These are findings and candidate failure mechanisms, not yet a single proven root cause. Acceptance: in one fresh thread, create map A, focus or revise map A, create map B, inspect Studio traces for every expected tool call, refresh, and recall both artifacts without substitution or loss. Record model ID and response strategy for every run. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "human-protective-governance-framework",
+      "title": "Human-Protective Governance Framework",
+      "created_at": "2026-08-02T02:44:13Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "ratify-constitution-authority-and-migration",
+          "content": "Human editors must ratify the communication constitution, authority tiers, amendment process, non-waivable protections, scoped exceptions, and constitution-version migration behavior for existing sessions.",
+          "status": "pending",
+          "agent": null,
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Governance reference: GOVERNANCE_FRAMEWORK.md. The model may surface tensions and draft language but cannot approve or activate the framework."
+        },
+        {
+          "id": "define-machine-rule-registry",
+          "content": "Define the machine-readable governance rule registry with stable rule IDs, versions, authority tier, waiver policy, affected typed state fields, enforcement conditions, interrupt behavior, and linked scenarios.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The registry must fail closed if it disagrees with the ratified human-readable constitution. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "curate-governance-source-manifest",
+          "content": "Create the source manifest for Martin, Rosenberg, Brignull, and future sources with provenance, rights, approved passages, human editorial interpretations, disagreements, limitations, rule breadcrumbs, and review history.",
+          "status": "pending",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The Store is an active case-law reasoning layer but remains subordinate to the constitution. Human editorial approval is required before publication. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "design-governed-source-ingestion",
+          "content": "Design and validate the governed source-ingestion pipeline for EPUB, PDF, HTML, Markdown, DOCX, JSON, and audio using appropriate LangChain loaders, OCR, or speech transcription with mandatory human review before indexing.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Every searchable passage must link backward to provenance and editorial interpretation and forward to rule IDs, state fields, enforcement conditions, scenarios, and implementation todos. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "build-human-protection-scenario-suite",
+          "content": "Build a human-reviewed scenario suite covering coercion, ambiguity, consent, authorization, memory, sessions, selected-node context, tool actions, refusal, revocation, silence, deceptive choices, and evaluator disagreement.",
+          "status": "pending",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Use deterministic tests for procedural invariants, model evaluations for semantic risk, and human editorial review for normative ambiguity. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "define-governance-audit-ledger",
+          "content": "Define an append-only governance audit event contract and durable storage boundary that records constitution version, triggered rule IDs, interrupt choices, explicit human decisions, and resulting transitions without unnecessary private content.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "LangGraph checkpoints and LangSmith traces are useful evidence but are not the authoritative consent and governance ledger. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "establish-governance-review-gate",
+          "content": "Establish a governance review gate requiring protected behavior, state transitions, interrupt language, and relevant implementation todos to cite GOVERNANCE_FRAMEWORK.md and stable rule IDs before release.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Cross-reference existing todos clickable-sentence-transcript, exact-current-sentence-indicator, pause-resume-and-sentence-start, soft-transcript-and-node-highlighting, node-selection-is-attention-not-authorization, neutral-node-prompt-clarification, and repeat-visual-tool-calls-in-one-thread rather than duplicating them."
+        },
+        {
+          "id": "gate-runtime-governance-enforcement",
+          "content": "Keep runtime governance enforcement disabled until human editors approve the charter baseline and repeated Jasper visualization-tool invocation, revision, publication, refresh, and recall pass independently in one thread.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Depends on ratify-constitution-authority-and-migration and the existing repeat-visual-tool-calls-in-one-thread todo. Do not hide tool failures behind ethical middleware or recovery behavior. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "define-grounded-spec-first-workflow",
+          "content": "Evaluate and define a grounded spec-first workflow, including whether spec-kit fits, so Jasper helps the human vet documentation, architecture, scope, and ethical implications before expensive Coding work begins.",
+          "status": "pending",
+          "agent": "jasper",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The purpose is informed direction and controlled scope, not an assumption that the human wants the fastest, simplest, cheapest, or lowest-token answer. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "define-engagement-and-understanding-controls",
+          "content": "Define human-controlled engagement modes, checks for understanding, and visual decision-tree behavior so Jasper can support delegated work or concept-by-concept participation without choosing the level of involvement for the human.",
+          "status": "pending",
+          "agent": "jasper",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Connect this work to the durable session, visual artifact, selected-node, transcript, and narration contracts. Long responses are evaluated for comprehensibility and voluntary engagement, not length alone. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "define-accessible-solution-evaluation",
+          "content": "Define an early-stage solution evaluation framework that surfaces accessibility and compares open-source and proprietary options by ownership, privacy, cost, maintenance, accessibility, and fitness without substituting one automatic default for another.",
+          "status": "pending",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Governance reference: GOVERNANCE_FRAMEWORK.md. The human retains the decision after seeing documented tradeoffs."
+        },
+        {
+          "id": "govern-curated-intellectual-lenses",
+          "content": "Define human editorial governance for curated intellectual lenses, including writers such as Baldwin and Lorde, with provenance, context, disagreement, limitations, representation review, and an explicit boundary between expanding perspective and prescribing belief.",
+          "status": "pending",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The model may retrieve and compare approved lenses but may not flatten distinct traditions into interchangeable advice or promote them into constitutional authority. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "research-non-therapy-boundary",
+          "content": "Research and human-review Jasper's non-therapy boundary, educational discussion of therapeutic modalities, appropriate-care referrals, urgent-risk handling, jurisdictional resources, and language that avoids both therapeutic impersonation and abrupt rejection of ordinary emotional conversation.",
+          "status": "pending",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "This is high-stakes policy work. Use current authoritative clinical and public-health sources, record jurisdiction and review dates, and require human editorial approval before runtime use. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "write-governance-framework-draft",
+          "content": "Create the root-level GOVERNANCE_FRAMEWORK.md working draft that records the human-protection mission, adopted governance direction, source foundations, technical boundaries, and unresolved editorial questions.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-02T02:45:17Z",
+          "notes": "Created GOVERNANCE_FRAMEWORK.md as a sourced working governance draft covering authority, typed enforcement, case-law retrieval, editorial ownership, interaction principles, staged adoption, and unresolved questions. It is explicitly not the ratified constitution and remains linked to implementation work through stable rule and todo IDs."
+        }
+      ]
+    },
+    {
+      "id": "jasper-tools-memory-search",
+      "title": "Jasper \u2014 Tools, Memory, and Search",
+      "created_at": "2026-07-28T05:00:00Z",
+      "planned_by_model": "deepseek-v4-flash-free",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "jasper-code-viz-tools",
+          "content": "DEFERRED: Wire code visualization tools for Jasper. Candidates researched: Tree-sitter (AST extraction, MIT, multi-language \u2014 https://github.com/tree-sitter/py-tree-sitter), Code2flow (call graphs, MIT, importable \u2014 https://github.com/scottrogowski/code2flow), Mermaid (LLM-generated diagrams, 89k stars \u2014 https://mermaid.js.org), CodeBoarding (agent-native, 2.4k stars \u2014 https://github.com/CodeBoarding/CodeBoarding). Lowest priority \u2014 deferred until ReAct loop + core tools (file-read, search, tent poles) are stable. Shares ReAct infrastructure.",
+          "status": "superseded",
+          "agent": null,
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "SUPERSEDED 2026-07-31: Do not implement this earlier Mermaid/Code2flow/ReAct-loop proposal. It is replaced by the grounded-interactive-visual-artifacts, python-architecture-adapter, and jasper-supervisor-deep-agents sections using Tach, Tree-sitter/Jedi, a renderer-neutral evidence graph, ELK layout, React Flow rendering, and Deep Agents profile tools."
+        },
+        {
+          "id": "jasper-react-loop",
+          "content": "Phase 1 (FOUNDATION): Convert Jasper from single-node plain LLM call to ReAct agent loop with ToolNode. Create backend/src/jasper_tools.py with seed list_todos @tool. Refactor backend/src/jasper_agent.py: single-node \u2192 ReAct graph (call_model + ToolNode + tools_condition), set recursion_limit=25, keep jasper_response field (set from messages[-1] at end). Add message bridge in backend/src/chat_ui.py: _dicts_to_base_messages() and _base_messages_to_dicts() converters, update run_jasper wrapper. Update system prompt to describe available tools. Keep todos in system prompt during transition (remove once file-read tool stable). Update backend/tests/test_jasper_agent.py: adapt 3 existing tests + add ReAct loop tests (tool call path, no-tool path) + message bridge round-trip tests (human, ai, tool, ai+tool_calls).",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T22:38:00Z",
+          "notes": "Implemented: jasper_tools.py (list_todos seed tool), jasper_agent.py (ReAct loop with add_messages, ToolNode, tools_condition, recursion_limit=25), chat_ui.py (_dicts_to_base_messages, _base_messages_to_dicts, updated run_jasper), jasper_agent.py system prompt with tool description. Fixed test_memory.py and test_supervisor.py: _make_llm_response returns AIMessage (not MagicMock), mock bind_tools.return_value set. All 35 relevant tests pass (3 test_opencode_stream.py failures are pre-existing pytest-asyncio missing)."
+        },
+        {
+          "id": "jasper-file-read-tool",
+          "content": "Phase 2: Add read_file(file_path: str) -> str LangChain @tool to jasper_tools.py. Reads file contents, returns as string. Security: use Path.resolve() BEFORE containment check (handles symlinks), restrict to OPENCODE_WORKSPACE directory, block path traversal (../), block binary file extensions, 100KB max file size truncation. Add tests with mock filesystem (valid path, path traversal blocked, binary blocked, oversized truncated).",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-28T22:48:00Z",
+          "notes": "Implemented: read_file @tool in jasper_tools.py with workspace containment (Path.resolve before check), binary extension block (30+ extensions), 100KB limit, relative path resolution. Registered in ACTIVE_TOOLS in jasper_agent.py. OPENCODE_WORKSPACE env var set in chat_ui.py run_jasper wrapper. 8 tests: valid read, traversal blocked, symlink allowed (in-workspace), binary blocked, oversized blocked, not found, relative path resolution, no workspace error."
+        },
+        {
+          "id": "jasper-search-tool",
+          "content": "Phase 3: Wire Tavily + Jina Reader search tools (NOT Exa \u2014 user decision). Add tavily-python and langchain-tavily to pyproject.toml. Add web_search(query: str) @tool using TavilySearch from langchain_tavily \u2014 CONDITIONALLY included only when TAVILY_API_KEY env var is set (graceful fallback: if no key, search tool not bound, Jasper tells user to set key). Add read_url(url: str) @tool using Jina Reader (GET https://r.jina.ai/{url} \u2192 markdown, no SDK needed, free tier works without API key). Add tests with mocked Tavily/Jina responses. User does NOT have Tavily API key yet \u2014 build with graceful fallback, add key later.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-29T03:00:00Z",
+          "notes": "Implemented: web_search @tool using TavilySearch(max_results=5) from langchain_tavily (conditionally included via os.getenv check in ACTIVE_TOOLS), read_url @tool using httpx GET https://r.jina.ai/{url}. Graceful fallback when no TAVILY_API_KEY. Imports: tavily-python, langchain-tavily, httpx in jasper_tools.py. All 46 tests pass."
+        },
+        {
+          "id": "jasper-context-compaction",
+          "content": "Phase 5: Add trim_history(messages, max_tokens=4000) to backend/src/agent_utils.py using strategy='last' and approximate token counting. Per-agent max_tokens: Jasper 4000, OpenCode 8000, Research 6000, Supervisor 2000. CRITICAL: verify tool-call/result pairs (AIMessage with tool_calls + ToolMessage response) are preserved during trimming \u2014 not severed. Add tests with mixed message types (human, ai, tool, ai+tool_calls) verifying tool pairs stay intact.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "deepseek-v4-flash-free",
+          "completed_at": "2026-07-29T03:00:00Z",
+          "notes": "Implemented trim_history() in agent_utils.py. Groups messages into atomic units: AIMessage+tool_calls + following ToolMessages are treated as indivisible. Drops oldest groups first until token budget fits. Uses len//4+10 estimate. Always keeps at least one group. All 46 tests pass."
+        },
+        {
+          "id": "jasper-hot-reload-fix",
+          "content": "Phase 6: Switch from langgraph dev to langgraph up (production server with Docker + Postgres). Sub-steps: (1) Launch Docker Desktop (/Applications/Docker.app) and wait for daemon \u2014 Docker is installed but not running, docker CLI not on PATH. (2) Add langgraph-checkpoint-postgres to backend/pyproject.toml dependencies (currently only -sqlite is present; sqlite is for dev mode, not Postgres-backed prod). (3) Update start_image_pipeline.sh:243 from `langgraph dev --port 8123 --no-browser` to `langgraph up --port 8123 --wait`. (4) Rewrite stop_langgraph function (start_image_pipeline.sh:255) from PID/lsof kill to `docker compose down` \u2014 Docker containers need different teardown than a single process. (5) Verify langgraph up starts, Postgres container comes up, UI connects, and a thread persists across a server restart (durable memory layer confirmed). User confirmed: production server, not dev server.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "ollama-cloud/glm-5.2",
+          "completed_at": "2026-07-29T02:51:57Z",
+          "notes": "Production server live. langgraph up --port 8123 --wait launches 3 Docker containers: backend-langgraph-api-1 (healthy, :8123->8000), backend-langgraph-postgres-1 (pgvector/pg16, healthy, :5433), backend-langgraph-redis-1 (redis:6, healthy). Changes: (1) Added langgraph-checkpoint-postgres>=3.0.2,<4 to pyproject.toml. (2) Removed langchain package dep (only langchain-core used directly), loosened langchain-core to >=0.3.66 to satisfy container uv constraints. (3) Pinned langgraph>=1.2.0,<2 to prevent downgrade to 0.5.0 (MRO crash). (4) start_image_pipeline.sh: langgraph dev -> langgraph up --wait, stop_langgraph -> docker compose down, added Docker Desktop CLI to PATH. (5) Added backend/.dockerignore. (6) LANGSMITH_API_KEY set in backend/.env. Backend tests 46/46 pass. Postgres + Redis durable persistence confirmed."
+        }
+      ]
+    },
     {
       "id": "original-plan-phases-0-10",
       "title": "Original Plan (Phases 0-10)",
@@ -400,47 +940,47 @@
         {
           "id": "tp-storage-layer",
           "content": "DECISION: JSON file (tent_poles.json) at repo root \u2014 same proven pattern as todos.json. Survives restarts, simple to debug, no Docker/Postgres dependency. Migrate to LangGraph Store later for cross-thread semantic search if needed. Implement read/write helpers for tent_poles.json. Add GET /api/tent-poles endpoint to FastAPI sidecar (web_server.py) mirroring /api/todos pattern. Schema: {version, updated_at, updated_by, tent_poles: [{id, content, priority, scope: 'global'|'thread', thread_id?, created_at, updated_at}]}.",
-          "status": "pending",
-          "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "DECISION: JSON file (not LangGraph Store). User confirmed. Same pattern as todos.json \u2014 proven, survives restarts, simple. LangGraph Store deferred to future production migration. Hybrid scope means tent_poles.json holds both global (scope=global) and per-thread (scope=thread, thread_id set) tent poles."
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T18:33:01Z",
+          "notes": "Implemented a validated TentPoleStore over root tent_poles.json with inter-process shared/exclusive locking, same-directory atomic replacement, file and directory fsync, restrictive permissions, scoped querying, mutation, and atomic batch reprioritization. Added GET/POST/PATCH/PUT/DELETE FastAPI contracts with validation and stable errors."
         },
         {
           "id": "tp-tool-definitions",
           "content": "Phase 4: Define 4 LangChain @tool functions for tent pole management in backend/src/jasper_tools.py (NOT 5 \u2014 propose_tent_poles DROPPED per user decision). Tools: (1) set_tent_pole(content: str, priority: int, scope: str = 'global') -> str \u2014 add a tent pole; (2) update_tent_pole(id: str, content: str = '', priority: int = -1) -> str \u2014 edit/reprioritize; (3) remove_tent_pole(id: str) -> str \u2014 drop; (4) get_tent_poles(scope: str = 'all', thread_id: str = '') -> list[dict] \u2014 read current set. Tools read/write tent_poles.json. Jasper extracts key points IN-RESPONSE (not via a separate tool), presents to user, user approves on next turn, Jasper calls set_tent_pole for each approved item. Depends on jasper-react-loop.",
-          "status": "pending",
-          "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "DECISION: Drop propose_tent_poles tool \u2014 Jasper extracts key points in its response text, then calls set_tent_pole for approved items. Avoids LLM-in-a-tool double-call cost. 4 tools: set/update/remove/get. User confirmed. Runs on Jasper's ReAct loop (depends on jasper-react-loop phase 1)."
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T18:33:01Z",
+          "notes": "Added the four specified LangChain tools with exact collaborative semantics, thread context isolation, stable JSON results, missing-ID handling, and active-only reads. Registered them in Jasper and the strict profile contract; no proposal-writing tool was introduced."
         },
         {
           "id": "tp-dashboard-ui",
           "content": "DECISION: Second tab in existing right sidebar (next to Todos). Adapt todos/index.tsx pattern. Add tab toggle between 'Todos' and 'Tent Poles' panels. Poll /api/tent-poles every 3s (same as todos). Display tent poles grouped by scope (global vs current thread). Show: content, priority (sortable), scope badge. Inline edit for content. Drag-to-reorder for priority. Approve/reject buttons for pending proposals. Pending review indicator (badge count) in tab header.",
-          "status": "pending",
-          "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "DECISION: Second tab in right sidebar (Option A). User confirmed. Reuses existing todo sidebar pattern (components/thread/todos/index.tsx). Add tab toggle between Todos and Tent Poles. Consistent UX \u2014 same location, same interaction model. Only poll when sidebar open (see ui-perf-todo-polling-conditional todo)."
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T18:33:01Z",
+          "notes": "Added a Todos/Tent Poles tabbed sidebar with global/thread grouping, scope/status badges, pending count, inline editing, proposal approve/reject, and drag reorder backed by one atomic priority transaction. Polling runs only while the sidebar is open. Playwright covers review, edit, approval, and reorder."
         },
         {
           "id": "tp-scoping-thread-vs-global",
           "content": "DECISION: Hybrid scope \u2014 global facts (user preferences, project facts, long-term decisions) + per-thread decisions (conversation-specific choices). Schema: tent pole has scope field ('global' or 'thread') and optional thread_id field (set when scope='thread'). Jasper reads both global and current-thread tent poles into context. Global tent poles persist across all conversations. Per-thread tent poles only loaded for their originating thread. get_tent_poles tool accepts scope filter ('all', 'global', 'thread') and thread_id parameter.",
-          "status": "pending",
-          "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "DECISION: Hybrid. User confirmed. Global tent poles = cross-conversation memory (user preferences, project facts). Per-thread tent poles = conversation-specific decisions. Hybrid gives best of both \u2014 long-term knowledge base + conversation independence. Implemented via scope field in tent_poles.json schema."
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T18:33:01Z",
+          "notes": "Enforced hybrid scope in Pydantic and storage validators: global entries cannot carry thread IDs, thread entries require one, and all/current-thread reads combine global entries only with the selected thread. Jasper tools derive thread identity from run-scoped context rather than process globals."
         },
         {
           "id": "tp-trigger-logic",
           "content": "DECISION: Auto-offer at message threshold (20+ messages in conversation) + manual trigger anytime via /tentpoles command. When threshold reached, Jasper's system prompt instructs it to offer: 'I've noticed we've discussed several things \u2014 would you like me to summarize the key points?' Jasper extracts key points in response text, user reviews/approves, Jasper calls set_tent_pole for approved items. Manual trigger: user types /tentpoles, Jasper immediately proposes. Collaborative, not silent \u2014 user always in the loop.",
-          "status": "pending",
-          "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "DECISION: Auto-offer at 20-message threshold + manual /tentpoles trigger. User confirmed. Collaborative \u2014 Jasper asks and invites review, never silently summarizes. System prompt includes instruction to offer at threshold. /tentpoles command forces immediate proposal. Matches user intent: 'Jasper will ask and invite the user to review the summary to support shared understanding.'"
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T18:33:01Z",
+          "notes": "Implemented deterministic /tentpoles proposal prompting and a persisted one-time offer at 20 human/assistant messages; tool messages do not inflate the threshold. Jasper is explicitly forbidden to persist silently and may call set_tent_pole only after approval. Unit tests cover manual, threshold, one-time, and tool-message behavior."
         }
       ]
     },
@@ -531,69 +1071,6 @@
           "completed_by_model": "ollama-cloud/kimi-k2.7-code",
           "completed_at": "2026-07-29T01:06:25Z",
           "notes": "Audit correction (2026-07-30): state mutation is guarded by isRoutingToOpenCode(prev), but onCustomEvent remains installed globally. The requested conditional custom stream mode was not implemented, so the SDK may still add custom mode for non-OpenCode requests."
-        }
-      ]
-    },
-    {
-      "id": "jasper-tools-memory-search",
-      "title": "Jasper \u2014 Tools, Memory, and Search",
-      "created_at": "2026-07-28T05:00:00Z",
-      "planned_by_model": "deepseek-v4-flash-free",
-      "planned_by_agent": "opencode-desktop",
-      "todos": [
-        {
-          "id": "jasper-react-loop",
-          "content": "Phase 1 (FOUNDATION): Convert Jasper from single-node plain LLM call to ReAct agent loop with ToolNode. Create backend/src/jasper_tools.py with seed list_todos @tool. Refactor backend/src/jasper_agent.py: single-node \u2192 ReAct graph (call_model + ToolNode + tools_condition), set recursion_limit=25, keep jasper_response field (set from messages[-1] at end). Add message bridge in backend/src/chat_ui.py: _dicts_to_base_messages() and _base_messages_to_dicts() converters, update run_jasper wrapper. Update system prompt to describe available tools. Keep todos in system prompt during transition (remove once file-read tool stable). Update backend/tests/test_jasper_agent.py: adapt 3 existing tests + add ReAct loop tests (tool call path, no-tool path) + message bridge round-trip tests (human, ai, tool, ai+tool_calls).",
-          "status": "completed",
-          "agent": "opencode",
-          "completed_by_model": "deepseek-v4-flash-free",
-          "completed_at": "2026-07-28T22:38:00Z",
-          "notes": "Implemented: jasper_tools.py (list_todos seed tool), jasper_agent.py (ReAct loop with add_messages, ToolNode, tools_condition, recursion_limit=25), chat_ui.py (_dicts_to_base_messages, _base_messages_to_dicts, updated run_jasper), jasper_agent.py system prompt with tool description. Fixed test_memory.py and test_supervisor.py: _make_llm_response returns AIMessage (not MagicMock), mock bind_tools.return_value set. All 35 relevant tests pass (3 test_opencode_stream.py failures are pre-existing pytest-asyncio missing)."
-        },
-        {
-          "id": "jasper-file-read-tool",
-          "content": "Phase 2: Add read_file(file_path: str) -> str LangChain @tool to jasper_tools.py. Reads file contents, returns as string. Security: use Path.resolve() BEFORE containment check (handles symlinks), restrict to OPENCODE_WORKSPACE directory, block path traversal (../), block binary file extensions, 100KB max file size truncation. Add tests with mock filesystem (valid path, path traversal blocked, binary blocked, oversized truncated).",
-          "status": "completed",
-          "agent": "opencode",
-          "completed_by_model": "deepseek-v4-flash-free",
-          "completed_at": "2026-07-28T22:48:00Z",
-          "notes": "Implemented: read_file @tool in jasper_tools.py with workspace containment (Path.resolve before check), binary extension block (30+ extensions), 100KB limit, relative path resolution. Registered in ACTIVE_TOOLS in jasper_agent.py. OPENCODE_WORKSPACE env var set in chat_ui.py run_jasper wrapper. 8 tests: valid read, traversal blocked, symlink allowed (in-workspace), binary blocked, oversized blocked, not found, relative path resolution, no workspace error."
-        },
-        {
-          "id": "jasper-search-tool",
-          "content": "Phase 3: Wire Tavily + Jina Reader search tools (NOT Exa \u2014 user decision). Add tavily-python and langchain-tavily to pyproject.toml. Add web_search(query: str) @tool using TavilySearch from langchain_tavily \u2014 CONDITIONALLY included only when TAVILY_API_KEY env var is set (graceful fallback: if no key, search tool not bound, Jasper tells user to set key). Add read_url(url: str) @tool using Jina Reader (GET https://r.jina.ai/{url} \u2192 markdown, no SDK needed, free tier works without API key). Add tests with mocked Tavily/Jina responses. User does NOT have Tavily API key yet \u2014 build with graceful fallback, add key later.",
-          "status": "completed",
-          "agent": "opencode",
-          "completed_by_model": "deepseek-v4-flash-free",
-          "completed_at": "2026-07-29T03:00:00Z",
-          "notes": "Implemented: web_search @tool using TavilySearch(max_results=5) from langchain_tavily (conditionally included via os.getenv check in ACTIVE_TOOLS), read_url @tool using httpx GET https://r.jina.ai/{url}. Graceful fallback when no TAVILY_API_KEY. Imports: tavily-python, langchain-tavily, httpx in jasper_tools.py. All 46 tests pass."
-        },
-        {
-          "id": "jasper-context-compaction",
-          "content": "Phase 5: Add trim_history(messages, max_tokens=4000) to backend/src/agent_utils.py using strategy='last' and approximate token counting. Per-agent max_tokens: Jasper 4000, OpenCode 8000, Research 6000, Supervisor 2000. CRITICAL: verify tool-call/result pairs (AIMessage with tool_calls + ToolMessage response) are preserved during trimming \u2014 not severed. Add tests with mixed message types (human, ai, tool, ai+tool_calls) verifying tool pairs stay intact.",
-          "status": "completed",
-          "agent": "opencode",
-          "completed_by_model": "deepseek-v4-flash-free",
-          "completed_at": "2026-07-29T03:00:00Z",
-          "notes": "Implemented trim_history() in agent_utils.py. Groups messages into atomic units: AIMessage+tool_calls + following ToolMessages are treated as indivisible. Drops oldest groups first until token budget fits. Uses len//4+10 estimate. Always keeps at least one group. All 46 tests pass."
-        },
-        {
-          "id": "jasper-hot-reload-fix",
-          "content": "Phase 6: Switch from langgraph dev to langgraph up (production server with Docker + Postgres). Sub-steps: (1) Launch Docker Desktop (/Applications/Docker.app) and wait for daemon \u2014 Docker is installed but not running, docker CLI not on PATH. (2) Add langgraph-checkpoint-postgres to backend/pyproject.toml dependencies (currently only -sqlite is present; sqlite is for dev mode, not Postgres-backed prod). (3) Update start_image_pipeline.sh:243 from `langgraph dev --port 8123 --no-browser` to `langgraph up --port 8123 --wait`. (4) Rewrite stop_langgraph function (start_image_pipeline.sh:255) from PID/lsof kill to `docker compose down` \u2014 Docker containers need different teardown than a single process. (5) Verify langgraph up starts, Postgres container comes up, UI connects, and a thread persists across a server restart (durable memory layer confirmed). User confirmed: production server, not dev server.",
-          "status": "completed",
-          "agent": "opencode",
-          "completed_by_model": "ollama-cloud/glm-5.2",
-          "completed_at": "2026-07-29T02:51:57Z",
-          "notes": "Production server live. langgraph up --port 8123 --wait launches 3 Docker containers: backend-langgraph-api-1 (healthy, :8123->8000), backend-langgraph-postgres-1 (pgvector/pg16, healthy, :5433), backend-langgraph-redis-1 (redis:6, healthy). Changes: (1) Added langgraph-checkpoint-postgres>=3.0.2,<4 to pyproject.toml. (2) Removed langchain package dep (only langchain-core used directly), loosened langchain-core to >=0.3.66 to satisfy container uv constraints. (3) Pinned langgraph>=1.2.0,<2 to prevent downgrade to 0.5.0 (MRO crash). (4) start_image_pipeline.sh: langgraph dev -> langgraph up --wait, stop_langgraph -> docker compose down, added Docker Desktop CLI to PATH. (5) Added backend/.dockerignore. (6) LANGSMITH_API_KEY set in backend/.env. Backend tests 46/46 pass. Postgres + Redis durable persistence confirmed."
-        },
-        {
-          "id": "jasper-code-viz-tools",
-          "content": "DEFERRED: Wire code visualization tools for Jasper. Candidates researched: Tree-sitter (AST extraction, MIT, multi-language \u2014 https://github.com/tree-sitter/py-tree-sitter), Code2flow (call graphs, MIT, importable \u2014 https://github.com/scottrogowski/code2flow), Mermaid (LLM-generated diagrams, 89k stars \u2014 https://mermaid.js.org), CodeBoarding (agent-native, 2.4k stars \u2014 https://github.com/CodeBoarding/CodeBoarding). Lowest priority \u2014 deferred until ReAct loop + core tools (file-read, search, tent poles) are stable. Shares ReAct infrastructure.",
-          "status": "pending",
-          "agent": "opencode",
-          "completed_by_model": null,
-          "completed_at": null,
-          "notes": "DEFERRED \u2014 lowest priority. Depends on jasper-react-loop. Shares ReAct infrastructure with search and file-read tools. Will need py-tree-sitter dependency when implemented."
         }
       ]
     },
@@ -698,7 +1175,7 @@
     },
     {
       "id": "ui-lag-evidence-and-remediation",
-      "title": "UI Lag — Evidence, Remediation, and Regression Plan",
+      "title": "UI Lag \u2014 Evidence, Remediation, and Regression Plan",
       "created_at": "2026-07-30T01:17:59Z",
       "planned_by_model": "openai/gpt-5",
       "planned_by_agent": "opencode-desktop",
@@ -1134,6 +1611,330 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-07-31T02:31:46Z",
           "notes": "LangGraph, the FastAPI sidecar, and the tested production UI were restarted and returned healthy responses on ports 8123, 8000, and 3001. ollama ps is empty, confirming no local model is resident."
+        }
+      ]
+    },
+    {
+      "id": "tts-sidecar-voice-list-recovery",
+      "title": "TTS Sidecar Voice List Recovery",
+      "created_at": "2026-07-31T02:36:39Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "restore-live-voice-discovery",
+          "content": "Repair the canonical sidecar dependency set so the live voice endpoint and UI voice selector work after a reproducible install.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:36:39Z",
+          "notes": "Replaced the unused Kokoro dependency with the Pocket TTS runtime actually imported by the sidecar, regenerated uv.lock, and synchronized the canonical environment. The restarted live /api/tts/voices endpoint returns 34 voices with HTTP 200 without loading the speech model into GPU memory."
+        },
+        {
+          "id": "cover-real-tts-runtime-imports",
+          "content": "Add integration coverage that detects missing optional TTS runtime packages instead of relying only on mocked browser responses.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:36:39Z",
+          "notes": "Added a backend integration test that imports the real Pocket TTS module and exercises deterministic remote voice discovery. This closes the gap left by Playwright tests that intentionally mock the sidecar endpoint."
+        }
+      ]
+    },
+    {
+      "id": "coding-workspace-selection-recovery",
+      "title": "Coding Workspace Selection Recovery",
+      "created_at": "2026-07-31T02:43:44Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "handle-unselected-coding-workspace",
+          "content": "Prevent coding requests without a repo-picker value from failing with invalid_workspace while preserving strict validation of explicit selections.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:43:44Z",
+          "notes": "Confirmed the failing thread had a null workspace. Coding now uses the deployment-configured /workspace repo only when no selection was supplied, while explicit missing or invalid paths remain rejected with a clear Repo selector recovery message."
+        },
+        {
+          "id": "persist-selected-repository",
+          "content": "Keep the human-selected repository across UI refreshes and component remounts.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:43:44Z",
+          "notes": "The repo picker now stores the selected absolute path in browser local storage. A Playwright regression selects a repo, reloads the UI, and confirms that the selection remains visible."
+        },
+        {
+          "id": "deploy-workspace-recovery",
+          "content": "Rebuild, restart, and verify the workspace recovery without false-positive port detection.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:43:44Z",
+          "notes": "Corrected the startup script to identify TCP listeners rather than unrelated connections, then restarted LangGraph, sidecar, and the optimized UI successfully on ports 8123, 8000, and 3001."
+        }
+      ]
+    },
+    {
+      "id": "jasper-tool-limit-recovery",
+      "title": "Jasper Tool-Limit Recovery",
+      "created_at": "2026-07-31T02:49:00Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "preserve-tool-results-at-safety-limit",
+          "content": "End repetitive Jasper tool loops without discarding completed tool evidence or returning a generic structured-response failure.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:49:00Z",
+          "notes": "The failing run was traced to ToolCallLimitExceededError, not a provider or model connection problem. LangChain model/tool call middleware now ends safely with accumulated state rather than raising an exception."
+        },
+        {
+          "id": "finalize-limited-jasper-run",
+          "content": "Produce one grounded final response from accumulated messages and tool results after a tool or model call limit is reached.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:49:00Z",
+          "notes": "Added a tools-disabled finalization pass for both plain/two-pass and combined structured strategies, with a precise deterministic fallback if finalization itself fails. Regression tests cover tool-limit and model-limit recovery."
+        },
+        {
+          "id": "deploy-jasper-limit-recovery",
+          "content": "Rebuild the LangGraph deployment and verify the recovered Jasper runtime and core services.",
+          "status": "completed",
+          "agent": "opencode",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T02:49:00Z",
+          "notes": "Rebuilt the LangGraph container and restarted the sidecar and optimized UI. Focused Jasper/supervisor tests and lint checks pass."
+        }
+      ]
+    },
+    {
+      "id": "explainer-session-persistence",
+      "title": "Explainer Session Persistence \u2014 LangGraph Threads + Store",
+      "created_at": "2026-07-31T02:55:00Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "opencode-desktop",
+      "todos": [
+        {
+          "id": "explainer-session-adr",
+          "content": "Write Architecture Decision Record documenting the explainer session model: durable collection of LangGraph threads and immutable visual artifacts, not one oversized chat-state object. Document thread copying via Agent Server API, LangGraph Store for session catalog, PostgreSQL checkpointer for messages and execution state, object storage for large binaries, and immutable artifact versioning with narration.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:44:02Z",
+          "notes": "Added the accepted backend/EXPLAINER_SESSION_ARCHITECTURE.md ADR. It defines owner-scoped session catalogs in LangGraph Store, root and copied child Agent Server threads in PostgreSQL checkpoints, immutable content-addressed artifact manifests with parent versions and narration, object storage for large bytes, separate presentation state, idempotent crash recovery, archive/export/deletion lifecycle, additive migrations, coordinated backup/restore verification, server-side authorization, and an explicit LangSmith-observability-only boundary."
+        },
+        {
+          "id": "explainer-session-schemas",
+          "content": "Define versioned Pydantic schemas for ExplainerSession (session ID, title, owner, root thread ID, repo identity, artifact IDs, child thread IDs, active artifact, timestamps, schema version, retention policy) and VisualArtifact v3 (artifact ID, version, renderer, payload, grounding sources, originating thread/checkpoint/message, node narration segments, parent artifact reference, content hash). Export JSON Schema and generate matching TypeScript types.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:44:02Z",
+          "notes": "Implemented frozen, strict Pydantic ExplainerSession v1 and VisualArtifact v3 contracts in backend/src/explainer_models.py, including ownership, repository identity, root/child checkpoint linkage, retention, artifact versions, inline versus object storage, grounding, origin, node narration, deterministic ordering, and verified canonical content hashes. Exported stable JSON Schemas and generated separate TypeScript contracts under agent-chat-ui/src/lib/explainer. Added schema generation/check scripts, seven model tests, Ruff validation, frontend typechecking, and stale-generation checks."
+        },
+        {
+          "id": "explainer-session-persistence-spike",
+          "content": "Run persistence spike against installed Agent Server: verify thread copying via copy-thread API, checkpoint branching behavior across restarts, Store writes for session catalog and artifact manifests, thread search by explainer_session_id metadata, and PostgreSQL backup/restore with migrations.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:47:50Z",
+          "notes": "Added a repeatable seed/verify/cleanup probe and recorded evidence in backend/spikes/EXPLAINER_PERSISTENCE_RESULTS.md. Against self-hosted Agent Server 0.11.2, native copy-thread produced a stateful child; exact root checkpoint, copied child, owner/session metadata search, Store catalog, and artifact manifest all survived an API-container restart. A PostgreSQL custom-format dump restored into an isolated database with identical 12 public tables, 1,937 checkpoints, two Store rows, and exact spike identities; all temporary records were cleaned. The spike also found and documented the installed API's copy-at-current-head constraint and the required compare-before-copy conflict guard."
+        },
+        {
+          "id": "explainer-session-contract-tests",
+          "content": "Add contract tests for idempotent artifact writes, crash recovery mid-exploration, server-side ownership and authorization filtering, archive/export/deletion behavior, and migration of existing legacy visuals to session-linked artifacts.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:51:20Z",
+          "notes": "Implemented owner-scoped ExplainerSessionRepository lifecycle behavior over LangGraph Store: idempotent immutable artifact batches, optimistic revisions, persisted branch intents and restart recovery, active/archived catalogs, export, two-phase deletion plans, and validated legacy ConceptMapArtifact migration. Added contract coverage for hash conflicts, retry safety, crash recovery, nondisclosing cross-owner access, stale revisions, archive/export/delete, grounding and narration preservation, and storage-boundary imports. The combined explainer/visual suite passes 25 tests."
+        },
+        {
+          "id": "explainer-session-langsmith-separation",
+          "content": "Document and enforce separation: LangSmith tracing remains observability only, not the session database. Session state lives in PostgreSQL checkpoints and Store; artifacts live in Store; large binaries live in object storage.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:51:20Z",
+          "notes": "The accepted Explainer Session ADR explicitly assigns LangSmith to observability only, Agent Server PostgreSQL checkpoints to execution state, LangGraph Store to session catalogs/manifests, and object storage to large bytes. The persistence implementation depends on BaseStore and versioned domain models only; an AST-level architecture test fails if a LangSmith runtime import enters the session database module."
+        }
+      ]
+    },
+    {
+      "id": "python-architecture-adapter",
+      "title": "Grounded Python Architecture Adapter",
+      "created_at": "2026-07-31T04:19:28Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "spike-tach-architecture-map",
+          "content": "Run a read-only Tach spike against representative Python repositories and this backend. Evaluate module-boundary discovery, internal and external dependencies, public interfaces, cycles, layered architecture, monorepo/source-root behavior, output stability, performance, and failure modes. Capture local `tach map` JSON and `tach report --raw` evidence without changing analyzed repositories.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:54:15Z",
+          "notes": "Installed and locked Tach 0.35.0, Grimp 3.15, Tree-sitter 0.26.0 with Python grammar 0.25.0, and Jedi 0.20.0. Ran local-only Tach against this backend and a committed representative fixture covering source roots, layers, interfaces, TYPE_CHECKING, cycles, and dynamic imports; tach show --web was never invoked. Recorded reproducible evidence and a hybrid architecture decision in backend/spikes/TACH_ARCHITECTURE_RESULTS.md. Tach map is fast and useful for static file dependencies, while configured policy is authoritative only when tach.toml exists; Grimp supplies queryable modules, cycles, externals, and line evidence."
+        },
+        {
+          "id": "implement-tach-grounded-adapter",
+          "content": "Implement a deterministic adapter from Tach's local dependency output into the renderer-neutral grounded graph schema. Represent packages, modules, architectural boundaries, internal/external dependencies, interfaces, cycles, source paths, and line-level evidence where available. Preserve claim provenance and do not allow the model, ELK, or React Flow to invent relationships.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:57:19Z",
+          "notes": "Implemented strict content-addressed canonical architecture contracts and a local TachArchitectureAdapter. It enumerates confined Python source files, validates every Tach path against the repository root, records file hashes and config provenance, separates observed Tach-map imports from declared tach.toml modules/dependencies/layers/interfaces, detects and marks cycles, emits explicit unconfigured diagnostics, sanitizes CLI failures, and produces deterministic immutable graphs. DerivedLayout and PresentationState are separate hash-linked models so ELK/React Flow cannot mutate facts. Added six passing trust-boundary/determinism tests. External packages and import-line enrichment remain assigned to the Grimp validation task because Tach does not output them."
+        },
+        {
+          "id": "python-symbol-drilldown-adapter",
+          "content": "Add progressive Python symbol drill-down below the Tach module view using Tree-sitter for syntax-grounded symbols and source ranges plus Jedi for static inference and reference resolution. Map results into a versioned Python visualization profile with stable architectural kinds and modifiers instead of exposing a raw syntax tree.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T18:02:50Z",
+          "notes": "Implemented on-demand PythonSymbolAdapter drill-down. Tree-sitter supplies observed class/function/method source ranges and stable qualified identities; it classifies dataclasses, protocols, enums, exceptions, visibility, async/generator/decorator/property/static/class/abstract/test modifiers without exposing a raw syntax tree. Jedi supplies bounded same-file reference edges and inferred identity metadata explicitly labeled as inferred, with failures degrading safely and parser cache confined to OS temporary storage. Added versioned frozen Python visualization styles/icon roles and four tests for classification, references, source provenance, syntax-error recovery, determinism, and profile immutability. The full Python pipeline suite passes 14 tests."
+        },
+        {
+          "id": "validate-tach-with-grimp",
+          "content": "Compare Tach dependency results with Grimp's queryable ImportGraph on the same fixtures. Document disagreements, dynamic-import limitations, namespace-package behavior, TYPE_CHECKING imports, unresolved dependencies, and the conditions under which Grimp should be used as an embedded fallback or validation oracle.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:59:51Z",
+          "notes": "Implemented GrimpArchitectureValidator as a queryable validation and enrichment layer over the immutable Tach graph. It restores sys.path after confined analysis, respects tach.toml source roots and TYPE_CHECKING policy, supports namespace packages, adds observed package/module/external nodes, records exact import-line evidence, compares internal Tach/Grimp edges, emits explicit disagreements, captures cycle breakers, and diagnoses runtime-computed imports without inventing their targets. Four tests cover matching graphs, forced disagreement, namespace packages, unavailable externals, TYPE_CHECKING exclusion, dynamic imports, path restoration, and deterministic output. The spike report documents when Grimp is the validation oracle versus Tach's declared-policy authority."
+        },
+        {
+          "id": "render-python-architecture-with-elk",
+          "content": "Feed only validated canonical Python architecture graphs into ELK for layered positioning and edge routing, then render them through React Flow with deterministic Python styles, accessible labels, node selection, narration highlighting, drill-down, and conversation branching. Verify that re-layout and presentation changes cannot mutate factual graph content.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T18:25:20Z",
+          "notes": "Implemented immutable ArchitectureGraph v1 validation and browser hash verification, ELK layered/orthogonal derived layout, deterministic accessible React Flow Python nodes and evidence-aware edges, narration highlight/replay, grounded drill-down, and actual LangGraph thread-copy branching with session/artifact/node/checkpoint provenance metadata. Layout failure falls back to a factual outline without mutating graph content. Backend contract tests (22 passed), production Next build, typecheck/lint, and nine Playwright visual-workspace tests passed, including tamper rejection and branch creation."
+        }
+      ]
+    },
+    {
+      "id": "jasper-supervisor-deep-agents",
+      "title": "Jasper Supervisor \u2014 Shared Deep Agents Runtime",
+      "created_at": "2026-07-31T05:03:21Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "jasper-supervisor-architecture-adr",
+          "content": "Write an Architecture Decision Record for a single LangChain Deep Agents runtime with Jasper as the primary human-facing supervisor and Jasper, Research, Coding, and Explainer as strongly configured profiles. Preserve the existing outer LangGraph thread, checkpoint, routing, and interrupt lifecycle; define when a profile is directly selected versus delegated as a subagent; and explicitly reject separate duplicated agent runtimes.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:34:15Z",
+          "notes": "Added backend/JASPER_SUPERVISOR_ARCHITECTURE.md. The accepted ADR defines one shared Deep Agents implementation foundation with independently compiled capability-scoped profiles; preserves the outer LangGraph lifecycle; routes unselected requests deterministically to Jasper; keeps explicit profile selection authoritative; uses native structured delegation; retains Coding as a separately sandboxed compiled subagent; defines permission, approval, persistence, voice, citation, migration, rollback, and release-gate boundaries; preserves Magic Coder until a separate migration; and defers Tent Poles implementation without discarding its collaborative-memory requirements."
+        },
+        {
+          "id": "deep-agent-profile-contracts",
+          "content": "Define versioned Pydantic configuration contracts and a shared agent factory for Jasper, Research, Coding, and Explainer profiles. Each profile must declare identity and communication style, allowed tools, skills, memory scope, backend, filesystem and network permissions, structured response format, approval policy, delegation policy, voice-delivery metadata, and provider/model capability requirements.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T17:38:33Z",
+          "notes": "Implemented backend/src/agent_profiles.py with strict versioned Pydantic contracts for Jasper, Research, Coding, Explainer, and the independent Fact-Checker plus a shared DeepAgentProfileFactory. Contracts declare tools, capabilities, backend, filesystem/network/memory policy, HITL approvals, delegation, voice delivery, resource limits, model requirements, and structured response names. Factory construction fails closed on undeclared tools, host expansion, backend mismatch, unauthorized delegation, or missing high-risk interrupts; Coding remains an independently compiled sandbox profile. Added 13 focused tests in backend/tests/test_agent_profiles.py; Ruff and all focused tests pass."
+        },
+        {
+          "id": "jasper-supervisor-delegation",
+          "content": "Implement Jasper's deterministic handle-or-delegate policy using Deep Agents subagent support while keeping explicit human profile selection authoritative. Add typed delegation envelopes, bounded context handoff, cancellation, timeout and retry behavior, subagent result provenance, conflict detection, approval interrupts, and one coherent Jasper-authored final response synthesized from specialist results.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Implemented deterministic explicit-profile routing and native Deep Agents delegation. Added bounded typed delegation/result/provenance/conflict contracts, retry/timeout/cancellation behavior, Jasper synthesis ownership, specialist call limits, and direct routing without obsolete generic handoff approvals. High-risk Coding mutations remain interrupted at the actual tool boundary."
+        },
+        {
+          "id": "profile-security-boundaries",
+          "content": "Enforce profile security through tool withholding, Deep Agents backend permissions, sandboxing, network isolation, secret exclusion, and human-in-the-loop middleware. Give Research network tools without repository writes; give Explainer read-only grounded architecture tools; give Coding a sandboxed selected workspace with approval-gated write, execute, git, and external network operations; and prevent Jasper from silently expanding a delegated profile's authority.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Enforced profile authority in DeepAgentProfileFactory and compiled boundaries: undeclared tools and hosts fail closed; Research and Fact-Checker have fixed-host read-only network tools and no repository access; Explainer is filesystem-denied with grounded read tools; Coding retains selected-workspace sandboxing and HITL mutation tools; Jasper has no direct network tools. Existing traversal, symlink, secret, approval-bypass, and workspace-isolation tests remain green."
+        },
+        {
+          "id": "profile-memory-and-session-linkage",
+          "content": "Implement user-scoped persistent Deep Agents memory for communication, learning, voice, and workflow preferences using LangGraph Store-backed namespaces. Keep organization and security policy memory read-only, separate learned preferences from authoritative policy, audit memory writes, and link Jasper, specialist child threads, immutable visual artifacts, bookmarks, and narration through the durable ExplainerSession model.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Implemented owner-scoped LangGraph Store preference namespaces, audited atomic writes, read-only organization policy, and explicit links to thread, ExplainerSession, artifact, source message, narration, and bookmark identities. Jasper receives the authenticated runtime Store; cross-user isolation and session linkage are contract-tested. LangSmith remains observability only."
+        },
+        {
+          "id": "profile-aware-voice-contract",
+          "content": "Define a renderer-neutral narration contract that separates voice-friendly text from visual artifacts and stores speaker profile, narration segments, node associations, pace, pause, emphasis, bookmark, replay, and user-preference metadata. Map this contract at playback time to capabilities supported by Pocket TTS or future engines instead of storing SSML as canonical session content.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Added renderer-neutral NarrationTrack/NarrationCue contracts with speaker profile, ordered segments, node links, pace, pauses, emphasis, bookmarks, replay, and user preference metadata. Playback capability adaptation maps canonical cues to Pocket TTS or future engines without persisting SSML. Browser tests cover node highlighting, replay, and grounded branch follow-up."
+        },
+        {
+          "id": "migrate-specialists-to-shared-runtime",
+          "content": "Migrate Jasper, Research, Coding, and Explainer incrementally behind the shared Deep Agents factory without a broad rewrite. Preserve stable UI agent IDs and existing thread compatibility, remove superseded duplicate agent loops only after profile parity is proven, and provide migrations for existing threads, profile metadata, approvals, artifacts, and saved user preferences.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Migrated Jasper, Research, Coding, Explainer, and Fact-Checker behind the shared factory/compiled-subagent boundary while preserving outer LangGraph lifecycle and stable UI IDs. Added an additive idempotent legacy-thread migration for Deep Agent/OpenCode identifiers that preserves messages, approvals, artifacts, sessions, and preference links and documents field-level rollback. Research now uses the same compiled verified pipeline for direct and Jasper-delegated work."
+        },
+        {
+          "id": "jasper-supervisor-release-gate",
+          "content": "Add unit, contract, integration, browser, security, persistence, restart-recovery, cancellation, provider-capability, latency, memory-pressure, and end-to-end tests for the shared runtime and all profiles. Verify explicit profile selection, Jasper delegation and synthesis, HITL resume, cross-thread memory isolation, explainer-session recovery, voice metadata fallback, Ollama local and cloud plus Hugging Face routing, and that cloud-profile use never loads a local Ollama model unexpectedly.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Passed the production gate across backend unit/contract/integration/security/persistence/restart/cancellation/provider tests, frontend type checking/lint/build/schema checks, and the full Playwright suite. Coverage includes explicit selection, delegation, HITL resume, memory isolation, ExplainerSession recovery, voice fallback, Ollama local/cloud and Hugging Face routing, cloud endpoint isolation, bounded streaming, UI latency, long-playback memory pressure, and operational migration rollback."
+        },
+        {
+          "id": "dual-channel-citation-experience",
+          "content": "Implement a dual-channel citation contract for Jasper and Research output. Voice-friendly narration must refer naturally to stable numbered references, such as 'according to reference one,' without reading URLs, citation JSON, or structured metadata aloud. Simultaneously render a numbered, accessible, clickable reference panel containing the full canonical URL, title, publisher or author, publication date when known, relevant excerpt, retrieval timestamp, claim associations, and one-action navigation to the source.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Implemented strict dual-channel Pydantic and TypeScript contracts: URL-free voice narration, stable contiguous reference numbers, claim/reference integrity, canonical HTTPS links, title/author/date/excerpt/retrieval metadata, and accessible one-action reference navigation. The UI renders citations and independent verification separately from speech; replay numbering and malformed-response rejection are tested."
+        },
+        {
+          "id": "independent-fact-checker-subagent",
+          "content": "Add a permission-limited Fact-Checker Deep Agents subagent that independently decomposes research output into checkable claims, retrieves corroborating and contradictory evidence without relying only on the Research agent's selected sources, evaluates source provenance using documented lateral-reading criteria informed by SIFT and the P.R.O.V.E.N. source-evaluation process, and returns structured per-claim verification results to Jasper before final synthesis.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Implemented a filesystem-denied Fact-Checker Deep Agent with structured SIFT+PROVEN per-claim verdicts, calibrated coverage confidence, evidence for/against, independence flag, and methodology notes. The compiled Research pipeline invokes it deterministically before returning to Jasper. Research-selected evidence IDs are excluded through a ContextVar-enforced tool boundary, not prompt compliance, and visual confidence output is tested."
+        },
+        {
+          "id": "authoritative-research-connectors",
+          "content": "Implement typed, read-only Research tools for authoritative scholarly discovery and metadata retrieval through Semantic Scholar, arXiv, PubMed via NCBI E-utilities, and IEEE Xplore. Normalize results into one evidence schema containing stable identifiers, canonical links, bibliographic metadata, abstract or permitted excerpt, source provider, query provenance, access status, and licensing constraints; rank by relevance and evidence quality rather than treating provider inclusion as proof of a claim.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Implemented fixed-host read-only Semantic Scholar, arXiv, PubMed/NCBI, IEEE Xplore, and clearly labeled lower-authority Tavily fallback connectors. All normalize stable IDs, canonical links, bibliographic metadata, permitted excerpts, access/license/provenance, publication status, transparent evidence-quality factors, and untrusted-text marking. Added bounded TTL caching, connection retries, rate-limit/outage statuses, redirect refusal, cross-provider deduplication, retraction/correction penalties, paywall handling, and secret-exclusion tests."
+        },
+        {
+          "id": "research-citation-verification-release-gate",
+          "content": "Add contract and end-to-end tests for Deep Agents Research and Fact-Checker orchestration, structured confidence output, source independence, claim-to-reference linkage, citation-number stability, spoken-versus-visual separation, dead or redirected URLs, duplicate records across providers, retractions and corrections, contradictory evidence, paywalls, empty results, rate limits, provider failure, prompt injection in retrieved text, and session replay with bookmarks.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-07-31T19:12:26Z",
+          "notes": "Added contract, integration, and browser coverage for native compiled Research/Fact-Checker orchestration, confidence calibration, enforced source independence, claim links, replay-stable numbering, voice/visual separation, redirects, duplicates, retractions/corrections, contradictory evidence schema, paywalls, empty/rate-limited/provider-failure states, untrusted prompt-injection text, bookmarks, and restored-session rendering. Final full backend and Playwright gates pass."
         }
       ]
     }

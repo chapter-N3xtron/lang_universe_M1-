@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-05T00:07:31Z",
+  "updated_at": "2026-08-05T03:25:14Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -40,8 +40,8 @@
         {
           "id": "define-workspace-model-efficiency-ledger",
           "content": "Define a workspace- and session-linked model-use evidence ledger that records model/provider, local or cloud execution, agent profile, workflow version, measured versus estimated tokens and resources, verification outcomes, and human selection decisions.",
-          "status": "pending",
-          "agent": "coding",
+          "status": "superseded",
+          "agent": null,
           "completed_by_model": null,
           "completed_at": null,
           "notes": "Use the ledger to help the human identify when deterministic workflows and as-built knowledge make a smaller model sufficient. Jasper may explain or recommend; only the model selector or an explicitly approved agent profile selects. Prefer existing local capacity, never encourage hardware purchase, never silently load or switch models, and never turn minimum compute into a score imposed on the human. Governance reference: GOVERNANCE_FRAMEWORK.md."
@@ -2178,6 +2178,312 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-08-05T00:07:31Z",
           "notes": "Converted Jasper's node and model/agent helper chain to native async invocation, preserving the compiled LangGraph Coding specialist and its approval, persistence, streaming, and security boundaries. Added a regression that delegates through the Deep Agents task tool to an async-only compiled Coding graph. Focused Jasper/Coding tests passed 29/29, the complete backend suite passed 175/175, and targeted Ruff checks passed. Repository-wide Ruff remains blocked by pre-existing import-order findings in backend/src/epub_attachments.py and backend/src/session_catalog_routes.py. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "jasper-coding-thread-handoff-repair",
+      "title": "Repair Jasper Coding Thread Handoff",
+      "created_at": "2026-08-05T00:27:02Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "propagate-langgraph-thread-to-coding",
+          "content": "Pass LangGraph configurable.thread_id through Jasper to its compiled Coding specialist while preserving the explicitly selected workspace and existing approval boundaries. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T00:28:02Z",
+          "notes": "Injected the documented RunnableConfig into Jasper's outer LangGraph node and used configurable.thread_id only when thread_identity is absent, while preserving the explicitly selected workspace. Added a focused Jasper handoff regression. Related tests passed 39/39, the complete backend suite passed 176/176, and targeted Ruff checks passed. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "approval-gated-package-installation",
+      "title": "Approval-Gated Package Installation",
+      "created_at": "2026-08-05T00:43:00Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "allow-workspace-package-installs",
+          "content": "Allow Coding to propose workspace-confined npm, pnpm, and Python package installation commands in approval mode, while preserving explicit human review, secret redaction, and denial of global or system installation. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T00:53:58Z",
+          "notes": "Added Node 22 and pinned pnpm 10.5.1 through LangGraph's documented dockerfile_lines, plus a persistent backend_coding-tools volume mounted at /opt/coding-tools. Approval mode now permits workspace npm/pnpm installs, shared global Node CLI installs into that volume, workspace .venv creation, and pip installs only through the workspace virtual environment; global/system Python installs and prefix overrides remain denied. Added bounded pwd and runtime-version checks, sanitized PATH/prefix configuration, security documentation, and regression coverage. The production image built successfully; live Node 22.23.2, npm 10.9.8, pnpm 10.5.1, shared volume mount, and all three HTTP health checks were verified. Focused tests passed 45/45, the complete backend suite passed 182/182, and changed-file Ruff checks passed. Repository-wide Ruff retains two pre-existing unrelated import-order findings. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "top-level-coding-specialist-handoff",
+      "title": "Move Coding to a Top-Level LangGraph Specialist",
+      "created_at": "2026-08-05T01:12:36Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "implement-visible-jasper-coding-handoff",
+          "content": "Remove Coding from Jasper's hidden Deep Agents subagent list and add a typed LangGraph handoff to the existing top-level coding node, preserving Research and Coding's established security, persistence, model, workspace, execution-mode, and approval boundaries. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T01:22:47Z",
+          "notes": "Removed Coding from Jasper's CompiledSubAgent list while leaving Research unchanged. Added the documented Command.PARENT handoff tool with the required AI/tool message pair and only the task, workspace, model, execution mode, and thread identity. The compiled graph now declares visible jasper-to-coding and coding-to-jasper routes; Coder's implementation was not changed. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-visible-coding-handoff-and-approval",
+          "content": "Verify ordinary Jasper requests do not invoke Coding, Jasper-to-coding and coding-to-Jasper routes are visible, read-only mode cannot mutate, approval mode exposes bounded write and command tools, approval resumes on the same thread, and package installation requests reach Coding's approval boundary; then run focused tests, backend lint, and the full backend suite. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T01:22:47Z",
+          "notes": "Added regressions for the visible graph edges, actual documented handoff execution into a separate top-level Coding node, bounded handoff context, explicit execution-mode enforcement, and parent-command propagation. Existing read-only, approval-tool, same-thread resume, and package-install approval coverage remains green. Focused Jasper, supervisor, Coding, security, and persistence tests passed 78/78; changed-file Ruff passed; the full backend suite passed 186/186. Repository-wide Ruff remains blocked by 19 unrelated pre-existing findings outside this change. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "top-level-research-specialist-discussion",
+      "title": "Discuss Moving Research to the Top-Level Graph",
+      "created_at": "2026-08-05T01:19:34Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "discuss-top-level-research-handoff",
+          "content": "Discuss whether Research should move from Jasper's Deep Agents subagent list to a visible top-level LangGraph specialist, including routing, context, persistence, and return-to-Jasper behavior. Do not implement until the architecture is reviewed and explicitly approved. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "research",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T01:59:00Z",
+          "notes": "Architecture approved by the user: use a visible Jasper to Research to Jasper LangGraph handoff, keep lightweight references in checkpoint state and immutable bounded bodies plus session display metadata in the existing LangGraph Store, preserve read-only workspace and attachment protections, and add a session Sources view. No application database, migration, vector index, command tool, write tool, crawler, or OCR. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "top-level-research-and-session-sources",
+      "title": "Promote Research and Add Session Sources",
+      "created_at": "2026-08-05T01:59:00Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "implement-visible-jasper-research-handoff",
+          "content": "Remove Research from Jasper's hidden Deep Agents subagent list and implement a typed top-level Jasper to Research to Jasper LangGraph handoff carrying only the task, selected model and workspace, thread identity, user identity, saved evidence references, and required AI and tool message pair. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "in_progress",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Implementation uses the existing top-level research node and Command.PARENT handoff pattern established for Coding. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "persist-bounded-session-research-evidence",
+          "content": "Persist immutable bounded visited-page, unopened-search-snippet, supported-upload, and safe workspace-file evidence bodies in the existing LangGraph Store while retaining lightweight session references in checkpoint state; support deduplication, changed-content versions, reopening saved evidence, and fork inheritance without copying bodies. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "in_progress",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "No application database tables, migrations, custom persistence service, vector index, crawl, command access, write access, or OCR. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "add-session-sources-view-and-renaming",
+          "content": "Add a dedicated Sources view to the existing session visual workspace that lists all session evidence, opens web URLs, shows provenance and visual usage, supports accessible click-name then Enter session-only renaming through the existing LangGraph Store pattern, and composes Jasper requests for all or selected sources. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Renaming changes only display_name and retains immutable original provenance and citation identity. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-top-level-research-and-session-sources",
+          "content": "Verify visible Jasper to Research to Jasper routing, ordinary Jasper isolation, read-only workspace and upload protections, snippet versus visited-page persistence, saved-source reuse, visual evidence validation, fork reference inheritance, Sources view accessibility and renaming, then run focused tests, changed-file lint, frontend build, browser tests, and the full backend suite. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "pending",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "OCR remains pending and separate. Live provider and browser results must be reported separately from unit or mocked coverage. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "repair-top-level-coding-task-and-result-flow",
+      "title": "Repair Top-Level Coding Task and Result Flow",
+      "created_at": "2026-08-05T02:08:27Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "deliver-explicit-task-to-top-level-coding",
+          "content": "Repair the documented Jasper to Coding handoff so the existing top-level Coding graph receives an explicit task message rather than treating Jasper's handoff acknowledgement as work, while preserving the selected workspace, model, explicit execution mode, durable thread identity, and required AI and tool message pair. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T02:24:26Z",
+          "notes": "The top-level coding node now consumes coding_task as a fresh HumanMessage while the required handoff AIMessage and ToolMessage remain in the outer graph state. Workspace, selected model, explicit execution mode, thread identity, user identity, and durable Coding session are preserved. Live read-only thread 019fcfba-14e0-7fc0-8e19-67dd8524f518 followed supervisor to jasper to coding to jasper to record_session and used Coder's read tool on README.md. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "return-coder-questions-blockers-and-completion",
+          "content": "Route Coder's genuine final question, blocker, error, cancellation, or completion result back to Jasper, preserve native LangGraph approval interrupts and same-thread resume, and forbid completed status when no new final Coder assistant message exists. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T02:24:26Z",
+          "notes": "Coder's final assistant message is returned to Jasper with coding provenance; questions, blockers, rejections, errors, cancellations, and verified completions use the existing message and interrupt flow. Missing terminal output now fails closed with missing_final_result instead of completed. No notification service, route, table, tool, or Coder rewrite was added. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-full-coder-handoff-approval-return",
+          "content": "Verify the production-shaped Jasper to Coding to approval to Coding to Jasper flow, read-only mutation blocking, direct Coder selection, missing-result failure, internal-history filtering, same-thread resume, OpenSpec installation approval reachability, and verified Jasper completion reporting; then run focused tests, changed-file lint, the full backend suite, restart, and live smoke checks. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T02:24:26Z",
+          "notes": "Focused Coder, approval, Jasper, supervisor, and persistence tests passed 84/84; the full backend suite passed 197/197; changed-file Ruff and git diff checks passed. The user explicitly deferred unrelated legacy ComfyUI Ruff findings. Core services restarted successfully. Live Jasper isolation thread 019fcfbc-6bb2-7ab0-b096-10ad99c3b7ed did not call Coder. Live OpenSpec thread 019fcfbb-e408-7662-a7a0-0c4efa98183a surfaced the exact npm install command through run_workspace_command approval, rejected it without execution on the same thread, and returned Coder's result through Jasper. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "compact-theme-aware-approval-card",
+      "title": "Compact Theme-Aware Approval Card",
+      "created_at": "2026-08-05T02:28:46Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "fix-approval-card-contrast-and-size",
+          "content": "Replace hard-coded light approval-card colors with the existing theme tokens and compact the Agent Inbox card, spacing, typography, and editable argument fields without changing native LangGraph approval behavior. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T02:58:39Z",
+          "notes": "Replaced hard-coded light colors with existing theme tokens, bounded the card to max-w-3xl, reduced spacing and typography, and limited editable argument fields to one through five rows while preserving the existing HITL controls. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-compact-approval-card",
+          "content": "Verify approval-card contrast and bounded dimensions in dark mode at desktop and narrow viewport widths, then run focused frontend lint, typecheck, production build, and browser coverage. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T02:58:39Z",
+          "notes": "TypeScript and the production build passed. A focused Chromium regression passed against the production bundle and verified the bounded card in desktop and narrow viewports, distinct dark-theme foreground and background colors, and current-interrupt decision counts. Existing lint warnings remain unrelated to this styling change. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "recover-chained-coder-approvals",
+      "title": "Recover Chained Coder Approvals",
+      "created_at": "2026-08-05T02:38:41Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "prevent-stale-approval-resubmission",
+          "content": "Bind Agent Chat UI review state to the current LangGraph interrupt, submit exactly one ordered decision per current action, and prevent stale or duplicate approval submissions while a resume is active. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The frontend now keys review state by interrupt and prevents duplicate queued submissions; its focused four-action then one-action browser regression passes. Live thread 019fcfd6-2c1e-7f72-8979-24498fa753c1 proved the remaining failure is the custom nested-interrupt bridge: on node restart it replayed an earlier one-decision resume against a new two-action interrupt. Replace that bridge with native subgraph interrupt propagation before completion. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "allow-bounded-openspec-initialization",
+          "content": "Extend the existing approval-gated command policy only for OpenSpec version inspection and repository initialization with validated tool IDs, preserving selected-workspace confinement and denying general OpenSpec or shell execution. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T02:58:39Z",
+          "notes": "Added and tested only OpenSpec version inspection, repository-local OpenCode core initialization, and bounded all-artifact validation. Direct installation was explicitly authorized after the live Coder approval bridge failed: official OpenSpec 1.7.0 is installed in the persistent coding-tools volume; openspec init --tools opencode --profile core created six skills, six commands, and openspec/config.yaml; strict validation returned no items because no change artifacts exist yet. Root AGENTS.md and todos.json hashes were unchanged by initialization. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-chained-approval-and-openspec-result",
+          "content": "Verify a four-action approval followed by a one-action approval cannot reuse stale decisions, complete a real same-thread OpenSpec installation and repository initialization, and confirm Coder reports its exact completion, question, rejection, or blocker to Jasper and Jasper reports it to the user. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Unit, browser, and live results must be reported separately. Unrelated ComfyUI Ruff findings are explicitly deferred by the user. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "coder-repository-sandbox-plan",
+      "title": "Give Coder a Real Repository Sandbox",
+      "created_at": "2026-08-05T02:58:39Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "verify-documented-sandbox-provider",
+          "content": "Verify that a documented Deep Agents sandbox provider available to the installed deepagents 0.7.0b2 runtime can create a thread-scoped sandbox, execute commands, enforce TTL and resource limits, and operate without exposing API-server credentials; stop for architecture review if no installed provider is available. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Superseded 2026-08-05 after the documented LangSmith provider returned 403 because the organization lacks private-preview sandbox access and the user explicitly authorized the documented LocalShellBackend instead. Replacement: local-coder-repository-access/use-native-local-shell-backend. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "define-selected-repository-transfer-boundary",
+          "content": "Define and verify the smallest selected-repository ingress and egress contract for the documented sandbox: preserve authorized dirty-worktree content, exclude secrets and unrelated host paths, retain sufficient Git context, show the resulting diff, and require approval before applying sandbox changes back to the selected repository. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "superseded",
+          "agent": null,
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Superseded 2026-08-05 by explicit user authorization for direct local repository execution rather than provider transfer. Replacement: local-coder-repository-access/use-native-local-shell-backend. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "use-native-sandbox-tools-for-coder",
+          "content": "Keep Coder as the existing top-level Deep Agent but replace the custom workspace command and file mutation tools with the documented sandbox backend's standard filesystem tools and execute tool; read_only mode must omit mutation and execution, while approval mode must interrupt on write, edit, and execute. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "superseded",
+          "agent": null,
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Superseded 2026-08-05 after the user explicitly selected the documented LocalShellBackend when the managed provider was unavailable. Replacement: local-coder-repository-access/use-native-local-shell-backend. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "propagate-coder-interrupts-natively",
+          "content": "Remove the custom nested approval replay loop and allow the compiled Coder subgraph's LangChain HITL interrupts to propagate natively through the parent LangGraph checkpoint using the same thread ID; preserve visible Jasper to coding to Jasper routing and return questions, blockers, rejections, and verified completion to Jasper. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "superseded",
+          "agent": null,
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Superseded 2026-08-05 only as part of the provider-sandbox plan; chained approval recovery remains tracked by recover-chained-coder-approvals/prevent-stale-approval-resubmission. Replacement access work: local-coder-repository-access/use-native-local-shell-backend. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-repository-sandbox-release-gate",
+          "content": "Verify filesystem escape denial, absence of host and credential access, normal shell commands, package installation, builds and tests, bounded long-running foreground execution and cancellation, chained approvals, rejection, restart and same-thread recovery, diff review and apply-back approval, visible Studio routing, and Coder to Jasper completion reporting; run focused tests, changed-file lint, full backend tests, frontend build, browser tests, and live smoke checks. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "superseded",
+          "agent": null,
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Superseded 2026-08-05 with the provider-sandbox plan. Replacement verification: local-coder-repository-access/verify-local-coder-repository-access. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "local-coder-repository-access",
+      "title": "Give Coder Direct Repository Access",
+      "created_at": "2026-08-05T03:23:03Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "use-native-local-shell-backend",
+          "content": "Give the top-level LangGraph Coding agent the documented Deep Agents LocalShellBackend in explicit approval mode, with native filesystem and execute tools rooted at the selected repository, normal dependency, test, build, and Git capability, and LangGraph human review for every mutation and command. Forward only the host SSH agent socket for Git authentication and never mount private key files. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T03:25:14Z",
+          "notes": "Approval mode now uses the documented Deep Agents LocalShellBackend with native write_file, edit_file, delete, and execute tools and LangGraph HITL review. Read-only mode remains unchanged. The custom executable allowlist is removed from the active Coding graph. Docker Desktop's SSH agent socket is forwarded without mounting private keys. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-local-coder-repository-access",
+          "content": "Verify native read, write, edit, delete, arbitrary selected-repository shell execution, dependency and test commands, working-directory rooting, LangGraph approve-edit-reject behavior, normal Git status, commit and current-branch push review, rejection of unapproved actions, restart wiring, and exact Coder-to-Jasper results. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Focused Coding, security, persistence, and event tests passed 55/55; the full backend suite passed 206/206; changed-file Ruff, JSON validation, and diff checks passed. The recreated Agent Server is healthy, its SSH agent socket is present, and local Git repository access passes. Remote Git authentication remains blocked because the forwarded host SSH agent currently reports no usable identity; no commit or push was attempted. Report unit and live results separately; do not perform a real commit or push without a specific user-authored repository change and approval. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

@@ -72,6 +72,7 @@ class CodingEventEmitter:
             "approved_edit_file",
             "write_file",
             "edit_file",
+            "delete",
         }:
             category = "file"
         self.emit(category, status, name=name, tool_call_id=tool_call_id)

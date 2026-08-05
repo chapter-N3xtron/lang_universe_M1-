@@ -31,6 +31,9 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
   const activeInterrupt = interrupts[activeInterruptIndex];
   const activeDescription =
     activeInterrupt?.value?.action_requests?.[0]?.description ?? "";
+  const activeInterruptKey = activeInterrupt
+    ? `${activeInterrupt.id ?? "interrupt"}:${JSON.stringify(activeInterrupt.value)}`
+    : "interrupt";
 
   const handleShowSidePanel = (
     showStateFlag: boolean,
@@ -57,7 +60,10 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
   }
 
   return (
-    <div className="flex h-full w-full flex-col rounded-2xl bg-gray-50 p-8 lg:flex-row">
+    <div
+      className="bg-card text-card-foreground mx-auto flex w-full max-w-3xl flex-col rounded-xl border p-4 shadow-sm sm:p-5"
+      data-agent-inbox-card
+    >
       {showSidePanel ? (
         <StateView
           handleShowSidePanel={handleShowSidePanel}
@@ -66,7 +72,7 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
           view={showState ? "state" : "description"}
         />
       ) : (
-        <div className="flex w-full flex-col gap-6">
+        <div className="flex w-full flex-col gap-3">
           {interrupts.length > 1 && (
             <div className="flex flex-wrap items-center gap-2">
               {interrupts.map((it, idx) => {
@@ -82,7 +88,7 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
                       "rounded-full border px-3 py-1 text-sm transition-colors",
                       idx === activeInterruptIndex
                         ? "border-primary bg-primary/10 text-primary"
-                        : "hover:border-primary hover:text-primary border-gray-300 bg-white text-gray-600",
+                        : "border-border bg-background text-muted-foreground hover:border-primary hover:text-primary",
                     )}
                   >
                     {title}
@@ -92,6 +98,7 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
             </div>
           )}
           <ThreadActionsView
+            key={activeInterruptKey}
             interrupt={activeInterrupt}
             handleShowSidePanel={handleShowSidePanel}
             showState={showState}

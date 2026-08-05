@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Interrupt } from "@langchain/langgraph-sdk";
 import { Button } from "@/components/ui/button";
 import { ThreadIdCopyable } from "./thread-id";
@@ -35,7 +35,9 @@ function ButtonGroup({
         variant="outline"
         className={cn(
           "rounded-l-md rounded-r-none border-r-[0px]",
-          showingState ? "text-black" : "bg-white",
+          showingState
+            ? "bg-accent text-accent-foreground"
+            : "bg-background text-foreground",
         )}
         size="sm"
         onClick={handleShowState}
@@ -46,7 +48,9 @@ function ButtonGroup({
         variant="outline"
         className={cn(
           "rounded-l-none rounded-r-md border-l-[0px]",
-          showingDescription ? "text-black" : "bg-white",
+          showingDescription
+            ? "bg-accent text-accent-foreground"
+            : "bg-background text-foreground",
         )}
         size="sm"
         onClick={handleShowDescription}
@@ -94,6 +98,7 @@ export function ThreadActionsView({
     Map<number, Decision>
   >(new Map());
   const [submittingAll, setSubmittingAll] = useState(false);
+  const submissionLock = useRef(false);
 
   const hitlValue = interrupt.value;
   const actionRequests = useMemo(
@@ -147,11 +152,6 @@ export function ThreadActionsView({
     interrupt: singleActionInterrupt,
   });
 
-  useEffect(() => {
-    setCurrentIndex(0);
-    setAddressedActions(new Map());
-  }, [interrupt]);
-
   const handleOpenInStudio = () => {
     if (!apiUrl) {
       toast.error("Error", {
@@ -167,15 +167,22 @@ export function ThreadActionsView({
     window.open(studioUrl, "_blank");
   };
 
-  const handleApproveAll = useCallback(() => {
-    if (!hasMultipleActions) return;
+  const handleApproveAll = useCallback(async () => {
+    if (!hasMultipleActions || submissionLock.current || stream.isLoading)
+      return;
 
+    submissionLock.current = true;
+    setSubmittingAll(true);
     try {
       const allDecisions: Decision[] = actionRequests.map(() => ({
         type: "approve",
       }));
 
-      stream.submit(
+      if (allDecisions.length !== actionRequests.length) {
+        throw new Error("Decision count does not match the current interrupt");
+      }
+
+      await stream.submit(
         {},
         {
           command: {
@@ -196,11 +203,15 @@ export function ThreadActionsView({
         closeButton: true,
         duration: 5000,
       });
+    } finally {
+      submissionLock.current = false;
+      setSubmittingAll(false);
     }
   }, [actionRequests, hasMultipleActions, stream]);
 
-  const handleSubmitAll = useCallback(() => {
-    if (!hasMultipleActions) return;
+  const handleSubmitAll = useCallback(async () => {
+    if (!hasMultipleActions || submissionLock.current || stream.isLoading)
+      return;
 
     if (addressedActions.size !== actionRequests.length) {
       toast.error("Error", {
@@ -212,8 +223,9 @@ export function ThreadActionsView({
       return;
     }
 
+    submissionLock.current = true;
+    setSubmittingAll(true);
     try {
-      setSubmittingAll(true);
       const allDecisions = actionRequests.map((_, index) => {
         const decision = addressedActions.get(index);
         if (!decision) {
@@ -222,7 +234,11 @@ export function ThreadActionsView({
         return decision;
       });
 
-      stream.submit(
+      if (allDecisions.length !== actionRequests.length) {
+        throw new Error("Decision count does not match the current interrupt");
+      }
+
+      await stream.submit(
         {},
         {
           command: {
@@ -245,6 +261,7 @@ export function ThreadActionsView({
         duration: 5000,
       });
     } finally {
+      submissionLock.current = false;
       setSubmittingAll(false);
     }
   }, [actionRequests, addressedActions, hasMultipleActions, stream]);
@@ -292,14 +309,15 @@ export function ThreadActionsView({
   };
 
   const currentTitle = getActionTitle(currentAction);
-  const actionsDisabled = loading || streaming || submittingAll;
+  const actionsDisabled =
+    loading || streaming || submittingAll || stream.isLoading;
   const hasAllDecisions =
     hasMultipleActions && addressedActions.size === actionRequests.length;
 
   if (!isValidHitlRequest(interrupt)) {
     return (
-      <div className="flex min-h-full w-full flex-col items-center justify-center rounded-2xl bg-gray-50/50 p-8">
-        <p className="text-sm text-gray-600">
+      <div className="bg-muted/50 flex w-full flex-col items-center justify-center rounded-xl p-4">
+        <p className="text-muted-foreground text-sm">
           Unable to render interrupt. The data provided is not in the expected
           HITL format.
         </p>
@@ -309,10 +327,10 @@ export function ThreadActionsView({
   const interruptValue = singleActionInterrupt.value as HITLRequest;
 
   return (
-    <div className="flex min-h-full w-full max-w-full flex-col gap-9">
+    <div className="flex w-full max-w-full flex-col gap-4">
       <div className="flex w-full flex-wrap items-center justify-between gap-3">
         <div className="flex items-center justify-start gap-3">
-          <p className="text-2xl tracking-tighter text-pretty">
+          <p className="text-lg font-semibold tracking-tight text-pretty">
             {hasMultipleActions
               ? `${currentTitle} (${currentIndex + 1}/${actionRequests.length})`
               : currentTitle}
@@ -324,7 +342,7 @@ export function ThreadActionsView({
             <Button
               size="sm"
               variant="outline"
-              className="flex items-center gap-1 bg-white"
+              className="bg-background flex items-center gap-1"
               onClick={handleOpenInStudio}
             >
               Studio
@@ -342,7 +360,8 @@ export function ThreadActionsView({
       <div className="flex w-full flex-row flex-wrap items-center justify-start gap-2">
         <Button
           variant="outline"
-          className="border-gray-500 bg-white font-normal text-gray-800"
+          size="sm"
+          className="border-border bg-background text-foreground font-normal"
           onClick={handleResolve}
           disabled={actionsDisabled}
         >
@@ -351,7 +370,8 @@ export function ThreadActionsView({
         {hasMultipleActions && allAllowApprove && (
           <Button
             variant="outline"
-            className="border-gray-500 bg-white font-normal text-gray-800"
+            size="sm"
+            className="border-border bg-background text-foreground font-normal"
             onClick={handleApproveAll}
             disabled={actionsDisabled}
           >
@@ -370,8 +390,8 @@ export function ThreadActionsView({
                 key={index}
                 onClick={() => setCurrentIndex(index)}
                 className={cn(
-                  "h-2 flex-1 rounded-full border transition-colors",
-                  "border-gray-300 bg-gray-200",
+                  "bg-muted h-1.5 flex-1 rounded-full border transition-colors",
+                  "border-border",
                   status === "approve" && "border-emerald-500 bg-emerald-200",
                   status === "reject" && "border-red-500 bg-red-200",
                   status === "edit" && "border-amber-500 bg-amber-200",
@@ -399,7 +419,7 @@ export function ThreadActionsView({
         setHasAddedResponse={setHasAddedResponse}
         setHasEdited={setHasEdited}
         handleSubmit={hasMultipleActions ? handleSaveDecision : handleSubmit}
-        isLoading={hasMultipleActions ? submittingAll : loading}
+        isLoading={hasMultipleActions ? actionsDisabled : loading}
         selectedSubmitType={selectedSubmitType}
       />
 
@@ -409,7 +429,7 @@ export function ThreadActionsView({
             <Button
               variant="outline"
               size="sm"
-              disabled={currentIndex === 0}
+              disabled={actionsDisabled || currentIndex === 0}
               onClick={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
             >
               Previous
@@ -417,7 +437,9 @@ export function ThreadActionsView({
             <Button
               variant="outline"
               size="sm"
-              disabled={currentIndex === actionRequests.length - 1}
+              disabled={
+                actionsDisabled || currentIndex === actionRequests.length - 1
+              }
               onClick={() =>
                 setCurrentIndex((prev) =>
                   Math.min(actionRequests.length - 1, prev + 1),
@@ -429,7 +451,8 @@ export function ThreadActionsView({
           </div>
           <Button
             variant="brand"
-            disabled={!hasAllDecisions || submittingAll}
+            size="sm"
+            disabled={!hasAllDecisions || actionsDisabled}
             onClick={handleSubmitAll}
           >
             {submittingAll

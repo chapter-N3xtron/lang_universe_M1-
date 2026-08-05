@@ -3,19 +3,20 @@ import json
 import operator
 import os
 from pathlib import Path
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph import START, StateGraph
+from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
 from src.agent_utils import get_conversation_history, get_user_query
 from src.coding_agent import create_coding_agent_graph
-from src.jasper_agent import STANDARD_SESSION_GREETING, create_jasper_graph
+from src.jasper_agent import STANDARD_SESSION_GREETING, call_jasper
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
-from src.research_agent import create_research_graph
+from src.research_agent import research_agent
 from src.session_catalog import record_session_projection
 
 
@@ -31,6 +32,7 @@ class State(TypedDict):
     coding_session_id: str
     coding_status: str
     coding_events: list[dict]
+    coding_task: str
     jasper_structured_response: dict
     visual_artifacts: list[dict]
     layout_suggestion: dict | None
@@ -45,6 +47,8 @@ class State(TypedDict):
     session_event: str
     session_opened: bool
     session_opening_version: str
+    research_task: str
+    session_evidence: Annotated[list[dict], operator.add]
 
 
 TODOS_FILE = os.getenv(
@@ -102,7 +106,16 @@ Rules:
 Reply with ONLY the specialist name (jasper, coding, research, magic-coder) or "done". No other text."""
 
 
-def supervisor_node(state: State):
+def supervisor_node(
+    state: State,
+) -> (
+    Command[
+        Literal[
+            "session_opening", "approval", "jasper", "coding", "research", "magic-coder"
+        ]
+    ]
+    | dict
+):
     todos_data = _load_todos()
     messages = state["messages"]
     history = get_conversation_history(messages)
@@ -207,7 +220,9 @@ def _is_approved(resume_value) -> bool:
     return bool(resume_value)
 
 
-def approval_node(state: State):
+def approval_node(
+    state: State,
+) -> Command[Literal["jasper", "coding", "research", "magic-coder"]] | dict:
     agent = state.get("pending_agent", "")
     approved = interrupt(
         {
@@ -256,6 +271,8 @@ def _base_messages_to_dicts(messages: list) -> list[dict]:
         msg_type = getattr(m, "type", "")
         role = role_map.get(msg_type, msg_type)
         entry = {"role": role, "content": getattr(m, "content", "")}
+        if getattr(m, "name", None):
+            entry["name"] = m.name
         if role == "assistant" and hasattr(m, "tool_calls") and m.tool_calls:
             entry["tool_calls"] = m.tool_calls
         if role == "assistant" and getattr(m, "additional_kwargs", None):
@@ -269,75 +286,140 @@ def _base_messages_to_dicts(messages: list) -> list[dict]:
 def create_chat_ui():
     graph = StateGraph(State)
 
-    jasper_app = create_jasper_graph()
     coding_app = create_coding_agent_graph()
-    research_app = create_research_graph()
     magic_coder_app = create_magic_coder_graph()
 
-    async def run_jasper(state):
-        input_count = len(state["messages"])
-        result = await jasper_app.ainvoke(
+    async def run_jasper(
+        state, config: RunnableConfig
+    ) -> Command[Literal["coding", "research", "record_session"]]:
+        configurable = config.get("configurable", {})
+        result = await call_jasper(
             {
                 "messages": state["messages"],
                 "todos": state.get("todos", []),
                 "model": state.get("model", ""),
-                "workspace": state.get("workspace", os.getcwd()),
-                "execution_mode": state.get(
-                    "execution_mode", state.get("mode", "read_only")
-                ),
-                "thread_identity": state.get("thread_identity", ""),
+                "workspace": state.get("workspace") or os.getcwd(),
+                "execution_mode": state.get("execution_mode") or state.get("mode"),
+                "thread_identity": state.get("thread_identity")
+                or configurable.get("thread_id", ""),
                 "user_identity": state.get("user_identity", "anonymous"),
                 "coding_session_id": state.get("coding_session_id", ""),
+                "session_evidence": state.get("session_evidence", []),
             }
         )
-        new_messages = result["messages"][input_count:]
-        outer_messages = _base_messages_to_dicts(new_messages)
-        return {
-            "messages": outer_messages,
-            "jasper_structured_response": result.get("jasper_structured_response", {}),
-            "visual_artifacts": result.get("visual_artifacts", []),
-            "layout_suggestion": result.get("layout_suggestion"),
-            "jasper_strategy": result.get("jasper_strategy", "text"),
-            "jasper_diagnostic": result.get("jasper_diagnostic"),
-        }
+        return Command(
+            goto="record_session",
+            update={
+                **result,
+                "messages": _base_messages_to_dicts(result.get("messages", [])),
+            },
+        )
 
-    async def run_coding(state, config: RunnableConfig):
-        input_count = len(state["messages"])
+    async def run_coding(state, config: RunnableConfig) -> Command[Literal["jasper"]]:
         configurable = config.get("configurable", {})
-        result = await coding_app.ainvoke(
+        handed_off_task = (state.get("coding_task") or "").strip()
+        task = handed_off_task or get_user_query(state.get("messages", []))
+        execution_mode = state.get("execution_mode") or state.get("mode")
+        if handed_off_task and execution_mode not in {"read_only", "approval"}:
+            result = {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "The coding handoff is blocked because no explicit "
+                            "execution mode was selected."
+                        ),
+                    }
+                ],
+                "coding_status": "error",
+                "coding_events": [],
+            }
+        else:
+            task_messages = [HumanMessage(content=task)]
+            result = await coding_app.ainvoke(
+                {
+                    "messages": task_messages,
+                    "workspace": state.get("workspace"),
+                    "execution_mode": execution_mode or "read_only",
+                    "model": state.get("model"),
+                    "thread_identity": state.get("thread_identity")
+                    or configurable.get("thread_id", ""),
+                    "user_identity": state.get("user_identity")
+                    or configurable.get("user_id")
+                    or configurable.get("owner_id")
+                    or "anonymous",
+                    "coding_session_id": state.get("coding_session_id") or "",
+                },
+                config=config,
+            )
+            result["messages"] = result.get("messages", [])[len(task_messages) :]
+        final_messages = [
+            message
+            for message in result.get("messages", [])
+            if (
+                (message.get("role") if isinstance(message, dict) else message.type)
+                in {"assistant", "ai"}
+                and not (
+                    message.get("tool_calls", [])
+                    if isinstance(message, dict)
+                    else getattr(message, "tool_calls", [])
+                )
+            )
+        ][-1:]
+        coding_status = result.get("coding_status", "error")
+        if not final_messages:
+            final_messages = [
+                {
+                    "role": "assistant",
+                    "content": (
+                        "The coding agent did not return a final result "
+                        "(missing_final_result)."
+                    ),
+                }
+            ]
+            coding_status = "error"
+        outer_messages = _base_messages_to_dicts(final_messages)
+        for message in outer_messages:
+            message["name"] = "coding"
+        update = {
+            "messages": outer_messages,
+            "coding_task": "",
+            "coding_session_id": result.get("coding_session_id", ""),
+            "coding_status": coding_status,
+            "coding_events": result.get("coding_events", []),
+        }
+        return Command(goto="jasper", update=update)
+
+    async def run_research(
+        state, config: RunnableConfig, runtime: Runtime
+    ) -> Command[Literal["jasper"]] | dict:
+        configurable = config.get("configurable", {})
+        messages = (
+            state["messages"][-2:] if state.get("research_task") else state["messages"]
+        )
+        result = await research_agent(
             {
-                "messages": state["messages"],
-                "workspace": state.get("workspace"),
-                "execution_mode": state.get(
-                    "execution_mode", state.get("mode", "read_only")
-                ),
-                "model": state.get("model"),
+                "messages": messages,
+                "model": state.get("model", ""),
+                "workspace": state.get("workspace") or os.getcwd(),
                 "thread_identity": state.get("thread_identity")
                 or configurable.get("thread_id", ""),
                 "user_identity": state.get("user_identity")
                 or configurable.get("user_id")
                 or configurable.get("owner_id")
                 or "anonymous",
-                "coding_session_id": state.get("coding_session_id") or "",
+                "session_evidence": state.get("session_evidence", []),
             },
-            config=config,
+            runtime,
         )
-        new_messages = result["messages"][input_count:]
         update = {
-            "messages": _base_messages_to_dicts(new_messages),
-            "coding_session_id": result.get("coding_session_id", ""),
-            "coding_status": result.get("coding_status", ""),
-            "coding_events": result.get("coding_events", []),
+            "messages": _base_messages_to_dicts(result.get("messages", [])[-1:]),
+            "research_task": "",
+            "session_evidence": result.get("session_evidence", []),
         }
+        if state.get("research_task"):
+            return Command(goto="jasper", update=update)
         return update
-
-    async def run_research(state):
-        input_count = len(state["messages"])
-        result = await research_app.ainvoke(
-            {"messages": state["messages"], "model": state.get("model", "")}
-        )
-        new_messages = result["messages"][input_count:]
-        return {"messages": _base_messages_to_dicts(new_messages)}
 
     async def run_magic_coder_node(state):
         input_count = len(state["messages"])
@@ -372,9 +454,9 @@ def create_chat_ui():
     graph.add_edge(START, "supervisor")
     graph.add_edge("session_opening", "record_session")
 
-    for specialist in ["jasper", "coding", "research", "magic-coder"]:
+    for specialist in ["research", "magic-coder"]:
         graph.add_edge(specialist, "record_session")
-    graph.add_edge("record_session", "supervisor")
+    graph.add_edge("record_session", END)
 
     return graph
 

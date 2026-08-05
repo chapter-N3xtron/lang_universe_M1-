@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Decision, DecisionWithEdits, HITLRequest, SubmitType } from "../types";
+import { DecisionWithEdits, HITLRequest, SubmitType } from "../types";
 import { buildDecisionFromState, createDefaultHumanResponse } from "../utils";
 
 interface UseInterruptedActionsInput {
@@ -54,6 +54,7 @@ export default function useInterruptedActions({
   const [hasAddedResponse, setHasAddedResponse] = useState(false);
   const [approveAllowed, setApproveAllowed] = useState(false);
   const initialHumanInterruptEditValue = useRef<Record<string, string>>({});
+  const submissionLock = useRef(false);
 
   useEffect(() => {
     const hitlValue = interrupt.value as HITLRequest | undefined;
@@ -84,29 +85,12 @@ export default function useInterruptedActions({
     }
   }, [interrupt]);
 
-  const resumeRun = (decisions: Decision[]): boolean => {
-    try {
-      thread.submit(
-        {},
-        {
-          command: {
-            resume: {
-              decisions,
-            },
-          },
-        },
-      );
-      return true;
-    } catch (error) {
-      console.error("Error sending human response", error);
-      return false;
-    }
-  };
-
   const handleSubmit = async (
     e: React.MouseEvent<HTMLButtonElement, MouseEvent> | KeyboardEvent,
   ) => {
     e.preventDefault();
+    if (submissionLock.current || thread.isLoading) return;
+
     const { decision, error } = buildDecisionFromState(
       humanResponse,
       selectedSubmitType,
@@ -134,16 +118,21 @@ export default function useInterruptedActions({
 
     let errorOccurred = false;
     initialHumanInterruptEditValue.current = {};
+    submissionLock.current = true;
 
     try {
       setLoading(true);
       setStreaming(true);
-
-      const resumedSuccessfully = resumeRun([decision]);
-      if (!resumedSuccessfully) {
-        errorOccurred = true;
-        return;
-      }
+      await thread.submit(
+        {},
+        {
+          command: {
+            resume: {
+              decisions: [decision],
+            },
+          },
+        },
+      );
 
       toast("Success", {
         description: "Response submitted successfully.",
@@ -172,6 +161,7 @@ export default function useInterruptedActions({
         });
       }
     } finally {
+      submissionLock.current = false;
       setStreaming(false);
       setLoading(false);
       if (errorOccurred) {
@@ -184,11 +174,14 @@ export default function useInterruptedActions({
     e: React.MouseEvent<HTMLButtonElement, MouseEvent>,
   ) => {
     e.preventDefault();
+    if (submissionLock.current || thread.isLoading) return;
+
+    submissionLock.current = true;
     setLoading(true);
     initialHumanInterruptEditValue.current = {};
 
     try {
-      thread.submit(
+      await thread.submit(
         {},
         {
           command: {
@@ -210,6 +203,7 @@ export default function useInterruptedActions({
         duration: 3000,
       });
     } finally {
+      submissionLock.current = false;
       setLoading(false);
     }
   };

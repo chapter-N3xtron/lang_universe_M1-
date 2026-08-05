@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
-import { GitFork, Library, LogOut, Workflow } from "lucide-react";
+import { BookOpen, GitFork, Library, LogOut, Workflow } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ConceptMapArtifact } from "@/lib/visual/jasper-response.generated";
 import { validateJasperResponse } from "@/lib/visual/validate";
@@ -27,9 +27,14 @@ import {
 } from "@/components/ui/dialog";
 import { ConceptMapRenderer } from "./concept-map-renderer";
 import { SessionLibrary } from "./session-library";
+import { SessionSources } from "./session-sources";
 import { setWorkspaceModeForThread } from "./use-workspace-preferences";
 
-const viewParser = parseAsStringLiteral(["library", "session"] as const);
+const viewParser = parseAsStringLiteral([
+  "library",
+  "session",
+  "sources",
+] as const);
 const SESSION_REMINDER_MINUTES = Number(
   process.env.NEXT_PUBLIC_SESSION_REMINDER_MINUTES ?? 90,
 );
@@ -74,17 +79,23 @@ export function SessionVisualPane({
     enabled: Boolean(apiUrl && threadId && effectiveView === "session"),
   });
   const closeMutation = useMutation({
-    mutationFn: () => closeSession(
-      apiUrl,
-      threadId!,
-      reviewSummary.trim(),
-      reviewTentPoles.split("\n").map((line) => line.trim()).filter(Boolean),
-      authScheme,
-    ),
+    mutationFn: () =>
+      closeSession(
+        apiUrl,
+        threadId!,
+        reviewSummary.trim(),
+        reviewTentPoles
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+        authScheme,
+      ),
     onSuccess: async () => {
       setCloseOpen(false);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["session-detail", apiUrl, threadId] }),
+        queryClient.invalidateQueries({
+          queryKey: ["session-detail", apiUrl, threadId],
+        }),
         queryClient.invalidateQueries({ queryKey: ["session-catalog"] }),
       ]);
     },
@@ -108,7 +119,9 @@ export function SessionVisualPane({
         diagnostic: null,
       });
       const artifact = validated.valid ? validated.value.artifacts?.[0] : null;
-      return artifact?.renderer === "react_flow" ? [{ ...entry, artifact }] : [];
+      return artifact?.renderer === "react_flow"
+        ? [{ ...entry, artifact }]
+        : [];
     });
   }, [artifactsQuery.data]);
   const selectedArtifact =
@@ -116,6 +129,18 @@ export function SessionVisualPane({
       ?.artifact ??
     artifacts.at(-1)?.artifact ??
     latestArtifact;
+  const sourceUsage = useMemo(() => {
+    const usage = new Map<string, string[]>();
+    for (const entry of artifacts) {
+      for (const source of entry.artifact.payload.sources) {
+        usage.set(source.id, [
+          ...(usage.get(source.id) ?? []),
+          entry.artifact.title,
+        ]);
+      }
+    }
+    return usage;
+  }, [artifacts]);
 
   useEffect(() => {
     if (selectedArtifact?.artifact_id && !selectedArtifactId) {
@@ -126,7 +151,9 @@ export function SessionVisualPane({
   useEffect(() => {
     setReminderDismissed(
       threadId
-        ? window.localStorage.getItem(`session-reminder-disabled:${threadId}`) === "true"
+        ? window.localStorage.getItem(
+            `session-reminder-disabled:${threadId}`,
+          ) === "true"
         : false,
     );
   }, [threadId]);
@@ -164,6 +191,17 @@ export function SessionVisualPane({
         >
           <Library className="size-4" /> All sessions
         </Button>
+        <Button
+          size="sm"
+          variant={effectiveView === "sources" ? "secondary" : "outline"}
+          disabled={!threadId}
+          onClick={() =>
+            setView(effectiveView === "sources" ? "session" : "sources")
+          }
+        >
+          <BookOpen className="size-4" />{" "}
+          {effectiveView === "sources" ? "Visuals" : "Sources"}
+        </Button>
         <h2 className="truncate text-sm font-semibold">
           {selectedArtifact?.title ?? legacyTitle ?? "Session visuals"}
         </h2>
@@ -176,7 +214,10 @@ export function SessionVisualPane({
           >
             <GitFork className="size-4" /> Fork as new session
           </Button>
-          <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
+          <Dialog
+            open={closeOpen}
+            onOpenChange={setCloseOpen}
+          >
             <DialogTrigger asChild>
               <Button
                 size="sm"
@@ -191,82 +232,172 @@ export function SessionVisualPane({
               <DialogHeader>
                 <DialogTitle>Review this session before closing</DialogTitle>
                 <DialogDescription>
-                  This records your reviewed summary and tent poles. It does not commit or push repository changes.
+                  This records your reviewed summary and tent poles. It does not
+                  commit or push repository changes.
                 </DialogDescription>
               </DialogHeader>
               <label className="space-y-2 text-sm font-medium">
                 Session summary
-                <Textarea value={reviewSummary} onChange={(event) => setReviewSummary(event.target.value)} rows={7} />
+                <Textarea
+                  value={reviewSummary}
+                  onChange={(event) => setReviewSummary(event.target.value)}
+                  rows={7}
+                />
               </label>
               <label className="space-y-2 text-sm font-medium">
                 Tent poles, one per line
-                <Textarea value={reviewTentPoles} onChange={(event) => setReviewTentPoles(event.target.value)} rows={6} />
+                <Textarea
+                  value={reviewTentPoles}
+                  onChange={(event) => setReviewTentPoles(event.target.value)}
+                  rows={6}
+                />
               </label>
-              {closeMutation.error && <p role="alert" className="text-destructive text-sm">{closeMutation.error.message}</p>}
+              {closeMutation.error && (
+                <p
+                  role="alert"
+                  className="text-destructive text-sm"
+                >
+                  {closeMutation.error.message}
+                </p>
+              )}
               <DialogFooter>
-                <DialogClose asChild><Button variant="outline">Keep open</Button></DialogClose>
-                <Button disabled={closeMutation.isPending} onClick={() => closeMutation.mutate()}>Save review and close</Button>
+                <DialogClose asChild>
+                  <Button variant="outline">Keep open</Button>
+                </DialogClose>
+                <Button
+                  disabled={closeMutation.isPending}
+                  onClick={() => closeMutation.mutate()}
+                >
+                  Save review and close
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
       </header>
-      {detailQuery.data?.status === "open" && detailQuery.data.active_minutes >= SESSION_REMINDER_MINUTES && !reminderDismissed && (
-        <div className="bg-muted/40 flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm" role="status">
-          <span>You have about {Math.floor(detailQuery.data.active_minutes / 60)} observed active hours here. What would serve you now?</span>
-          <Button size="sm" variant="outline" onClick={() => setReminderDismissed(true)}>Break</Button>
-          <Button size="sm" variant="outline" onClick={beginCloseReview}>Close</Button>
-          <Button size="sm" variant="outline" onClick={() => setReminderDismissed(true)}>Continue</Button>
-          <Button size="sm" variant="ghost" onClick={() => {
-            if (threadId) window.localStorage.setItem(`session-reminder-disabled:${threadId}`, "true");
-            setReminderDismissed(true);
-          }}>Disable this reminder</Button>
-        </div>
-      )}
+      {detailQuery.data?.status === "open" &&
+        detailQuery.data.active_minutes >= SESSION_REMINDER_MINUTES &&
+        !reminderDismissed && (
+          <div
+            className="bg-muted/40 flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm"
+            role="status"
+          >
+            <span>
+              You have about {Math.floor(detailQuery.data.active_minutes / 60)}{" "}
+              observed active hours here. What would serve you now?
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setReminderDismissed(true)}
+            >
+              Break
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={beginCloseReview}
+            >
+              Close
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setReminderDismissed(true)}
+            >
+              Continue
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (threadId)
+                  window.localStorage.setItem(
+                    `session-reminder-disabled:${threadId}`,
+                    "true",
+                  );
+                setReminderDismissed(true);
+              }}
+            >
+              Disable this reminder
+            </Button>
+          </div>
+        )}
       {(forkMutation.error || detailQuery.error) && (
-        <p role="alert" className="text-destructive border-b px-4 py-2 text-sm">
+        <p
+          role="alert"
+          className="text-destructive border-b px-4 py-2 text-sm"
+        >
           {(forkMutation.error ?? detailQuery.error)?.message}
         </p>
       )}
-      <div className="flex min-h-0 flex-1">
-        {artifacts.length > 0 && (
-          <nav className="w-48 shrink-0 overflow-y-auto border-r p-2" aria-label="Session visual timeline">
-            <p className="text-muted-foreground px-2 py-1 text-xs font-medium uppercase">Visual timeline</p>
-            {artifacts.map((entry, index) => (
-              <Button
-                key={entry.artifact.artifact_id}
-                variant={entry.artifact.artifact_id === selectedArtifact?.artifact_id ? "secondary" : "ghost"}
-                className="mb-1 h-auto w-full justify-start whitespace-normal py-2 text-left"
-                onClick={() =>
-                  setSelectedArtifactId(entry.artifact.artifact_id ?? null)
-                }
-              >
-                <span>
-                  <span className="block text-xs">{index + 1}. {entry.artifact.title}</span>
-                  <span className="text-muted-foreground block text-[10px]">{entry.relationship.replace("_", " ")}</span>
-                </span>
-              </Button>
-            ))}
-          </nav>
-        )}
-        <div className="relative min-w-0 flex-1">
-          {selectedArtifact ? (
-            <ConceptMapRenderer artifact={selectedArtifact} selectedVoice={selectedVoice} />
-          ) : legacyActive ? (
-            legacyContent
-          ) : (
-            <div className="flex h-full items-center justify-center p-8 text-center">
-              <div className="bg-muted/30 max-w-md rounded-2xl border border-dashed p-8">
-                <Workflow className="text-muted-foreground mx-auto mb-4 size-9" />
-                <h3 className="font-medium">No saved visualization in this session</h3>
-                <p className="text-muted-foreground mt-2 text-sm leading-6">
-                  Ask Jasper for a grounded visual, or return to All sessions to review other knowledge work.
-                </p>
-              </div>
-            </div>
+      {effectiveView === "sources" && threadId ? (
+        <SessionSources
+          apiUrl={apiUrl}
+          authScheme={authScheme}
+          threadId={threadId}
+          usage={sourceUsage}
+        />
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          {artifacts.length > 0 && (
+            <nav
+              className="w-48 shrink-0 overflow-y-auto border-r p-2"
+              aria-label="Session visual timeline"
+            >
+              <p className="text-muted-foreground px-2 py-1 text-xs font-medium uppercase">
+                Visual timeline
+              </p>
+              {artifacts.map((entry, index) => (
+                <Button
+                  key={entry.artifact.artifact_id}
+                  variant={
+                    entry.artifact.artifact_id === selectedArtifact?.artifact_id
+                      ? "secondary"
+                      : "ghost"
+                  }
+                  className="mb-1 h-auto w-full justify-start py-2 text-left whitespace-normal"
+                  onClick={() =>
+                    setSelectedArtifactId(entry.artifact.artifact_id ?? null)
+                  }
+                >
+                  <span>
+                    <span className="block text-xs">
+                      {index + 1}. {entry.artifact.title}
+                    </span>
+                    <span className="text-muted-foreground block text-[10px]">
+                      {entry.relationship.replace("_", " ")}
+                    </span>
+                  </span>
+                </Button>
+              ))}
+            </nav>
           )}
+          <div className="relative min-w-0 flex-1">
+            {selectedArtifact ? (
+              <ConceptMapRenderer
+                artifact={selectedArtifact}
+                selectedVoice={selectedVoice}
+              />
+            ) : legacyActive ? (
+              legacyContent
+            ) : (
+              <div className="flex h-full items-center justify-center p-8 text-center">
+                <div className="bg-muted/30 max-w-md rounded-2xl border border-dashed p-8">
+                  <Workflow className="text-muted-foreground mx-auto mb-4 size-9" />
+                  <h3 className="font-medium">
+                    No saved visualization in this session
+                  </h3>
+                  <p className="text-muted-foreground mt-2 text-sm leading-6">
+                    Ask Jasper for a grounded visual, or return to All sessions
+                    to review other knowledge work.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }

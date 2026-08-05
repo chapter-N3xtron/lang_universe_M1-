@@ -54,6 +54,31 @@ def _clear_src_modules():
         sys.modules.pop(key, None)
 
 
+def test_compiled_graph_declares_visible_jasper_coding_handoff_routes():
+    _clear_src_modules()
+    from src.chat_ui import create_chat_ui
+
+    graph = _compile(create_chat_ui()).get_graph()
+    edges = {(edge.source, edge.target) for edge in graph.edges}
+
+    assert ("jasper", "coding") in edges
+    assert ("coding", "jasper") in edges
+    assert ("jasper", "record_session") in edges
+    assert ("record_session", "__end__") in edges
+
+
+def test_compiled_graph_declares_visible_jasper_research_handoff_routes():
+    _clear_src_modules()
+    from src.chat_ui import create_chat_ui
+
+    graph = _compile(create_chat_ui()).get_graph()
+    edges = {(edge.source, edge.target) for edge in graph.edges}
+
+    assert ("jasper", "research") in edges
+    assert ("research", "jasper") in edges
+    assert ("jasper", "record_session") in edges
+
+
 def test_new_session_opening_is_canonical_and_model_free():
     from src import chat_ui
     from src.jasper_agent import STANDARD_SESSION_GREETING
@@ -279,50 +304,13 @@ def test_supervisor_done_falls_back_to_jasper():
 def test_jasper_visual_response_survives_outer_graph_state():
     """Structured artifacts use persisted LangGraph state, not a side channel."""
 
-    class FakeJasperApp:
-        async def ainvoke(self, state):
-            return {
-                "messages": [
-                    *state["messages"],
-                    AIMessage(id="jasper-visual-1", content="Here is the flow."),
-                ],
-                "jasper_structured_response": {
-                    "version": 1,
-                    "voice_text": "Here is the flow.",
-                    "artifacts": [
-                        {
-                            "renderer": "react_flow",
-                            "artifact_id": "flow-1",
-                            "title": "Request flow",
-                            "alt_text": "Input flows to output.",
-                            "source_message_id": "jasper-visual-1",
-                            "payload": {
-                                "nodes": [
-                                    {"id": "input", "label": "Input", "kind": "input"},
-                                    {
-                                        "id": "output",
-                                        "label": "Output",
-                                        "kind": "output",
-                                    },
-                                ],
-                                "edges": [
-                                    {
-                                        "source": "input",
-                                        "target": "output",
-                                        "relation": "flows_to",
-                                    }
-                                ],
-                                "direction": "left_to_right",
-                            },
-                        }
-                    ],
-                    "layout_suggestion": {
-                        "mode": "split",
-                        "reason": "See the flow beside the explanation.",
-                    },
-                    "diagnostic": None,
-                },
-                "visual_artifacts": [
+    async def fake_call_jasper(state):
+        return {
+            "messages": [AIMessage(id="jasper-visual-1", content="Here is the flow.")],
+            "jasper_structured_response": {
+                "version": 1,
+                "voice_text": "Here is the flow.",
+                "artifacts": [
                     {
                         "renderer": "react_flow",
                         "artifact_id": "flow-1",
@@ -330,8 +318,21 @@ def test_jasper_visual_response_survives_outer_graph_state():
                         "alt_text": "Input flows to output.",
                         "source_message_id": "jasper-visual-1",
                         "payload": {
-                            "nodes": [{"id": "input", "label": "Input"}],
-                            "edges": [],
+                            "nodes": [
+                                {"id": "input", "label": "Input", "kind": "input"},
+                                {
+                                    "id": "output",
+                                    "label": "Output",
+                                    "kind": "output",
+                                },
+                            ],
+                            "edges": [
+                                {
+                                    "source": "input",
+                                    "target": "output",
+                                    "relation": "flows_to",
+                                }
+                            ],
                             "direction": "left_to_right",
                         },
                     }
@@ -340,12 +341,32 @@ def test_jasper_visual_response_survives_outer_graph_state():
                     "mode": "split",
                     "reason": "See the flow beside the explanation.",
                 },
-                "jasper_strategy": "two_pass",
-                "jasper_diagnostic": None,
-            }
+                "diagnostic": None,
+            },
+            "visual_artifacts": [
+                {
+                    "renderer": "react_flow",
+                    "artifact_id": "flow-1",
+                    "title": "Request flow",
+                    "alt_text": "Input flows to output.",
+                    "source_message_id": "jasper-visual-1",
+                    "payload": {
+                        "nodes": [{"id": "input", "label": "Input"}],
+                        "edges": [],
+                        "direction": "left_to_right",
+                    },
+                }
+            ],
+            "layout_suggestion": {
+                "mode": "split",
+                "reason": "See the flow beside the explanation.",
+            },
+            "jasper_strategy": "two_pass",
+            "jasper_diagnostic": None,
+        }
 
     _clear_src_modules()
-    with patch("src.jasper_agent.create_jasper_graph", return_value=FakeJasperApp()):
+    with patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper):
         from src.chat_ui import create_chat_ui
 
         app = _compile(create_chat_ui())
@@ -376,19 +397,15 @@ def test_jasper_visual_response_survives_outer_graph_state():
 
 
 def test_explicit_jasper_selection_stays_sticky_across_turns():
-    class FakeJasperApp:
-        async def ainvoke(self, state):
-            user_text = state["messages"][-1]["content"]
-            return {
-                "messages": [
-                    *state["messages"],
-                    AIMessage(content=f"Jasper handled: {user_text}"),
-                ],
-                "visual_artifacts": [],
-            }
+    async def fake_call_jasper(state):
+        user_text = state["messages"][-1]["content"]
+        return {
+            "messages": [AIMessage(content=f"Jasper handled: {user_text}")],
+            "visual_artifacts": [],
+        }
 
     _clear_src_modules()
-    with patch("src.jasper_agent.create_jasper_graph", return_value=FakeJasperApp()):
+    with patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper):
         from src.chat_ui import create_chat_ui
 
         app = _compile(create_chat_ui())
@@ -418,6 +435,157 @@ def test_explicit_jasper_selection_stays_sticky_across_turns():
     decisions = [entry["decision"] for entry in second["decision_log"]]
     assert decisions.count("route_to_jasper") == 2
     assert "route_to_magic-coder" not in decisions
+
+
+def test_jasper_passes_selected_workspace_and_langgraph_thread_to_coding():
+    captured = []
+
+    async def fake_call_jasper(state):
+        captured.append(state)
+        return {
+            "messages": [AIMessage(content="Jasper handled the request.")],
+            "visual_artifacts": [],
+        }
+
+    _clear_src_modules()
+    with patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper):
+        from src.chat_ui import create_chat_ui
+
+        app = _compile(create_chat_ui())
+        asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [{"role": "user", "content": "Use Coding"}],
+                    "workspace": "/selected/workspace",
+                    "target_agent": "jasper",
+                    "mode": "read_only",
+                    "model": "ollama/test-model",
+                },
+                config={"configurable": {"thread_id": "jasper-coding-thread"}},
+            )
+        )
+
+    assert captured[0]["workspace"] == "/selected/workspace"
+    assert captured[0]["thread_identity"] == "jasper-coding-thread"
+
+
+def test_coding_receives_explicit_task_and_returns_named_result_to_jasper(tmp_path):
+    coding_inputs = []
+    jasper_inputs = []
+
+    class FakeCodingApp:
+        async def ainvoke(self, state, config=None):
+            coding_inputs.append((state, config))
+            return {
+                "messages": [
+                    *state["messages"],
+                    AIMessage(content="Coder completed and verified the task."),
+                ],
+                "coding_session_id": "coding-session-1",
+                "coding_status": "completed",
+                "coding_events": [],
+            }
+
+    async def fake_call_jasper(state):
+        jasper_inputs.append(state)
+        return {
+            "messages": [AIMessage(content="Coder completed and verified the task.")],
+            "visual_artifacts": [],
+        }
+
+    _clear_src_modules()
+    with (
+        patch("src.chat_ui.create_coding_agent_graph", return_value=FakeCodingApp()),
+        patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper),
+    ):
+        from src.chat_ui import create_chat_ui
+
+        app = _compile(create_chat_ui())
+        result = asyncio.run(
+            app.ainvoke(
+                {
+                    "messages": [{"role": "user", "content": "Use Coder"}],
+                    "coding_task": "Install OpenSpec in the selected workspace",
+                    "workspace": str(tmp_path),
+                    "target_agent": "coding",
+                    "execution_mode": "approval",
+                    "model": "ollama/test-model",
+                    "user_identity": "test-user",
+                },
+                config={"configurable": {"thread_id": "coding-return-thread"}},
+            )
+        )
+
+    coding_state, coding_config = coding_inputs[0]
+    assert len(coding_state["messages"]) == 1
+    assert coding_state["messages"][0].type == "human"
+    assert coding_state["messages"][0].content == (
+        "Install OpenSpec in the selected workspace"
+    )
+    assert coding_state["workspace"] == str(tmp_path)
+    assert coding_state["execution_mode"] == "approval"
+    assert coding_state["model"] == "ollama/test-model"
+    assert coding_state["thread_identity"] == "coding-return-thread"
+    assert coding_state["user_identity"] == "test-user"
+    assert coding_config["configurable"]["thread_id"] == "coding-return-thread"
+    assert jasper_inputs[0]["messages"][-1]["name"] == "coding"
+    assert jasper_inputs[0]["messages"][-1]["content"] == (
+        "Coder completed and verified the task."
+    )
+    assert result["messages"][-1]["content"] == (
+        "Coder completed and verified the task."
+    )
+    assert result["coding_task"] == ""
+    assert result["coding_status"] == "completed"
+
+
+def test_direct_coding_uses_latest_user_task_and_fails_closed_without_result(
+    tmp_path,
+):
+    coding_inputs = []
+    jasper_inputs = []
+
+    class FakeCodingApp:
+        async def ainvoke(self, state, config=None):
+            coding_inputs.append(state)
+            return {
+                "messages": list(state["messages"]),
+                "coding_status": "completed",
+                "coding_events": [],
+            }
+
+    async def fake_call_jasper(state):
+        jasper_inputs.append(state)
+        return {
+            "messages": [AIMessage(content=state["messages"][-1]["content"])],
+            "visual_artifacts": [],
+        }
+
+    _clear_src_modules()
+    with (
+        patch("src.chat_ui.create_coding_agent_graph", return_value=FakeCodingApp()),
+        patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper),
+    ):
+        from src.chat_ui import create_chat_ui
+
+        result = asyncio.run(
+            _compile(create_chat_ui()).ainvoke(
+                {
+                    "messages": [
+                        {"role": "user", "content": "Inspect the selected workspace"}
+                    ],
+                    "workspace": str(tmp_path),
+                    "target_agent": "coding",
+                    "execution_mode": "read_only",
+                },
+                config={"configurable": {"thread_id": "direct-coding-thread"}},
+            )
+        )
+
+    assert coding_inputs[0]["messages"][0].content == "Inspect the selected workspace"
+    assert jasper_inputs[0]["messages"][-1]["name"] == "coding"
+    assert "missing_final_result" in jasper_inputs[0]["messages"][-1]["content"]
+    assert result["coding_status"] == "error"
 
 
 def test_auto_concept_map_routing_is_owned_by_jasper_without_model_guessing():

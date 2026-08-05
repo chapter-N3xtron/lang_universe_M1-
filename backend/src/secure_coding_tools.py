@@ -33,6 +33,17 @@ _ALLOWED_GIT_SUBCOMMANDS = {
     "status",
 }
 _ALLOWED_SCRIPT_NAMES = {"build", "lint", "test", "typecheck"}
+_ALLOWED_OPENSPEC_TOOLS = {"opencode"}
+_DENIED_NODE_INSTALL_OPTIONS = {
+    "--prefix",
+}
+_DENIED_PYTHON_INSTALL_OPTIONS = {
+    "--break-system-packages",
+    "--prefix",
+    "--root",
+    "--target",
+    "--user",
+}
 _DENIED_GIT_OPTIONS = {
     "--ext-diff",
     "--output",
@@ -173,17 +184,68 @@ def validate_command_argv(argv: list[str]) -> list[str]:
         if argv[1] == "format" and "--check" not in argv:
             raise CodingPolicyError("command_denied")
     elif executable == "python":
-        if argv[1:3] not in (["-m", "pytest"], ["-m", "compileall"]):
+        python_args = argv[1:]
+        if python_args in (["--version"], ["-V"]) or python_args == [
+            "-m",
+            "venv",
+            ".venv",
+        ]:
+            pass
+        elif python_args[:3] == ["-m", "pip", "install"]:
+            if any(
+                arg.split("=", 1)[0] in _DENIED_PYTHON_INSTALL_OPTIONS
+                for arg in python_args[3:]
+            ):
+                raise CodingPolicyError("command_denied")
+        elif argv[1:3] not in (["-m", "pytest"], ["-m", "compileall"]):
             raise CodingPolicyError("command_denied")
     elif executable in {"npm", "pnpm"}:
         arguments = argv[1:]
-        if arguments[:1] == ["run"]:
+        if arguments in (["--version"], ["-v"]):
+            pass
+        elif arguments[:1] == ["run"]:
             arguments = arguments[1:]
-        if not arguments or arguments[0] not in _ALLOWED_SCRIPT_NAMES:
+            if not arguments or arguments[0] not in _ALLOWED_SCRIPT_NAMES:
+                raise CodingPolicyError("command_denied")
+        elif arguments[:1] in (["install"], ["add"], ["i"]):
+            if any(
+                arg.split("=", 1)[0] in _DENIED_NODE_INSTALL_OPTIONS
+                for arg in arguments[1:]
+            ):
+                raise CodingPolicyError("command_denied")
+        else:
+            raise CodingPolicyError("command_denied")
+    elif executable == "node":
+        if argv[1:] not in (["--version"], ["-v"]):
+            raise CodingPolicyError("command_denied")
+    elif executable == "openspec":
+        arguments = argv[1:]
+        is_repository_init = (
+            len(arguments) in {3, 5}
+            and arguments[:2] == ["init", "--tools"]
+            and arguments[2] in _ALLOWED_OPENSPEC_TOOLS
+            and (len(arguments) == 3 or arguments[3:] == ["--profile", "core"])
+        )
+        is_validation = arguments in (
+            ["validate", "--all"],
+            ["validate", "--all", "--strict"],
+        )
+        if arguments != ["--version"] and not is_repository_init and not is_validation:
+            raise CodingPolicyError("command_denied")
+    elif executable == "pwd":
+        if len(argv) != 1:
             raise CodingPolicyError("command_denied")
     else:
         raise CodingPolicyError("command_denied")
     return argv
+
+
+def _validate_python_install_workspace(workspace: Path, argv: list[str]) -> None:
+    if argv[0:4] != ["python", "-m", "pip", "install"]:
+        return
+    workspace_python = workspace / ".venv" / "bin" / "python"
+    if not workspace_python.is_file():
+        raise CodingPolicyError("workspace_venv_required")
 
 
 def _validate_existing_command_paths(workspace: Path, argv: list[str]) -> None:
@@ -207,6 +269,8 @@ def _command_environment(workspace: Path) -> dict[str, str]:
     path_entries = [
         workspace / ".venv" / "bin",
         workspace / "node_modules" / ".bin",
+        Path("/opt/coding-tools/node/bin"),
+        Path("/opt/coding-tools/pnpm"),
         Path("/opt/homebrew/bin"),
         Path("/usr/local/bin"),
         Path("/usr/bin"),
@@ -218,6 +282,8 @@ def _command_environment(workspace: Path) -> dict[str, str]:
         "LC_ALL": "C.UTF-8",
         "NO_COLOR": "1",
         "PYTHONNOUSERSITE": "1",
+        "NPM_CONFIG_PREFIX": "/opt/coding-tools/node",
+        "PNPM_HOME": "/opt/coding-tools/pnpm",
     }
 
 
@@ -229,6 +295,7 @@ def redact_command_output(output: str) -> str:
 async def _run_command(workspace: Path, argv: list[str], timeout: int = 60) -> str:
     argv = validate_command_argv(argv)
     _validate_existing_command_paths(workspace, argv)
+    _validate_python_install_workspace(workspace, argv)
     if timeout <= 0 or timeout > MAX_COMMAND_TIMEOUT_SECONDS:
         raise CodingPolicyError("invalid_timeout")
     try:

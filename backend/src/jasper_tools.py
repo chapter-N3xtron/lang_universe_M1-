@@ -141,7 +141,9 @@ def _evidence_header(source: EvidenceSource | None) -> str:
 
 
 @contextmanager
-def agent_evidence(user_text: str | None) -> Iterator[None]:
+def agent_evidence(
+    user_text: str | None, saved_sources: list[dict] | None = None
+) -> Iterator[None]:
     """Scope authoritative visual evidence to one Jasper run."""
 
     token = _EVIDENCE_REGISTRY.set({})
@@ -154,6 +156,31 @@ def agent_evidence(user_text: str | None) -> Iterator[None]:
                 content=user_text.strip(),
                 source_id="user-input",
             )
+        for saved in saved_sources or []:
+            source_id = saved.get("id")
+            locator = saved.get("locator")
+            content_hash = saved.get("content_sha256")
+            if not all(
+                isinstance(value, str) and value
+                for value in (source_id, locator, content_hash)
+            ):
+                continue
+            kind = "repo_file" if saved.get("kind") == "workspace_file" else "web_url"
+            if saved.get("kind") == "upload":
+                kind = "user_input"
+            registry = _EVIDENCE_REGISTRY.get()
+            if registry is not None:
+                registry[source_id] = EvidenceSource(
+                    id=source_id,
+                    kind=kind,
+                    locator=locator,
+                    title=str(
+                        saved.get("display_name")
+                        or saved.get("original_title")
+                        or locator
+                    ),
+                    content_sha256=content_hash,
+                )
         yield
     finally:
         _EVIDENCE_REGISTRY.reset(token)

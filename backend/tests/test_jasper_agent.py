@@ -10,7 +10,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.graph import START, StateGraph
 from pydantic import PrivateAttr
 
 from src.visual_models import (
@@ -74,9 +74,7 @@ class _TestChatModel(BaseChatModel):
         return self
 
     def _generate(self, _messages, stop=None, run_manager=None, **_kwargs):
-        return ChatResult(
-            generations=[ChatGeneration(message=self._responses.pop(0))]
-        )
+        return ChatResult(generations=[ChatGeneration(message=self._responses.pop(0))])
 
 
 def _plain_model(*responses: AIMessage) -> _TestChatModel:
@@ -387,14 +385,16 @@ async def test_combined_strategy_drops_artifacts_not_returned_by_visual_tool():
     module = importlib.import_module("src.jasper_agent")
     invented = _concept_map("Invented map")
     agent = MagicMock()
-    agent.ainvoke = AsyncMock(return_value={
-        "messages": [AIMessage(content="An unsupported diagram.")],
-        "structured_response": {
-            "version": 2,
-            "voice_text": "An unsupported diagram.",
-            "artifacts": [invented.model_dump(mode="json")],
-        },
-    })
+    agent.ainvoke = AsyncMock(
+        return_value={
+            "messages": [AIMessage(content="An unsupported diagram.")],
+            "structured_response": {
+                "version": 2,
+                "voice_text": "An unsupported diagram.",
+                "artifacts": [invented.model_dump(mode="json")],
+            },
+        }
+    )
 
     with patch.object(module, "_build_agent", return_value=agent):
         result = await module._invoke_combined(
@@ -498,22 +498,15 @@ def test_exact_verified_model_override_is_used(monkeypatch):
 def test_jasper_delegates_web_access_to_research_without_direct_web_tools():
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
-    research_agent = MagicMock()
+    specialists = module._specialists(MagicMock())
 
-    with (
-        patch.object(module, "create_research_agent", return_value=research_agent),
-        patch.object(module, "create_coding_agent_graph", return_value=MagicMock()),
-    ):
-        specialists = module._specialists(MagicMock())
-
-    assert [specialist["name"] for specialist in specialists] == [
-        "research",
-        "coding",
-    ]
+    assert specialists == []
     assert [tool.name for tool in module.ACTIVE_TOOLS] == [
         "list_todos",
         "read_repository_file",
         "draw_concept_map",
+        "transfer_to_coding",
+        "transfer_to_research",
     ]
 
 
@@ -533,56 +526,160 @@ def test_jasper_deep_agent_exposes_documented_tools_and_task(tmp_path):
         "read_file",
         "read_repository_file",
         "task",
+        "transfer_to_coding",
+        "transfer_to_research",
     }
 
 
-@pytest.mark.asyncio
-async def test_jasper_delegates_to_async_compiled_coding_specialist(tmp_path):
+def test_jasper_handoff_targets_top_level_coding_with_required_context(tmp_path):
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
+    runtime = MagicMock(
+        tool_call_id="coding-handoff-1",
+        state={
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "transfer_to_coding",
+                            "args": {"task": "Inspect the repository"},
+                            "id": "coding-handoff-1",
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+            ],
+            "workspace": str(tmp_path),
+            "model": "ollama/test-model",
+            "execution_mode": "approval",
+            "thread_identity": "top-level-coding-test",
+            "user_identity": "test-user",
+        },
+    )
+    command = module.transfer_to_coding.func(
+        task="Inspect the repository", runtime=runtime
+    )
 
-    async def coding_node(_state):
-        return {"messages": [AIMessage(content="CODING_ASYNC_OK")]}
+    assert command.graph == command.PARENT
+    assert command.goto == "coding"
+    assert command.update["workspace"] == str(tmp_path)
+    assert command.update["execution_mode"] == "approval"
+    assert command.update["thread_identity"] == "top-level-coding-test"
+    assert len(command.update["messages"]) == 2
+    assert command.update["messages"][1].tool_call_id == "coding-handoff-1"
 
-    coding_builder = StateGraph(MessagesState)
-    coding_builder.add_node("coding_agent", coding_node)
-    coding_builder.add_edge(START, "coding_agent")
-    coding_builder.add_edge("coding_agent", END)
-    coding_graph = coding_builder.compile()
+
+def test_jasper_handoff_requires_explicit_execution_mode(tmp_path):
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    runtime = MagicMock(
+        tool_call_id="coding-handoff-2",
+        state={
+            "messages": [AIMessage(content="", tool_calls=[])],
+            "workspace": str(tmp_path),
+        },
+    )
+
+    with pytest.raises(ValueError, match="Select read_only or approval"):
+        module.transfer_to_coding.func(task="Inspect", runtime=runtime)
+
+
+def test_jasper_handoff_targets_top_level_research_with_bounded_context(tmp_path):
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    runtime = MagicMock(
+        tool_call_id="research-handoff-1",
+        state={
+            "messages": [AIMessage(content="", tool_calls=[])],
+            "workspace": str(tmp_path),
+            "model": "ollama/test-model",
+            "thread_identity": "research-thread",
+            "user_identity": "test-user",
+            "session_evidence": [{"id": "source-one"}],
+            "coding_events": [{"secret": "must-not-transfer"}],
+        },
+    )
+
+    command = module.transfer_to_research.func(task="Research SIFT", runtime=runtime)
+
+    assert command.graph == command.PARENT
+    assert command.goto == "research"
+    assert command.update["research_task"] == "Research SIFT"
+    assert command.update["session_evidence"] == [{"id": "source-one"}]
+    assert "coding_events" not in command.update
+    assert len(command.update["messages"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_jasper_allows_parent_handoff_command_to_reach_outer_graph():
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    from langgraph.errors import ParentCommand
+    from langgraph.types import Command
+
+    parent_command = ParentCommand(Command(goto="coding", graph=Command.PARENT))
+    with (
+        patch.object(module, "get_agent_llm", return_value=MagicMock(profile={})),
+        patch.object(module, "select_response_strategy", return_value="text"),
+        patch.object(module, "_invoke_text", side_effect=parent_command),
+        pytest.raises(ParentCommand),
+    ):
+        await module.call_jasper(
+            {
+                "messages": [{"role": "user", "content": "Use Coding"}],
+                "execution_mode": "read_only",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_documented_handoff_tool_runs_top_level_coding_node(tmp_path):
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
     model = _plain_model(
         AIMessage(
             content="",
             tool_calls=[
                 {
-                    "name": "task",
-                    "args": {
-                        "description": "Inspect the repository",
-                        "subagent_type": "coding",
-                    },
-                    "id": "coding-task-1",
+                    "name": "transfer_to_coding",
+                    "args": {"task": "Read the selected workspace"},
+                    "id": "top-level-handoff-1",
                     "type": "tool_call",
                 }
             ],
         ),
-        AIMessage(content="Coding specialist completed."),
+        AIMessage(content="Jasper relayed the Coding result."),
+    )
+    jasper = module._build_agent(model, workspace=str(tmp_path))
+    coding_inputs = []
+
+    async def run_jasper(state, config):
+        return await jasper.ainvoke(state, config=config)
+
+    async def run_coding(state):
+        coding_inputs.append(state)
+        return {"messages": [AIMessage(content="TOP_LEVEL_CODING_OK")]}
+
+    graph = StateGraph(module.JasperDeepAgentState)
+    graph.add_node("jasper", run_jasper)
+    graph.add_node("coding", run_coding)
+    graph.add_edge(START, "jasper")
+    graph.add_edge("coding", "jasper")
+    result = await graph.compile().ainvoke(
+        {
+            "messages": [{"role": "user", "content": "Use Coding"}],
+            "workspace": str(tmp_path),
+            "execution_mode": "read_only",
+            "thread_identity": "documented-handoff-test",
+        }
     )
 
-    with patch.object(module, "create_coding_agent_graph", return_value=coding_graph):
-        agent = module._build_agent(model, workspace=str(tmp_path))
-        result = await agent.ainvoke(
-            {
-                "messages": [{"role": "user", "content": "Use Coding"}],
-                "workspace": str(tmp_path),
-                "thread_identity": "async-specialist-test",
-            }
-        )
-
-    assert result["messages"][-1].content == "Coding specialist completed."
-    assert any(
-        getattr(message, "type", "") == "tool"
-        and "CODING_ASYNC_OK" in str(message.content)
-        for message in result["messages"]
-    )
+    assert coding_inputs
+    assert coding_inputs[0]["coding_task"] == "Read the selected workspace"
+    assert coding_inputs[0]["workspace"] == str(tmp_path)
+    assert coding_inputs[0]["execution_mode"] == "read_only"
+    assert result["messages"][-1].content == "Jasper relayed the Coding result."
 
 
 def test_jasper_deep_agent_executes_builtin_repository_discovery(tmp_path):

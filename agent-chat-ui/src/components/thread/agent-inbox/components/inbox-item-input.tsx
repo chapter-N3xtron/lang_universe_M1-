@@ -13,7 +13,8 @@ function ResetButton({ handleReset }: { handleReset: () => void }) {
     <Button
       onClick={handleReset}
       variant="ghost"
-      className="flex items-center justify-center gap-2 text-gray-500 hover:text-red-500"
+      size="sm"
+      className="text-muted-foreground hover:text-destructive flex items-center justify-center gap-2"
     >
       <Undo2 className="h-4 w-4" />
       <span>Reset</span>
@@ -23,7 +24,7 @@ function ResetButton({ handleReset }: { handleReset: () => void }) {
 
 function ArgsRenderer({ args }: { args: Record<string, unknown> }) {
   return (
-    <div className="flex w-full flex-col items-start gap-6">
+    <div className="flex w-full flex-col items-start gap-3">
       {Object.entries(args).map(([key, value]) => {
         const stringValue =
           typeof value === "string" || typeof value === "number"
@@ -33,12 +34,12 @@ function ArgsRenderer({ args }: { args: Record<string, unknown> }) {
         return (
           <div
             key={`args-${key}`}
-            className="flex flex-col items-start gap-1"
+            className="flex w-full flex-col items-start gap-1"
           >
-            <p className="text-sm leading-[18px] text-wrap text-gray-600">
+            <p className="text-muted-foreground text-xs leading-4 text-wrap">
               {prettifyText(key)}
             </p>
-            <span className="w-full max-w-full rounded-xl bg-zinc-100 p-3 text-[13px] leading-[18px] text-black">
+            <span className="bg-muted text-foreground w-full max-w-full rounded-md p-2 font-mono text-xs leading-4">
               <MarkdownText>{stringValue}</MarkdownText>
             </span>
           </div>
@@ -83,15 +84,16 @@ function ApproveOnly({
   ) => Promise<void> | void;
 }) {
   return (
-    <div className="flex w-full flex-col items-start gap-4 rounded-lg border border-gray-300 p-6">
+    <div className="border-border flex w-full flex-col items-start gap-3 rounded-lg border p-4">
       {Object.keys(actionRequestArgs).length > 0 && (
         <ArgsRenderer args={actionRequestArgs} />
       )}
       <Button
         variant="brand"
+        size="sm"
         disabled={isLoading}
         onClick={handleSubmit}
-        className="w-full"
+        className="self-end"
       >
         Approve
       </Button>
@@ -120,7 +122,6 @@ function EditActionCard({
     e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
   ) => Promise<void> | void;
 }) {
-  const defaultRows = React.useRef<Record<string, number>>({});
   const editResponse = humanResponse.find(
     (response) => response.type === "edit",
   );
@@ -183,9 +184,9 @@ function EditActionCard({
   };
 
   return (
-    <div className="flex w-full min-w-full flex-col items-start gap-4 rounded-lg border border-gray-300 p-6">
+    <div className="border-border flex w-full flex-col items-start gap-3 rounded-lg border p-4">
       <div className="flex w-full items-center justify-between">
-        <p className="text-base font-semibold text-black">{header}</p>
+        <p className="text-card-foreground text-sm font-semibold">{header}</p>
         <ResetButton handleReset={handleReset} />
       </div>
 
@@ -196,11 +197,9 @@ function EditActionCard({
               ? value.toString()
               : JSON.stringify(value, null);
 
-          if (defaultRows.current[key] === undefined) {
-            defaultRows.current[key] = !stringValue.length
-              ? 3
-              : Math.max(stringValue.length / 30, 7);
-          }
+          const wrappedRows = Math.ceil(stringValue.length / 72);
+          const lineRows = stringValue.split("\n").length;
+          const rows = Math.min(5, Math.max(1, wrappedRows, lineRows));
 
           return (
             <div
@@ -213,13 +212,13 @@ function EditActionCard({
                 </p>
                 <Textarea
                   disabled={isLoading}
-                  className="h-full w-full max-w-full"
+                  className="bg-background text-foreground max-h-36 min-h-10 w-full max-w-full resize-y font-mono text-xs"
                   value={stringValue}
                   onChange={(event) =>
                     onEditChange(event.target.value, editResponse, key)
                   }
                   onKeyDown={handleKeyDown}
-                  rows={defaultRows.current[key] || 8}
+                  rows={rows}
                 />
               </div>
             </div>
@@ -230,6 +229,7 @@ function EditActionCard({
       <div className="flex w-full items-center justify-end gap-2">
         <Button
           variant="brand"
+          size="sm"
           disabled={isLoading}
           onClick={handleSubmit}
         >
@@ -274,9 +274,9 @@ function RejectActionCard({
   };
 
   return (
-    <div className="flex w-full max-w-full flex-col items-start gap-4 rounded-xl border border-gray-300 p-6">
+    <div className="border-border flex w-full max-w-full flex-col items-start gap-3 rounded-lg border p-4">
       <div className="flex w-full items-center justify-between">
-        <p className="text-base font-semibold text-black">Reject</p>
+        <p className="text-card-foreground text-sm font-semibold">Reject</p>
         <ResetButton handleReset={() => onChange("", rejectResponse)} />
       </div>
 
@@ -286,7 +286,7 @@ function RejectActionCard({
         <p className="min-w-fit text-sm font-medium">Reason</p>
         <Textarea
           disabled={isLoading}
-          className="w-full max-w-full"
+          className="bg-background text-foreground min-h-16 w-full max-w-full"
           value={rejectResponse.message ?? ""}
           onChange={(event) => onChange(event.target.value, rejectResponse)}
           onKeyDown={handleKeyDown}
@@ -298,6 +298,7 @@ function RejectActionCard({
       <div className="flex w-full items-center justify-end gap-2">
         <Button
           variant="brand"
+          size="sm"
           disabled={isLoading}
           onClick={handleSubmit}
         >
@@ -471,7 +472,7 @@ export function InboxItemInput({
         {supportsMultipleMethods ? (
           <div className="mx-auto mt-3 flex items-center gap-3">
             <Separator className="w-full" />
-            <p className="text-sm text-gray-500">Or</p>
+            <p className="text-muted-foreground text-sm">Or</p>
             <Separator className="w-full" />
           </div>
         ) : null}
@@ -486,10 +487,12 @@ export function InboxItemInput({
         />
 
         {isLoading && (
-          <p className="text-sm text-gray-600">Submitting decision...</p>
+          <p className="text-muted-foreground text-sm">
+            Submitting decision...
+          </p>
         )}
         {selectedSubmitType && supportsMultipleMethods && (
-          <p className="text-xs text-gray-500">
+          <p className="text-muted-foreground text-xs">
             Currently selected: {prettifyText(selectedSubmitType)}
           </p>
         )}

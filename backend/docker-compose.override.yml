@@ -4,6 +4,8 @@ services:
       - ..:/workspace
       - /Volumes/Storage:/Volumes/Storage
       - ${HOME}/world_monitor:${HOME}/world_monitor
+      - coding-tools:/opt/coding-tools
+      - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock
     environment:
       - AGENT_WORKSPACE=/workspace
       - TODOS_FILE=/workspace/todos.json
@@ -11,3 +13,9 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - SESSION_RUNTIME_MODE=durable
       - SESSION_RUNTIME_ID=backend-postgres-v1
+      - NPM_CONFIG_PREFIX=/opt/coding-tools/node
+      - PNPM_HOME=/opt/coding-tools/pnpm
+      - SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock
+
+volumes:
+  coding-tools:

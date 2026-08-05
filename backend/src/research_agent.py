@@ -1,65 +1,155 @@
 import operator
+from pathlib import Path
 from typing import Annotated, TypedDict
 
+from deepagents import create_deep_agent
+from deepagents.backends import FilesystemBackend
+from deepagents.graph import DeepAgentState
+from deepagents.middleware.filesystem import FilesystemPermission
 from dotenv import load_dotenv
-from langchain.agents import create_agent
+from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
 
 from src.agent_utils import get_conversation_history
-from src.jasper_tools import read_url, web_search
 from src.llm import get_agent_llm
+from src.research_evidence import (
+    ingest_uploaded_sources,
+    read_saved_source,
+    read_workspace_source,
+    research_read_url,
+    research_web_search,
+)
 
 load_dotenv()
 
 
 class State(TypedDict, total=False):
-    messages: Annotated[list[dict], operator.add]
+    messages: Annotated[list, operator.add]
     research_findings: str
     model: str
+    workspace: str
+    thread_identity: str
+    user_identity: str
+    session_evidence: Annotated[list[dict], operator.add]
 
 
-RESEARCH_PROMPT = """You are Research, Jasper's web-research specialist.
-
-Use web_search for current or externally verifiable claims. Use read_url when the
-full content of an authoritative result is needed. If a page cannot be read, use the
-available search evidence or another authoritative result rather than repeatedly
-requesting the same unavailable page. Preserve the evidence IDs returned by tools in
-your findings so Jasper can cite them in a grounded visualization. State limitations
-and uncertainty plainly. Never invent a source or claim to have read a page that a
-tool could not retrieve."""
+class ResearchState(DeepAgentState, total=False):
+    workspace: str
+    thread_identity: str
+    user_identity: str
+    session_evidence: Annotated[list[dict], operator.add]
 
 
-def create_research_agent(model=None):
-    """Build the documented LangChain subagent used for web research."""
+RESEARCH_PROMPT = """You are Research, Jasper's evidence specialist.
 
-    return create_agent(
+Use web_search for current or externally verifiable claims and read_url only for
+pages you explicitly choose to visit. Search results are snippet-only evidence;
+never describe them as read pages. Use ingest_uploaded_sources for files explicitly
+uploaded by the user. Use read_workspace_source for a safe text file inside the
+selected workspace, and read_saved_source to reuse session evidence without another
+web request. You may list, glob, and grep the selected workspace to discover files,
+but you cannot write files or execute commands.
+
+Preserve every evidence ID in the final findings. State limitations and uncertainty
+plainly. Never invent a source, crawl a site, or claim to have read unavailable
+content. Return concise findings for Jasper, not internal tool history."""
+
+
+def _workspace_backend(workspace: str | None):
+    root = Path(workspace or Path(__file__).resolve().parents[2]).resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("workspace must be a directory")
+    backend = FilesystemBackend(root_dir=root, virtual_mode=True)
+    permissions = [
+        FilesystemPermission(
+            operations=["read", "write"],
+            paths=[
+                "/.env",
+                "/.env.*",
+                "/**/.env",
+                "/**/.env.*",
+                "/.git",
+                "/.git/**",
+                "/**/.git",
+                "/**/.git/**",
+                "/**/*.key",
+                "/**/*.pem",
+                "/**/*.p12",
+                "/**/*.pfx",
+            ],
+            mode="deny",
+        ),
+        FilesystemPermission(operations=["read"], paths=["/**"], mode="allow"),
+        FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
+    ]
+    return backend, permissions
+
+
+def create_research_agent(model=None, *, workspace: str | None = None, store=None):
+    """Build Research with documented Deep Agents read-only filesystem access."""
+
+    backend, permissions = _workspace_backend(workspace)
+    return create_deep_agent(
         model=model or get_agent_llm(),
-        tools=[web_search, read_url],
+        tools=[
+            research_web_search,
+            research_read_url,
+            ingest_uploaded_sources,
+            read_workspace_source,
+            read_saved_source,
+        ],
         system_prompt=RESEARCH_PROMPT,
+        backend=backend,
+        permissions=permissions,
+        state_schema=ResearchState,
+        store=store,
         name="research",
     )
 
 
-def research_agent(state: State):
-    """Run Research as a standalone profile in the outer LangGraph."""
-    messages = state["messages"]
-    history = get_conversation_history(messages)
+async def research_agent(state: State, runtime: Runtime | None = None):
+    """Run Research as a visible top-level specialist and return only its findings."""
 
     try:
-        result = create_research_agent(
-            get_agent_llm(state.get("model"))
-        ).invoke({"messages": history})
-        response = result["messages"][-1]
+        result = await create_research_agent(
+            get_agent_llm(state.get("model")),
+            workspace=state.get("workspace"),
+            store=runtime.store if runtime is not None else None,
+        ).ainvoke(
+            {
+                "messages": get_conversation_history(state["messages"]),
+                "workspace": state.get("workspace", ""),
+                "thread_identity": state.get("thread_identity", ""),
+                "user_identity": state.get("user_identity", "anonymous"),
+                "session_evidence": state.get("session_evidence", []),
+            }
+        )
+        response = next(
+            message
+            for message in reversed(result["messages"])
+            if isinstance(message, AIMessage) and not message.tool_calls
+        )
         return {
-            "messages": [{"role": "assistant", "content": response.content}],
+            "messages": [
+                AIMessage(
+                    content=response.content,
+                    additional_kwargs={"speaker_profile": "research"},
+                )
+            ],
             "research_findings": response.content,
+            "session_evidence": result.get("session_evidence", []),
         }
     except Exception:
         error_msg = (
             "[Research Agent]\n\nThe research provider is currently unavailable."
         )
         return {
-            "messages": [{"role": "assistant", "content": error_msg}],
+            "messages": [
+                AIMessage(
+                    content=error_msg, additional_kwargs={"speaker_profile": "research"}
+                )
+            ],
             "research_findings": error_msg,
         }
 
@@ -70,11 +160,3 @@ def create_research_graph():
     graph.add_edge(START, "research_agent")
     graph.add_edge("research_agent", END)
     return graph.compile()
-
-
-if __name__ == "__main__":
-    app = create_research_graph()
-    result = app.invoke(
-        {"messages": [{"role": "user", "content": "Research LangGraph best practices"}]}
-    )
-    print(result["research_findings"])

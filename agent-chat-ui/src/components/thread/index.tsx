@@ -103,7 +103,7 @@ function ThreadImpl() {
   const [threadId, _setThreadId] = useQueryState("threadId");
   const [, setSessionView] = useQueryState(
     "sessionView",
-    parseAsStringLiteral(["library", "session"] as const),
+    parseAsStringLiteral(["library", "session", "sources"] as const),
   );
   const [apiUrl] = useQueryState("apiUrl", {
     defaultValue: process.env.NEXT_PUBLIC_API_URL || "",

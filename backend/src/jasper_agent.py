@@ -24,12 +24,14 @@ from langchain.agents.middleware import (
     ToolRetryMiddleware,
 )
 from langchain.agents.structured_output import ProviderStrategy, ToolStrategy
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from langchain.tools import ToolRuntime, tool
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.types import Command
 
 from src.agent_utils import get_user_query
-from src.coding_agent import create_coding_agent_graph
 from src.jasper_tools import (
     agent_evidence,
     agent_workspace,
@@ -38,7 +40,6 @@ from src.jasper_tools import (
     read_file,
 )
 from src.llm import get_agent_llm
-from src.research_agent import create_research_agent
 from src.visual_models import (
     ConceptMapArtifact,
     JasperResponse,
@@ -79,9 +80,7 @@ class State(TypedDict, total=False):
     thread_identity: str
     user_identity: str
     coding_session_id: str
-
-
-ACTIVE_TOOLS = [list_todos, read_file, draw_concept_map]
+    session_evidence: list[dict]
 
 
 class JasperDeepAgentState(DeepAgentState, total=False):
@@ -95,29 +94,90 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     coding_session_id: str
     coding_status: str
     coding_events: list[dict]
+    coding_task: str
+    research_task: str
+    session_evidence: list[dict]
 
 
-def _specialists(model) -> list[CompiledSubAgent]:
+def _specialists(_model) -> list[CompiledSubAgent]:
     """Return the documented Deep Agents specialist definitions."""
 
-    return [
-        CompiledSubAgent(
-            name="research",
-            description=(
-                "Research external sources with Tavily and Jina and return grounded "
-                "findings with evidence identifiers."
-            ),
-            runnable=create_research_agent(model),
-        ),
-        CompiledSubAgent(
-            name="coding",
-            description=(
-                "Inspect repository code or perform explicitly approved coding work "
-                "inside the selected workspace."
-            ),
-            runnable=create_coding_agent_graph(),
-        ),
-    ]
+    return []
+
+
+@tool
+def transfer_to_coding(task: str, runtime: ToolRuntime) -> Command[Literal["coding"]]:
+    """Hand a repository task to the top-level Coding specialist."""
+
+    state = runtime.state
+    execution_mode = state.get("execution_mode")
+    if execution_mode not in {"read_only", "approval"}:
+        raise ValueError(
+            "Select read_only or approval mode before handing work to Coding."
+        )
+    last_ai_message = next(
+        message
+        for message in reversed(state.get("messages", []))
+        if isinstance(message, AIMessage)
+    )
+    transfer_message = ToolMessage(
+        content=f"Coding task: {task}",
+        tool_call_id=runtime.tool_call_id,
+    )
+    return Command(
+        goto="coding",
+        update={
+            "coding_task": task,
+            "workspace": state.get("workspace", ""),
+            "model": state.get("model"),
+            "execution_mode": execution_mode,
+            "thread_identity": state.get("thread_identity", ""),
+            "messages": [last_ai_message, transfer_message],
+        },
+        graph=Command.PARENT,
+    )
+
+
+@tool
+def transfer_to_research(
+    task: str, runtime: ToolRuntime
+) -> Command[Literal["research"]]:
+    """Hand an evidence-gathering task to the top-level Research specialist."""
+
+    state = runtime.state
+    last_ai_message = next(
+        message
+        for message in reversed(state.get("messages", []))
+        if isinstance(message, AIMessage)
+    )
+    return Command(
+        goto="research",
+        update={
+            "research_task": task,
+            "workspace": state.get("workspace", ""),
+            "model": state.get("model"),
+            "thread_identity": state.get("thread_identity", ""),
+            "user_identity": state.get("user_identity", "anonymous"),
+            "session_evidence": state.get("session_evidence", []),
+            "messages": [
+                last_ai_message,
+                ToolMessage(
+                    content=f"Research task: {task}",
+                    tool_call_id=runtime.tool_call_id,
+                ),
+            ],
+        },
+        graph=Command.PARENT,
+    )
+
+
+ACTIVE_TOOLS = [
+    list_todos,
+    read_file,
+    draw_concept_map,
+    transfer_to_coding,
+    transfer_to_research,
+]
 
 
 JASPER_INTERACTION_GOVERNANCE_VERSION = "2026-08-04.1"
@@ -204,13 +264,22 @@ decorate a simple answer.
 Use Deep Agents filesystem tools ls, glob, grep, and read_file to discover and inspect
 the selected repository. Use read_repository_file for every repository file whose
 contents support a grounded visual so its evidence ID can be cited. Delegate external
-research and coding work with the task tool to the named Research and Coding
-specialists. Do not perform either specialist's restricted work directly.
+research with transfer_to_research. Delegate repository
+analysis and coding work with transfer_to_coding. Do not perform either specialist's
+restricted work directly. Call transfer_to_coding by itself, never in parallel with
+another tool call. Call transfer_to_research by itself, never in parallel with another
+tool call.
+
+When an assistant message named coding returns from the top-level Coding node,
+relay its result to the human. Treat a question, blocker, cancellation, or error as
+such. Do not claim the requested work completed unless Coding's returned message
+explicitly reports completion and verification. Do not expose Coding's internal
+reasoning or tool transcript.
 
 Every diagram must be evidence-grounded. Before drawing a repository or code diagram,
 read the relevant repository files and cite the evidence IDs returned by
 read_repository_file on every node and edge. Before drawing a research diagram,
-delegate the evidence search to Research with the task tool, then cite the returned
+delegate the evidence search with transfer_to_research, then cite the returned
 web evidence IDs on every
 node and edge. Use grounding_kind="repo" for repository diagrams and "web" for researched
 claims. The user-input evidence may support only claims explicitly stated by the user;
@@ -465,6 +534,8 @@ async def _invoke_plain(
         final_text = _message_text(final_message)
         if final_text:
             return [*result_messages, final_message], final_text
+    except GraphBubbleUp:
+        raise
     except Exception as exc:
         logger.warning("Jasper final-answer recovery failed: %s", type(exc).__name__)
 
@@ -633,12 +704,13 @@ async def call_jasper(state: State):
                 "thread_identity",
                 "user_identity",
                 "coding_session_id",
+                "session_evidence",
             )
             if state.get(key) is not None
         }
         with (
             agent_workspace(state.get("workspace")),
-            agent_evidence(get_user_query(messages)),
+            agent_evidence(get_user_query(messages), state.get("session_evidence")),
         ):
             if strategy in {"native", "tool"}:
                 response = await _invoke_combined(
@@ -662,6 +734,8 @@ async def call_jasper(state: State):
                     workspace=state.get("workspace"),
                     agent_context=agent_context,
                 )
+    except GraphBubbleUp:
+        raise
     except Exception as exc:
         provider_failure = _is_provider_failure(exc)
         logger.warning(

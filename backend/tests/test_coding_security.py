@@ -38,13 +38,51 @@ def _write_model(file_path="/approved.txt", content="approved"):
                 content="",
                 tool_calls=[
                     {
-                        "name": "approved_write_file",
+                        "name": "write_file",
                         "args": {"file_path": file_path, "content": content},
                         "id": "write-1",
                     }
                 ],
             ),
             AIMessage(content="finished"),
+        ]
+    )
+
+
+def _openspec_install_model():
+    return ToolCallingModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "execute",
+                        "args": {"command": "npm install --global @fission-ai/openspec"},
+                        "id": "install-openspec-1",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="OpenSpec installation was rejected and was not completed."
+            ),
+        ]
+    )
+
+
+def _execute_model(command: str):
+    return ToolCallingModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "execute",
+                        "args": {"command": command},
+                        "id": "execute-1",
+                    }
+                ],
+            ),
+            AIMessage(content="command finished"),
         ]
     )
 
@@ -77,7 +115,7 @@ def test_approval_executes_workspace_confined_write(monkeypatch, tmp_path):
     app = _approval_app(monkeypatch, tmp_path, _write_model())
     config, request = _first_interrupt(app, "approve-write")
 
-    assert request["action_requests"][0]["name"] == "approved_write_file"
+    assert request["action_requests"][0]["name"] == "write_file"
     asyncio.run(
         app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
     )
@@ -92,7 +130,7 @@ def test_edit_decision_is_revalidated_and_writes_edited_action(monkeypatch, tmp_
     decision = {
         "type": "edit",
         "edited_action": {
-            "name": "approved_write_file",
+            "name": "write_file",
             "args": {"file_path": "/edited.txt", "content": "edited"},
         },
     }
@@ -120,13 +158,40 @@ def test_reject_decision_does_not_write(monkeypatch, tmp_path):
     assert not (tmp_path / "approved.txt").exists()
 
 
+def test_native_execute_requires_approval_and_starts_in_workspace(monkeypatch, tmp_path):
+    app = _approval_app(monkeypatch, tmp_path, _execute_model("pwd"))
+    config, request = _first_interrupt(app, "approve-execute")
+
+    assert request["action_requests"][0]["name"] == "execute"
+    assert request["action_requests"][0]["args"] == {"command": "pwd"}
+    result = asyncio.run(
+        app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
+    )
+
+    tool_messages = [message for message in result["messages"] if message.type == "tool"]
+    assert str(tmp_path.resolve()) in tool_messages[-1].content
+
+
+def test_native_execute_accepts_normal_shell_syntax_after_approval(monkeypatch, tmp_path):
+    command = "printf first | tr a-z A-Z > native-shell.txt"
+    app = _approval_app(monkeypatch, tmp_path, _execute_model(command))
+    config, request = _first_interrupt(app, "approve-native-shell")
+
+    assert request["action_requests"][0]["args"]["command"] == command
+    asyncio.run(
+        app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
+    )
+
+    assert (tmp_path / "native-shell.txt").read_text() == "FIRST"
+
+
 def test_edited_action_cannot_escape_workspace(monkeypatch, tmp_path):
     app = _approval_app(monkeypatch, tmp_path, _write_model())
     config, _request = _first_interrupt(app, "reject-escape")
     decision = {
         "type": "edit",
         "edited_action": {
-            "name": "approved_write_file",
+            "name": "write_file",
             "args": {"file_path": "/../escaped.txt", "content": "denied"},
         },
     }
@@ -163,12 +228,20 @@ def test_sensitive_and_symlink_escape_paths_are_denied(tmp_path):
         ["git", "reset", "--hard"],
         ["rg", "token", "/etc"],
         ["pytest", "../outside"],
-        ["npm", "install"],
+        ["npm", "install", "--prefix", "elsewhere", "unsafe-package"],
+        ["pnpm", "add", "--prefix", "elsewhere", "unsafe-package"],
+        ["python", "-m", "pip", "install", "--user", "unsafe-package"],
+        ["python", "-m", "pip", "install", "--target", "vendor", "unsafe-package"],
         ["ruff", "format", "."],
         ["git", "status", "&&", "whoami"],
         ["git", "diff", "--ext-diff"],
         ["git", "show", "--output=result.txt"],
         ["rg", "--pre", "cat", "pattern"],
+        ["openspec", "init"],
+        ["openspec", "init", "--tools", "all"],
+        ["openspec", "init", "--tools", "codex"],
+        ["openspec", "update"],
+        ["openspec", "validate"],
     ],
 )
 def test_command_policy_denies_shell_destructive_and_escape_forms(argv):
@@ -185,6 +258,69 @@ def test_command_policy_allows_bounded_verification_commands():
     assert validate_command_argv(["pytest", "-q", "tests"])
     assert validate_command_argv(["ruff", "format", "--check", "."])
     assert validate_command_argv(["pnpm", "run", "typecheck"])
+    assert validate_command_argv(["pwd"])
+    assert validate_command_argv(["node", "--version"])
+
+
+def test_command_policy_allows_approval_gated_workspace_package_installs():
+    from src.secure_coding_tools import validate_command_argv
+
+    assert validate_command_argv(["npm", "install", "example-package"])
+    assert validate_command_argv(["npm", "install", "--global", "example-cli"])
+    assert validate_command_argv(["pnpm", "add", "example-package"])
+    assert validate_command_argv(["pnpm", "add", "--global", "example-cli"])
+    assert validate_command_argv(["python", "-m", "venv", ".venv"])
+    assert validate_command_argv(["python", "-m", "pip", "install", "example-package"])
+
+
+def test_command_policy_allows_only_bounded_openspec_repository_setup():
+    from src.secure_coding_tools import validate_command_argv
+
+    assert validate_command_argv(["openspec", "--version"])
+    assert validate_command_argv(["openspec", "init", "--tools", "opencode"])
+    assert validate_command_argv(
+        [
+            "openspec",
+            "init",
+            "--tools",
+            "opencode",
+            "--profile",
+            "core",
+        ]
+    )
+    assert validate_command_argv(["openspec", "validate", "--all"])
+    assert validate_command_argv(["openspec", "validate", "--all", "--strict"])
+
+
+def test_python_package_install_requires_workspace_virtualenv(tmp_path):
+    from src.secure_coding_tools import (
+        CodingPolicyError,
+        _validate_python_install_workspace,
+    )
+
+    command = ["python", "-m", "pip", "install", "example-package"]
+    with pytest.raises(CodingPolicyError, match="workspace_venv_required"):
+        _validate_python_install_workspace(tmp_path, command)
+
+    workspace_python = tmp_path / ".venv" / "bin" / "python"
+    workspace_python.parent.mkdir(parents=True)
+    workspace_python.touch()
+    _validate_python_install_workspace(tmp_path, command)
+
+
+def test_command_environment_uses_durable_shared_node_tool_paths(tmp_path):
+    from src.secure_coding_tools import _command_environment
+
+    environment = _command_environment(tmp_path)
+    path_entries = environment["PATH"].split(":")
+    assert path_entries[:4] == [
+        str(tmp_path / ".venv" / "bin"),
+        str(tmp_path / "node_modules" / ".bin"),
+        "/opt/coding-tools/node/bin",
+        "/opt/coding-tools/pnpm",
+    ]
+    assert environment["NPM_CONFIG_PREFIX"] == "/opt/coding-tools/node"
+    assert environment["PNPM_HOME"] == "/opt/coding-tools/pnpm"
 
 
 def test_command_path_symlink_escape_is_denied(tmp_path):
@@ -273,6 +409,67 @@ def test_production_wrapper_surfaces_and_resumes_approval(monkeypatch, tmp_path)
 
     assert result["coding_status"] == "completed"
     assert (tmp_path / "approved.txt").read_text() == "approved"
+
+
+def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_to_jasper(
+    monkeypatch, tmp_path
+):
+    from src import chat_ui, coding_agent
+
+    nested = _approval_app(monkeypatch, tmp_path, _openspec_install_model())
+    jasper_inputs = []
+
+    async def session_agent(*_args):
+        return nested
+
+    async def fake_call_jasper(state):
+        jasper_inputs.append(state)
+        return {
+            "messages": [AIMessage(content=state["messages"][-1]["content"])],
+            "visual_artifacts": [],
+        }
+
+    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
+    monkeypatch.setattr(chat_ui, "call_jasper", fake_call_jasper)
+    app = chat_ui.create_chat_ui().compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "outer-openspec-approval"}}
+    initial = {
+        "messages": [{"role": "user", "content": "Use Coder to install OpenSpec"}],
+        "coding_task": "Install OpenSpec in the selected workspace",
+        "workspace": str(tmp_path),
+        "target_agent": "coding",
+        "execution_mode": "approval",
+    }
+
+    first = asyncio.run(app.ainvoke(initial, config=config))
+    request = first["__interrupt__"][0].value
+
+    assert request["action_requests"][0]["name"] == "execute"
+    assert request["action_requests"][0]["args"]["command"] == (
+        "npm install --global @fission-ai/openspec"
+    )
+
+    result = asyncio.run(
+        app.ainvoke(
+            Command(
+                resume={
+                    "decisions": [
+                        {"type": "reject", "message": "Do not install it yet."}
+                    ]
+                }
+            ),
+            config=config,
+        )
+    )
+
+    assert jasper_inputs[0]["messages"][-1]["name"] == "coding"
+    assert jasper_inputs[0]["messages"][-1]["content"] == (
+        "OpenSpec installation was rejected and was not completed."
+    )
+    assert result["messages"][-1]["content"] == (
+        "OpenSpec installation was rejected and was not completed."
+    )
+    assert result["coding_status"] == "completed"
 
 
 def test_expired_approval_is_rejected_without_writing(monkeypatch, tmp_path):

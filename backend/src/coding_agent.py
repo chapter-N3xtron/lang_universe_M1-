@@ -24,7 +24,6 @@ from src.coding_persistence import (
     reset_coding_session,
 )
 from src.llm import get_coding_llm
-from src.secure_coding_tools import APPROVAL_INTERRUPT_ON, create_approval_tools
 
 
 class CodingAgentState(TypedDict, total=False):
@@ -59,6 +58,25 @@ _SENSITIVE_VIRTUAL_PATHS = [
 ]
 _SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str], Any] = OrderedDict()
 _SESSION_AGENT_CACHE_SIZE = 8
+
+_LOCAL_APPROVAL_INTERRUPT_ON = {
+    "write_file": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": "Review a file write in the selected repository.",
+    },
+    "edit_file": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": "Review a file edit in the selected repository.",
+    },
+    "delete": {
+        "allowed_decisions": ["approve", "reject"],
+        "description": "Review a file deletion in the selected repository.",
+    },
+    "execute": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": "Review a shell command rooted in the selected repository.",
+    },
+}
 
 
 def _now() -> float:
@@ -141,9 +159,9 @@ def _deep_agent_components():
     # Lazy imports let the rollback backend and unit tests start without loading
     # the comparatively large Deep Agents dependency tree.
     from deepagents import FilesystemPermission, create_deep_agent
-    from deepagents.backends import FilesystemBackend
+    from deepagents.backends import FilesystemBackend, LocalShellBackend
 
-    return FilesystemPermission, FilesystemBackend, create_deep_agent
+    return FilesystemPermission, FilesystemBackend, LocalShellBackend, create_deep_agent
 
 
 def _execution_mode(raw_mode: str | None) -> str:
@@ -156,7 +174,12 @@ def _build_deep_agent(
     execution_mode: str = "read_only",
     checkpointer: Any = False,
 ):
-    permission_type, backend_type, create_deep_agent = _deep_agent_components()
+    (
+        permission_type,
+        filesystem_backend_type,
+        local_shell_backend_type,
+        create_deep_agent,
+    ) = _deep_agent_components()
     approval_mode = _execution_mode(execution_mode) == "approval"
     permissions = [
         permission_type(
@@ -165,15 +188,30 @@ def _build_deep_agent(
             mode="deny",
         ),
         permission_type(operations=["read"], paths=["/**"], mode="allow"),
-        permission_type(operations=["write"], paths=["/**"], mode="deny"),
+        permission_type(
+            operations=["write"],
+            paths=["/**"],
+            mode="allow" if approval_mode else "deny",
+        ),
     ]
-    tools = create_approval_tools(workspace) if approval_mode else []
-    interrupt_on = APPROVAL_INTERRUPT_ON if approval_mode else None
+    backend = (
+        local_shell_backend_type(
+            root_dir=workspace,
+            virtual_mode=True,
+            timeout=120,
+            max_output_bytes=100_000,
+            inherit_env=True,
+        )
+        if approval_mode
+        else filesystem_backend_type(root_dir=workspace, virtual_mode=True)
+    )
+    interrupt_on = _LOCAL_APPROVAL_INTERRUPT_ON if approval_mode else None
     mutation_prompt = (
-        "You may propose changes only with approved_write_file, "
-        "approved_edit_file, or run_workspace_command. Every call pauses for "
-        "human review and is revalidated after approval. Never request secrets, "
-        "sensitive paths, shell syntax, or commands outside the allowlist."
+        "Use the built-in repository file tools and execute tool for coding work. "
+        "Every write, edit, deletion, or shell command pauses for human review. "
+        "Commands start in the selected repository. Never read or modify secrets "
+        "or edit .git files directly. Use normal Git commands for repository "
+        "management; never force-push or delete remote history."
         if approval_mode
         else "This deployment is read-only: never write, edit, delete, or execute files."
     )
@@ -184,7 +222,7 @@ def _build_deep_agent(
 
     return create_deep_agent(
         model=get_coding_llm(model_name),
-        tools=tools,
+        tools=[],
         name="coding_agent",
         system_prompt=(
             "You are the repository coding agent. Inspect only the selected "
@@ -192,8 +230,8 @@ def _build_deep_agent(
         ),
         memory=memory,
         skills=skills,
-        backend=backend_type(root_dir=workspace, virtual_mode=True),
-        permissions=permissions,
+        backend=backend,
+        permissions=None if approval_mode else permissions,
         interrupt_on=interrupt_on,
         checkpointer=checkpointer,
     )
@@ -280,6 +318,22 @@ def _current_turn_output(messages: list[Any]) -> list[Any]:
         if _message_type(messages[index]) in {"human", "user"}:
             return messages[index + 1 :]
     return messages
+
+
+def _has_final_assistant_message(messages: list[Any]) -> bool:
+    for message in reversed(messages):
+        if _message_type(message) not in {"ai", "assistant"} or _tool_calls(message):
+            continue
+        content = (
+            message.get("content", "")
+            if isinstance(message, dict)
+            else getattr(message, "content", "")
+        )
+        if isinstance(content, str) and content.strip():
+            return True
+        if isinstance(content, list) and content:
+            return True
+    return False
 
 
 def _approval_deadline(created_at: str | None, timeout_seconds: int) -> float:
@@ -423,6 +477,21 @@ async def deep_agents_coding_node(state: CodingAgentState) -> dict[str, Any]:
                 event.get("id", ""),
                 "completed" if event["type"] == "tool_result" else "running",
             )
+        if not _has_final_assistant_message(new_messages):
+            emitter.emit("error", "error", code="missing_final_result")
+            return {
+                "messages": [
+                    AIMessage(
+                        content=(
+                            "The coding agent did not return a final result "
+                            "(missing_final_result)."
+                        )
+                    )
+                ],
+                "coding_session_id": session_id,
+                "coding_status": "error",
+                "coding_events": emitter.events,
+            }
         final_status = "cancelled" if approval_expired else "completed"
         if approval_expired:
             emitter.emit("approval", "expired")

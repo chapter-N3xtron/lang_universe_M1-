@@ -1,5 +1,12 @@
 {
   "python_version": "3.12",
+  "dockerfile_lines": [
+    "COPY --from=node:22-bookworm-slim /usr/local /usr/local",
+    "RUN rm -f /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/pnpm /usr/local/bin/pnpx && corepack enable && corepack prepare pnpm@10.5.1 --activate",
+    "ENV NPM_CONFIG_PREFIX=/opt/coding-tools/node",
+    "ENV PNPM_HOME=/opt/coding-tools/pnpm",
+    "ENV PATH=/opt/coding-tools/node/bin:/opt/coding-tools/pnpm:${PATH}"
+  ],
   "dependencies": [
     "."
   ],

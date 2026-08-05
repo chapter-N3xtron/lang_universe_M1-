@@ -36,7 +36,7 @@ def _write_request():
         content="",
         tool_calls=[
             {
-                "name": "approved_write_file",
+                "name": "write_file",
                 "args": {"file_path": "/durable.txt", "content": "persisted"},
                 "id": "durable-write",
             }

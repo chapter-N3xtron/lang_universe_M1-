@@ -2,20 +2,23 @@ import { test, expect } from "@playwright/test";
 
 test.describe("UI controls render and respond", () => {
   test.beforeEach(async ({ page }) => {
-    await page.route("**/session-catalog/preferences/model**", async (route) => {
-      if (route.request().method() === "PUT") {
-        const body = route.request().postDataJSON();
+    await page.route(
+      "**/session-catalog/preferences/model**",
+      async (route) => {
+        if (route.request().method() === "PUT") {
+          const body = route.request().postDataJSON();
+          await route.fulfill({
+            contentType: "application/json",
+            body: JSON.stringify({ model_id: body.model_id }),
+          });
+          return;
+        }
         await route.fulfill({
           contentType: "application/json",
-          body: JSON.stringify({ model_id: body.model_id }),
+          body: JSON.stringify({ model_id: null }),
         });
-        return;
-      }
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ model_id: null }),
-      });
-    });
+      },
+    );
     // LangGraph SDK polls threads on mount; mock it so the Suspense layout resolves.
     await page.route("**/threads/search", async (route) => {
       await route.fulfill({
@@ -187,6 +190,121 @@ test.describe("UI controls render and respond", () => {
     expect(body.input.messages[0].type).toBe("human");
   });
 
+  test("chained approvals submit only the current interrupt decisions", async ({
+    page,
+  }) => {
+    const runBodies: Record<string, any>[] = [];
+    const actions = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        name: "run_workspace_command",
+        args: { argv: ["git", "status", `--short-${index + 1}`] },
+        description: `Inspect workspace ${index + 1}`,
+      }));
+    const interrupt = (id: string, count: number) => ({
+      id,
+      value: {
+        action_requests: actions(count),
+        review_configs: Array.from({ length: count }, () => ({
+          action_name: "run_workspace_command",
+          allowed_decisions: ["approve", "edit", "reject"],
+        })),
+      },
+    });
+    const sse = (runId: string, currentInterrupt?: Record<string, unknown>) =>
+      [
+        "event: metadata",
+        `data: ${JSON.stringify({ run_id: runId, thread_id: "approval-thread" })}`,
+        "",
+        "event: values",
+        `data: ${JSON.stringify({ messages: [], __interrupt__: currentInterrupt ? [currentInterrupt] : [] })}`,
+        "",
+        "event: end",
+        "data: {}",
+        "",
+      ].join("\n");
+
+    await page.route("**/info", (route) =>
+      route.fulfill({ contentType: "application/json", body: "{}" }),
+    );
+    await page.route("**/runtime-identity", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          runtime_id: "backend-postgres-v1",
+          durable: true,
+          persistence: "postgres",
+        }),
+      }),
+    );
+    await page.route("**/threads", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          thread_id: "approval-thread",
+          created_at: "2026-08-05T00:00:00Z",
+          updated_at: "2026-08-05T00:00:00Z",
+          metadata: {},
+          status: "idle",
+        }),
+      }),
+    );
+    await page.route("**/threads/*/runs/stream", async (route) => {
+      runBodies.push(route.request().postDataJSON());
+      const requestIndex = runBodies.length - 1;
+      const body =
+        requestIndex === 0
+          ? sse("initial-run", interrupt("interrupt-four", 4))
+          : requestIndex === 1
+            ? sse("first-resume", interrupt("interrupt-one", 1))
+            : sse("second-resume");
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body,
+      });
+    });
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/");
+    await page.locator("textarea").fill("Use Coder for approval testing");
+    await page.locator("textarea").press("Enter");
+
+    const approveAll = page.getByRole("button", { name: "Approve All" });
+    await expect(approveAll).toBeVisible();
+    await expect(page.getByText("(1/4)", { exact: false })).toBeVisible();
+    await approveAll.dblclick();
+
+    await expect(page.getByText("(1/4)", { exact: false })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
+    expect(runBodies).toHaveLength(2);
+    expect(runBodies[1].command.resume.decisions).toEqual([
+      { type: "approve" },
+      { type: "approve" },
+      { type: "approve" },
+      { type: "approve" },
+    ]);
+
+    await page.evaluate(() => document.documentElement.classList.add("dark"));
+    const card = page.locator("[data-agent-inbox-card]");
+    const desktopBox = await card.boundingBox();
+    expect(desktopBox?.width).toBeLessThanOrEqual(768);
+    const colors = await card.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { color: style.color, backgroundColor: style.backgroundColor };
+    });
+    expect(colors.color).not.toBe(colors.backgroundColor);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const narrowBox = await card.boundingBox();
+    expect(narrowBox?.width).toBeLessThanOrEqual(390);
+
+    await page.getByRole("button", { name: "Approve" }).click();
+    await expect.poll(() => runBodies.length).toBe(3);
+    expect(runBodies[2].command.resume.decisions).toEqual([
+      { type: "approve" },
+    ]);
+  });
+
   test("does not synthesize a tool result after an incomplete tool call", async ({
     page,
   }) => {
@@ -260,7 +378,9 @@ test.describe("UI controls render and respond", () => {
     expect(secondInput.messages[0]).toEqual(
       expect.objectContaining({
         type: "human",
-        content: [expect.objectContaining({ type: "text", text: "Short follow-up" })],
+        content: [
+          expect.objectContaining({ type: "text", text: "Short follow-up" }),
+        ],
       }),
     );
   });

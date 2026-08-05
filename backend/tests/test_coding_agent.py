@@ -67,6 +67,40 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
     }
 
 
+def test_deep_agents_node_does_not_complete_without_final_assistant_message(
+    monkeypatch, tmp_path
+):
+    from src import coding_agent
+
+    output = [
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "read_file", "args": {}, "id": "call-1"}],
+        ),
+        ToolMessage(content="contents", tool_call_id="call-1"),
+    ]
+
+    async def session_agent(*_args):
+        return _FakeApp(output)
+
+    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
+
+    result = asyncio.run(
+        coding_agent.deep_agents_coding_node(
+            {
+                "messages": [{"role": "user", "content": "Inspect this repo"}],
+                "workspace": str(tmp_path),
+                "execution_mode": "read_only",
+                "thread_identity": "missing-final",
+            }
+        )
+    )
+
+    assert result["coding_status"] == "error"
+    assert "missing_final_result" in result["messages"][0].content
+    assert result["coding_events"][-1]["data"]["code"] == "missing_final_result"
+
+
 def test_deep_agents_node_rejects_relative_workspace(monkeypatch):
     from src import coding_agent
 
@@ -149,9 +183,13 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
             self.paths = kwargs["paths"]
             self.mode = kwargs["mode"]
 
-    class Backend:
+    class FilesystemBackend:
         def __init__(self, **kwargs):
-            captured["backend"] = kwargs
+            captured["filesystem_backend"] = kwargs
+
+    class LocalShellBackend:
+        def __init__(self, **kwargs):
+            captured["local_shell_backend"] = kwargs
 
     def create_agent(**kwargs):
         captured["agent"] = kwargs
@@ -161,13 +199,13 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
     monkeypatch.setattr(
         coding_agent,
         "_deep_agent_components",
-        lambda: (Permission, Backend, create_agent),
+        lambda: (Permission, FilesystemBackend, LocalShellBackend, create_agent),
     )
     monkeypatch.setattr(coding_agent, "get_coding_llm", lambda _name: model)
 
     coding_agent._build_deep_agent(tmp_path.resolve(), "ollama/qwen3.5:27b")
 
-    assert captured["backend"] == {
+    assert captured["filesystem_backend"] == {
         "root_dir": tmp_path.resolve(),
         "virtual_mode": True,
     }
@@ -189,6 +227,59 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
         ["/**"],
         "deny",
     )
+
+
+def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp_path):
+    from src import coding_agent
+
+    captured = {}
+
+    class Permission:
+        def __init__(self, **kwargs):
+            self.operations = kwargs["operations"]
+            self.paths = kwargs["paths"]
+            self.mode = kwargs["mode"]
+
+    class FilesystemBackend:
+        def __init__(self, **kwargs):
+            captured["filesystem_backend"] = kwargs
+
+    class LocalShellBackend:
+        def __init__(self, **kwargs):
+            captured["local_shell_backend"] = kwargs
+
+    def create_agent(**kwargs):
+        captured["agent"] = kwargs
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        coding_agent,
+        "_deep_agent_components",
+        lambda: (Permission, FilesystemBackend, LocalShellBackend, create_agent),
+    )
+    monkeypatch.setattr(coding_agent, "get_coding_llm", lambda _name: SimpleNamespace())
+
+    coding_agent._build_deep_agent(
+        tmp_path.resolve(),
+        "ollama/qwen3.5:27b",
+        execution_mode="approval",
+    )
+
+    assert captured["local_shell_backend"] == {
+        "root_dir": tmp_path.resolve(),
+        "virtual_mode": True,
+        "timeout": 120,
+        "max_output_bytes": 100_000,
+        "inherit_env": True,
+    }
+    assert captured["agent"]["tools"] == []
+    assert set(captured["agent"]["interrupt_on"]) == {
+        "write_file",
+        "edit_file",
+        "delete",
+        "execute",
+    }
+    assert captured["agent"]["permissions"] is None
 
 
 def test_coding_graph_uses_deep_agents_node():

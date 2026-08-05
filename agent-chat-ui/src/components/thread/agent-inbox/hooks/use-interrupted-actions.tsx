@@ -89,7 +89,7 @@ export default function useInterruptedActions({
     e: React.MouseEvent<HTMLButtonElement, MouseEvent> | KeyboardEvent,
   ) => {
     e.preventDefault();
-    if (submissionLock.current || thread.isLoading) return;
+    if (submissionLock.current) return;
 
     const { decision, error } = buildDecisionFromState(
       humanResponse,

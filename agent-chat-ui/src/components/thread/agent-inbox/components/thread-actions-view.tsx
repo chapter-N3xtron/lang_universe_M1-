@@ -168,8 +168,7 @@ export function ThreadActionsView({
   };
 
   const handleApproveAll = useCallback(async () => {
-    if (!hasMultipleActions || submissionLock.current || stream.isLoading)
-      return;
+    if (!hasMultipleActions || submissionLock.current) return;
 
     submissionLock.current = true;
     setSubmittingAll(true);
@@ -210,8 +209,7 @@ export function ThreadActionsView({
   }, [actionRequests, hasMultipleActions, stream]);
 
   const handleSubmitAll = useCallback(async () => {
-    if (!hasMultipleActions || submissionLock.current || stream.isLoading)
-      return;
+    if (!hasMultipleActions || submissionLock.current) return;
 
     if (addressedActions.size !== actionRequests.length) {
       toast.error("Error", {
@@ -309,8 +307,7 @@ export function ThreadActionsView({
   };
 
   const currentTitle = getActionTitle(currentAction);
-  const actionsDisabled =
-    loading || streaming || submittingAll || stream.isLoading;
+  const actionsDisabled = loading || streaming || submittingAll;
   const hasAllDecisions =
     hasMultipleActions && addressedActions.size === actionRequests.length;
 

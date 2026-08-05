@@ -232,6 +232,7 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
 def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp_path):
     from src import coding_agent
 
+    (tmp_path / ".agents" / "skills").mkdir(parents=True)
     captured = {}
 
     class Permission:
@@ -288,6 +289,7 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
         "execute",
     }
     assert captured["agent"]["permissions"] is None
+    assert captured["agent"]["skills"] == ["/.agents/skills/"]
 
 
 def test_coding_graph_uses_deep_agents_node():

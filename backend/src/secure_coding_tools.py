@@ -33,7 +33,7 @@ _ALLOWED_GIT_SUBCOMMANDS = {
     "status",
 }
 _ALLOWED_SCRIPT_NAMES = {"build", "lint", "test", "typecheck"}
-_ALLOWED_OPENSPEC_TOOLS = {"opencode"}
+_ALLOWED_OPENSPEC_TOOLS = {"none"}
 _DENIED_NODE_INSTALL_OPTIONS = {
     "--prefix",
 }

@@ -277,13 +277,13 @@ def test_command_policy_allows_only_bounded_openspec_repository_setup():
     from src.secure_coding_tools import validate_command_argv
 
     assert validate_command_argv(["openspec", "--version"])
-    assert validate_command_argv(["openspec", "init", "--tools", "opencode"])
+    assert validate_command_argv(["openspec", "init", "--tools", "none"])
     assert validate_command_argv(
         [
             "openspec",
             "init",
             "--tools",
-            "opencode",
+            "none",
             "--profile",
             "core",
         ]

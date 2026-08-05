@@ -196,9 +196,9 @@ def list_todos() -> str:
     return _evidence_header(source) + result
 
 
-@tool
+@tool("read_repository_file")
 def read_file(file_path: str) -> str:
-    """Read a file from the workspace directory and return its contents as text.
+    """Read a repository file and register it as evidence for grounded visuals.
 
     Security: path traversal and symlink attacks are blocked.
     Binary files and files over 100KB are rejected.

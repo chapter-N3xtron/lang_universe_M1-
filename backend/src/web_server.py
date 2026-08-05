@@ -33,6 +33,7 @@ from src.epub_attachments import (
     extract_epub,
 )
 from src.ollama_client import list_ollama_cloud_models, list_ollama_models
+from src.openai_client import list_openai_gpt_models
 from src.stt import transcribe
 
 load_dotenv()
@@ -282,6 +283,8 @@ def list_models() -> dict:
     ]
 
     def provider(model_id: str) -> str:
+        if model_id.startswith("openai/"):
+            return "openai"
         if model_id.startswith(("huggingface/", "hf/")):
             return "huggingface"
         if model_id.startswith("ollama-cloud/"):
@@ -306,8 +309,9 @@ def list_models() -> dict:
         for m in list_ollama_models()
         if m.get("name")
     ]
+    openai_models = list_openai_gpt_models()
     seen = {model["id"] for model in models}
-    for discovered in (cloud_models, local_models):
+    for discovered in (openai_models, cloud_models, local_models):
         for model in discovered:
             if model["id"] not in seen:
                 models.append(model)

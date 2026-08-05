@@ -32,6 +32,7 @@ const rows = [
 ];
 
 async function mockBase(page: Page) {
+  let displayName: string | undefined;
   await page.route("**/threads/search", (route) =>
     route.fulfill({ contentType: "application/json", body: "[]" }),
   );
@@ -65,6 +66,21 @@ async function mockBase(page: Page) {
       body: JSON.stringify({ rows, next_cursor: null, total: 1 }),
     });
   });
+  await page.route("**/store/items**", async (route) => {
+    if (route.request().method() === "PUT") {
+      displayName = route.request().postDataJSON().value.display_name;
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        namespace: ["local-owner-v1", "sessions"],
+        key: "session-one",
+        value: { display_name: displayName },
+      }),
+    });
+  });
   await page.route("**/info", (route) =>
     route.fulfill({ contentType: "application/json", body: "{}" }),
   );
@@ -93,6 +109,16 @@ async function mockBase(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => mockBase(page));
+
+test("session name can be edited from the list", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Focus visual" }).click();
+  await page.getByRole("button", { name: rows[0].short_description }).click();
+  const input = page.getByRole("textbox", { name: "Session name" });
+  await input.fill("Durable session memory");
+  await input.press("Enter");
+  await expect(page.getByRole("button", { name: "Durable session memory" })).toBeVisible();
+});
 
 test("visual pane presents a sortable, keyboard-openable session library", async ({
   page,

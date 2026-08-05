@@ -6,7 +6,6 @@ import { useStreamContext } from "@/providers/Stream";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import { useTTS } from "@/hooks/useTTS";
-import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses";
 import type { ConceptMapArtifact } from "@/lib/visual/jasper-response.generated";
 
 interface MessageListProps {
@@ -55,8 +54,9 @@ function MessageListImpl({
         {
           checkpoint,
           streamMode: ["messages"],
-          streamSubgraphs: true,
+          streamSubgraphs: false,
           streamResumable: true,
+          onDisconnect: "cancel",
           optimisticValues: (previous) => {
             if (!values) return previous;
             const previousMessages = Array.isArray(values.messages)
@@ -83,8 +83,9 @@ function MessageListImpl({
       streamRef.current.submit(undefined, {
         checkpoint: parentCheckpoint,
         streamMode: ["messages"],
-        streamSubgraphs: true,
+        streamSubgraphs: false,
         streamResumable: true,
+        onDisconnect: "cancel",
       });
     },
     [onRegenerateStart],
@@ -178,13 +179,7 @@ function MessageListImpl({
   const hasNoAIOrToolMessages = !messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
-  const renderableMessages = useMemo(
-    () =>
-      messages.filter(
-        (message) => !message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX),
-      ),
-    [messages],
-  );
+  const renderableMessages = messages;
   const customComponentMessageIds = useMemo(
     () =>
       new Set(

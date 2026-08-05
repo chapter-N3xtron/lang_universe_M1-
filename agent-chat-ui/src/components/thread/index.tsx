@@ -33,6 +33,7 @@ import { useModelAndVoices } from "@/hooks/use-model-and-voices";
 import { MessageList } from "./message-list";
 import { ChatInput } from "./chat-input";
 import dynamic from "next/dynamic";
+import { openSession } from "@/lib/session-catalog";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
 import type { JasperResponse } from "@/lib/visual/jasper-response.generated";
 
@@ -127,6 +128,7 @@ function ThreadImpl() {
   } = useModelAndVoices();
 
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
+  const [isOpeningSession, setIsOpeningSession] = useState(false);
   const stream = useStreamContext();
   const streamRef = useRef(stream);
   useEffect(() => {
@@ -134,7 +136,6 @@ function ThreadImpl() {
   }, [stream]);
   const streamActions = useMemo(
     () => ({
-      getMessages: () => streamRef.current.messages,
       submit: ((...args: Parameters<StreamContextType["submit"]>) =>
         streamRef.current.submit(...args)) as StreamContextType["submit"],
       stop: () => streamRef.current.stop(),
@@ -155,6 +156,21 @@ function ThreadImpl() {
     },
     [_setThreadId, closeArtifact, setArtifactContext, setSessionView],
   );
+
+  const handleOpenSession = useCallback(async () => {
+    if (!apiUrl || isOpeningSession) return;
+    setIsOpeningSession(true);
+    try {
+      const result = await openSession(apiUrl, authScheme || undefined);
+      setThreadId(result.thread_id);
+    } catch (error) {
+      toast.error("The session could not be opened.", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setIsOpeningSession(false);
+    }
+  }, [apiUrl, authScheme, isOpeningSession, setThreadId]);
 
   useEffect(() => {
     if (!stream.error) {
@@ -256,7 +272,15 @@ function ThreadImpl() {
           >
             {!chatStarted && (
               <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-                <div />
+                <TooltipIconButton
+                  size="lg"
+                  tooltip="Open new session"
+                  variant="ghost"
+                  disabled={isOpeningSession}
+                  onClick={handleOpenSession}
+                >
+                  <SquarePen className="size-5" />
+                </TooltipIconButton>
                 <div className="absolute top-2 right-4 flex items-center">
                   <TooltipIconButton
                     size="lg"
@@ -324,7 +348,8 @@ function ThreadImpl() {
                     className="p-4"
                     tooltip="New thread"
                     variant="ghost"
-                    onClick={() => setThreadId(null)}
+                    disabled={isOpeningSession}
+                    onClick={handleOpenSession}
                   >
                     <SquarePen className="size-5" />
                   </TooltipIconButton>
@@ -380,9 +405,10 @@ function ThreadImpl() {
             voiceOptions={voiceOptions}
             chatStarted={chatStarted}
             targetAgent={stream.values?.target_agent}
-            targetModel={stream.values?.model}
             streamActions={streamActions}
             onStartSubmit={handleSubmit}
+            apiUrl={apiUrl}
+            authScheme={authScheme || undefined}
           />
         }
       />

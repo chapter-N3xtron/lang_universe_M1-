@@ -2,6 +2,20 @@ import { test, expect } from "@playwright/test";
 
 test.describe("UI controls render and respond", () => {
   test.beforeEach(async ({ page }) => {
+    await page.route("**/session-catalog/preferences/model**", async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ model_id: body.model_id }),
+        });
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ model_id: null }),
+      });
+    });
     // LangGraph SDK polls threads on mount; mock it so the Suspense layout resolves.
     await page.route("**/threads/search", async (route) => {
       await route.fulfill({
@@ -167,6 +181,88 @@ test.describe("UI controls render and respond", () => {
 
     const body = (await runRequest).postDataJSON();
     expect(body.input.model).toBe("ollama-cloud/glm-5.2");
+    expect(body.stream_subgraphs).toBe(false);
+    expect(body.on_disconnect).toBe("cancel");
+    expect(body.input.messages).toHaveLength(1);
+    expect(body.input.messages[0].type).toBe("human");
+  });
+
+  test("does not synthesize a tool result after an incomplete tool call", async ({
+    page,
+  }) => {
+    const runBodies: Record<string, unknown>[] = [];
+    await page.route("**/threads", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          thread_id: "stop-regression-thread",
+          created_at: "2026-08-03T00:00:00Z",
+          updated_at: "2026-08-03T00:00:00Z",
+          metadata: {},
+          status: "idle",
+        }),
+      }),
+    );
+    await page.route("**/threads/*/runs/stream", async (route) => {
+      runBodies.push(route.request().postDataJSON());
+      const firstRun = runBodies.length === 1;
+      const body = firstRun
+        ? [
+            "event: metadata",
+            `data: ${JSON.stringify({ run_id: "incomplete-run", thread_id: "stop-regression-thread" })}`,
+            "",
+            "event: messages",
+            `data: ${JSON.stringify([
+              {
+                id: "incomplete-ai",
+                type: "ai",
+                content: "",
+                tool_calls: [
+                  {
+                    id: "incomplete-task",
+                    name: "task",
+                    args: { subagent_type: "research", description: "test" },
+                    type: "tool_call",
+                  },
+                ],
+              },
+              { langgraph_node: "jasper" },
+            ])}`,
+            "",
+            "event: end",
+            "data: {}",
+            "",
+          ].join("\n")
+        : "event: end\ndata: {}\n\n";
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body,
+      });
+    });
+
+    await page.goto("/");
+    const textarea = page.locator("textarea");
+    await textarea.fill("Start a tool call");
+    await textarea.press("Enter");
+    await expect.poll(() => runBodies.length).toBe(1);
+    await textarea.fill("Short follow-up");
+    await textarea.press("Enter");
+    await expect.poll(() => runBodies.length).toBe(2);
+
+    const secondInput = runBodies[1].input as {
+      messages: Array<{
+        type: string;
+        content: Array<{ type: string; text: string }>;
+      }>;
+    };
+    expect(secondInput.messages).toHaveLength(1);
+    expect(secondInput.messages[0]).toEqual(
+      expect.objectContaining({
+        type: "human",
+        content: [expect.objectContaining({ type: "text", text: "Short follow-up" })],
+      }),
+    );
   });
 
   test("repo selector opens and displays the selected folder", async ({

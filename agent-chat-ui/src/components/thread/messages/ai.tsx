@@ -142,6 +142,24 @@ function AssistantMessageImpl({
   });
   const content = message?.content ?? [];
   const contentString = getContentString(content);
+  const additionalKwargs = (
+    message as
+      | (Message & {
+          additional_kwargs?: {
+            jasper_confidence_score?: unknown;
+            jasper_confidence_basis?: unknown;
+          };
+        })
+      | undefined
+  )?.additional_kwargs;
+  const confidenceScore =
+    typeof additionalKwargs?.jasper_confidence_score === "number"
+      ? additionalKwargs.jasper_confidence_score
+      : null;
+  const confidenceBasis =
+    typeof additionalKwargs?.jasper_confidence_basis === "string"
+      ? additionalKwargs.jasper_confidence_basis
+      : null;
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
@@ -210,6 +228,16 @@ function AssistantMessageImpl({
                   {contentString}
                 </MarkdownText>
               </div>
+            )}
+            {confidenceScore !== null && (
+              <p
+                className="text-muted-foreground text-xs"
+                data-jasper-confidence
+              >
+                Confidence {confidenceScore.toFixed(2)} — model estimate, not
+                empirically calibrated
+                {confidenceBasis ? ` · ${confidenceBasis}` : ""}
+              </p>
             )}
 
             {!hideToolCalls && (

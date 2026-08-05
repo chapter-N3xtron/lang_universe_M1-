@@ -227,6 +227,8 @@ class ResponseDiagnostic(StrictModel):
 class JasperResponse(StrictModel):
     version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
     voice_text: str = Field(min_length=1, max_length=12000)
+    confidence_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence_basis: str | None = Field(default=None, min_length=1, max_length=240)
     artifacts: list[VisualArtifact] = Field(default_factory=list, max_length=4)
     layout_suggestion: LayoutSuggestion | None = None
     diagnostic: ResponseDiagnostic | None = None

@@ -133,6 +133,15 @@ class SessionCloseInput(StrictModel):
     tent_poles: list[str] = Field(default_factory=list, max_length=20)
 
 
+class SessionOpenInput(StrictModel):
+    owner_id: str = Field(min_length=1, max_length=128)
+
+
+class ModelPreferenceInput(StrictModel):
+    owner_id: str = Field(min_length=1, max_length=128)
+    model_id: str = Field(min_length=1, max_length=256)
+
+
 class SessionForkInput(StrictModel):
     owner_id: str = Field(min_length=1, max_length=128)
     checkpoint_id: str | None = Field(default=None, max_length=128)

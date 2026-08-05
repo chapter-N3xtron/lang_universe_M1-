@@ -44,9 +44,33 @@ def _create_mock_llm(responses):
 
 
 def _clear_src_modules():
-    to_remove = [k for k in list(sys.modules) if k.startswith("src.")]
-    for k in to_remove:
-        del sys.modules[k]
+    for key in (
+        "src.chat_ui",
+        "src.jasper_agent",
+        "src.research_agent",
+        "src.magic_coder_graph",
+        "src.llm",
+    ):
+        sys.modules.pop(key, None)
+
+
+def test_new_session_opening_is_canonical_and_model_free():
+    from src import chat_ui
+    from src.jasper_agent import STANDARD_SESSION_GREETING
+
+    with patch.object(chat_ui, "get_llm") as get_llm:
+        command = chat_ui.supervisor_node(
+            {"messages": [], "session_event": "open", "session_opened": False}
+        )
+    assert command.goto == "session_opening"
+    get_llm.assert_not_called()
+
+    opening = chat_ui.session_opening_node({})
+    assert opening["messages"] == [
+        {"role": "assistant", "content": STANDARD_SESSION_GREETING}
+    ]
+    assert opening["session_opened"] is True
+    assert opening["active_agent"] == "jasper"
 
 
 def test_supervisor_routes_to_research():

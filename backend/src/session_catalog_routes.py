@@ -13,12 +13,57 @@ from psycopg.rows import dict_row
 from src.session_catalog import SCHEMA, ensure_catalog_schema, query_sessions
 from src.session_catalog_models import (
     SavedViewInput,
+    ModelPreferenceInput,
     SessionCloseInput,
     SessionForkInput,
+    SessionOpenInput,
     SessionQuery,
 )
 
 router = APIRouter(prefix="/session-catalog", tags=["session-catalog"])
+
+
+@router.get("/preferences/model")
+async def get_model_preference(owner_id: str = Query(min_length=1, max_length=128)):
+    client = _agent_server_client()
+    item = await client.store.get_item((owner_id, "preferences"), "model-selection")
+    value = item.get("value", {}) if item else {}
+    return {"model_id": value.get("model_id")}
+
+
+@router.put("/preferences/model")
+async def put_model_preference(body: ModelPreferenceInput):
+    client = _agent_server_client()
+    await client.store.put_item(
+        (body.owner_id, "preferences"),
+        "model-selection",
+        {"model_id": body.model_id},
+        index=False,
+    )
+    return {"model_id": body.model_id}
+
+
+@router.post("/open")
+async def open_session(body: SessionOpenInput) -> dict[str, Any]:
+    """Create one durable thread and run its deterministic Jasper opening."""
+
+    client = _agent_server_client()
+    thread = await client.threads.create(
+        graph_id="chat_ui",
+        metadata={"graph_id": "chat_ui", "owner_id": body.owner_id},
+    )
+    thread_id = thread["thread_id"]
+    await client.runs.wait(
+        thread_id,
+        "chat_ui",
+        input={
+            "messages": [],
+            "session_event": "open",
+            "user_identity": body.owner_id,
+            "target_agent": "jasper",
+        },
+    )
+    return {"thread_id": thread_id, "status": "open"}
 
 
 def _database_uri() -> str:

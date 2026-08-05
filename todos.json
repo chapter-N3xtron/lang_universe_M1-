@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-02T20:00:24Z",
+  "updated_at": "2026-08-05T00:07:31Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -74,6 +74,15 @@
           "notes": "Historical gates passed the frontend production build, generated-schema checks, TypeScript, 27 Playwright tests, Research citations, and Research visual placement. The latest focused Jasper suite passed 52 tests and an earlier full backend run passed 236. This gate is currently open: live repository grounding passes, but grounded visualization regressed\u2014Jasper reads repository files without calling draw_concept_map or publishing an artifact. The final ordered no-mock sweep must be rerun after the Jasper contract is corrected, and still requires the segmented handoff and continuous real three-minute audio run. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
+          "id": "repair-thread-model-selector-payload-divergence",
+          "content": "Ensure every submitted Agent Server run uses the model currently shown by the UI selector, preserve that selection consistently across thread changes and refreshes, and prevent a cloud-selected session from silently loading any local Ollama model.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-03T03:57:04Z",
+          "notes": "Confirmed production defect on 2026-08-03: the selector's React-only choice was discarded on refresh and stale checkpoint model state submitted ollama/qwen3.5:27b despite a visible cloud selection, loading 16 GB into GPU memory. Corrected the ownership boundary by persisting every explicit selector change immediately as owner-scoped LangGraph Store preference data. Checkpoint model remains execution history and no longer drives the selector. Deployed the canonical Agent Server and optimized UI, verified the preference route, UI HTTP 200, durable runtime identity, and empty ollama ps after unloading the unintended model. Validation passed: 37 focused backend tests, TypeScript, and the production frontend build. The human must make one explicit selection after this migration because no prior Store preference existed; subsequent refreshes and thread changes restore it."
+        },
+        {
           "id": "repair-agent-server-runtime-and-envelopes",
           "content": "Fix normal Agent Server execution without allow-blocking, Python 3.11 schema compatibility, stale-thread recovery, and prevent internal JSON/tool envelopes from leaking into visible chat.",
           "status": "completed",
@@ -116,7 +125,7 @@
           "agent": "jasper",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Do not synthesize missing artifacts or treat deterministic preflight as proof of Jasper tool use. Removed Jasper's call-limit middleware and tools-disabled recovery call so the standard create_agent ReAct loop owns tool execution and completion. After restart, live grounded visual thread 019fbb51-c590-7013-a629-a55f9b42daff successfully called repository tools and registered eight evidence sources, but ollama-cloud/glm-5.1 returned a final assistant preamble ('Let me now construct...') instead of a draw_concept_map tool call. Artifact count remained zero. No custom limit or recovery middleware participated in this run. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "Do not synthesize missing artifacts or treat deterministic preflight as proof of Jasper tool use. Removed Jasper's call-limit middleware and tools-disabled recovery call so the standard create_agent ReAct loop owns tool execution and completion. After restart, live grounded visual thread 019fbb51-c590-7013-a629-a55f9b42daff successfully called repository tools and registered eight evidence sources, but ollama-cloud/glm-5.1 returned a final assistant preamble ('Let me now construct...') instead of a draw_concept_map tool call. Artifact count remained zero. No custom limit or recovery middleware participated in this run. On 2026-08-03 Jasper's execution loop was migrated to the documented create_deep_agent harness with read-only FilesystemBackend discovery tools, direct grounded visualization and todo tools, and Research and approval-gated Coding as CompiledSubAgent specialists through the standard task tool. The obsolete eight-call ceiling and ordinary Research wrapper were removed. The compiled tool surface and a real built-in ls execution are covered by tests; 168 backend tests pass. Keep this todo in progress until a live selected-provider repository-grounded visualization passes. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "run-real-jasper-release-gate",
@@ -125,7 +134,7 @@
           "agent": "coding",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Mock-only tests are insufficient; completion requires live runtime evidence. Jasper now uses the standard create_agent loop, is the default supervisor, and has Research and approval-gated Coding through SubAgentMiddleware. The compiled graph exposes the expected ten direct tools plus task. Focused tests and lint pass, and the restarted API is healthy. Live visual thread 019fbb51-c590-7013-a629-a55f9b42daff still failed because ollama-cloud/glm-5.1 emitted final text instead of calling the registered draw_concept_map tool; no artifact was published. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "Mock-only tests are insufficient; completion requires live runtime evidence. Jasper now uses the standard create_agent loop, is the default supervisor, and has Research and approval-gated Coding through SubAgentMiddleware. The compiled graph exposes the expected ten direct tools plus task. Focused tests and lint pass, and the restarted API is healthy. Live visual thread 019fbb51-c590-7013-a629-a55f9b42daff still failed because ollama-cloud/glm-5.1 emitted final text instead of calling the registered draw_concept_map tool; no artifact was published. The 2026-08-03 implementation now uses create_deep_agent directly and exposes exactly draw_concept_map, list_todos, read_repository_file, read_file, ls, glob, grep, and task; Research and Coding are named compiled subagents. Unit and graph validation passes, but this release gate remains pending until the same surface is observed in Agent Server traces with a real model and a visual artifact is published. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "correct-jasper-tool-contract",
@@ -153,6 +162,24 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": "Use the existing renderer-neutral NarrationTrack/NarrationCue contract and LangGraph thread/checkpoint state; do not split speakers with regexes or duplicate raw tool output into chat. Desired library handoff recorded 2026-08-02: Jasper neutrally checks understanding when intent is not already clear, explicitly introduces the Research transition (for example, 'let me run to the library'), and retains Jasper-authored context in the Jasper voice. Research returns typed specialist narration with speaker_profile=research plus separate reference/list/visual artifacts; the UI gives those segments visible Research provenance and TTS uses the configured Research voice. Node deep dives must preserve artifact provenance and let the human explicitly continue with Research, Coding, Jasper, or another available profile rather than inferring a handoff from attention alone. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "timestamped-research-pass-reference-artifacts",
+          "content": "Represent every Research search as a durable, timestamped visual-board pass containing clickable numbered references, short source summaries, explicit page-read versus search-snippet or retrieval-failure status, and stable claim-to-reference links showing exactly where each source supports the response.",
+          "status": "pending",
+          "agent": "research",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Extend rather than replace dual-channel-citation-experience and research-citation-verification-release-gate. Use LangChain ToolMessage artifacts for full connector metadata and a LangGraph Command/state update for the typed ResearchPass artifact; persist pass identity and session/artifact relationships through the existing durable Store boundary. Render concise numbered citations in text and full cards in the visual board, grouped by RFC 3339 date/time, with parent/deep-dive links between passes. Use CSL-JSON-compatible bibliographic metadata for citation rendering/export and W3C PROV-inspired activity/entity provenance. Never label a URL as read unless a retrieval tool actually returned usable page content; distinguish discovered, snippet-only, read, partial, and failed states. Citation selection must focus the associated stable response or narration segment, and URLs must not be spoken. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "remove-legacy-kokoro-stack",
+          "content": "Remove the obsolete Kokoro TTS implementation and dependency graph so Pocket TTS is the repository's only active speech-synthesis engine.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-03T15:52:37Z",
+          "notes": "Confirmed the legacy tts.py implementation and runtime imports were already absent, removed Kokoro from the sidecar dependency declaration, and regenerated uv.lock. The lock cleanup removed Kokoro and its 38 exclusive transitive packages, including the incompatible legacy Transformers branch. Repository search finds no Kokoro, KPipeline, or src.tts references; uv lock validation and both Pocket TTS CPU-safety tests pass. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "live-cloud-model-persistence",
@@ -270,6 +297,15 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": "This is the implementation gate. It remains blocked on the three observational tasks above so speculative UI changes do not accumulate. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "compact-low-contrast-activity-cards",
+          "content": "Replace oversized white tool-call, tool-result, and Research reference cards with one compact semantic dark-red card treatment that avoids abrupt contrast in both light and dark modes.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-03T15:31:55Z",
+          "notes": "Added shared activity-card color tokens with muted burgundy surfaces, softened foregrounds and borders for both themes. Applied the compact treatment to Agent Chat UI tool calls/results and visual-board source/reference cards, reducing maximum width, padding, typography, and expansion-control height. Focused lint, TypeScript, Prettier, and diff checks pass. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     },
@@ -477,6 +513,33 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-08-02T02:45:17Z",
           "notes": "Created GOVERNANCE_FRAMEWORK.md as a sourced working governance draft covering authority, typed enforcement, case-law retrieval, editorial ownership, interaction principles, staged adoption, and unresolved questions. It is explicitly not the ratified constitution and remains linked to implementation work through stable rule and todo IDs."
+        },
+        {
+          "id": "add-versioned-jasper-interaction-governance-prompt",
+          "content": "Add the human-authored Jasper identity, No-Self, invisible-elegance tone, incremental pacing, no-coercion, capability-transparency, consent, and standard-greeting contract to Jasper's active system prompt with an explicit version.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-03T03:14:33Z",
+          "notes": "Added Jasper interaction governance version 2026-08-03.1 to the active Jasper system prompt and required the two-pass formatter to preserve No-Self language, lean pacing, human control, and the prohibition on manufactured intimacy or unrequested next steps. The prompt states that it does not replace typed LangGraph interrupts or tool authorization. Added focused regression coverage; all 20 Jasper-agent tests pass. This is prompt-level guidance authorized by the human, not ratification of the broader constitution or activation of the pending runtime governance framework. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "align-all-jasper-response-paths-with-no-self",
+          "content": "Apply Jasper's versioned No-Self interaction contract consistently to normal generation, structured formatting, empty-answer recovery, visual fallback narration, and sanitized provider or agent failures.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-03T03:19:01Z",
+          "notes": "Added reusable No-Self response guidance to Jasper's unbound final-answer recovery, replaced first-person visual and provider fallback language with system-neutral phrasing, and expanded regression assertions for recovery and failure paths. Scope was deliberately limited to Jasper; Research, Coding, Magic Coder, and the outer supervisor graph were not changed. All 20 focused Jasper-agent tests pass. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "make-jasper-session-opening-deterministic",
+          "content": "Create a deterministic, idempotent Jasper opening transition for genuinely new durable sessions and align it with the existing session close lifecycle.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-03T03:24:57Z",
+          "notes": "Added an owner-scoped session-catalog open route that creates a durable Agent Server thread and runs a model-free LangGraph session_opening node exactly once. The node persists the canonical No-Self greeting, Jasper attribution, opening version, and session_opened state through the existing record_session projection used by the close lifecycle. New-session buttons now call this route; reopened and forked threads do not retrigger it. Validation passed: 37 focused backend tests and TypeScript checking. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     },
@@ -503,7 +566,7 @@
           "agent": "coding",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Observed defect: both surfaces display metadata but do not permit correction. Preserve human editorial ownership, show save/cancel explicitly, and never silently replace human-reviewed text with a later model summary. Cross-reference design-human-knowledge-work-review and implement-session-review-fork-and-visual-timeline."
+          "notes": "Session names can now be edited inline from All sessions and persist as display_name in the existing LangGraph Store record through the standard SDK. The todo remains pending for long-description and close-review editing. Cross-reference design-human-knowledge-work-review and implement-session-review-fork-and-visual-timeline. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "jasper-session-resumption-orientation",
@@ -2097,6 +2160,24 @@
           "completed_by_model": "openai/gpt-5",
           "completed_at": "2026-08-02T18:56:26Z",
           "notes": "Passed 155 backend tests, eight focused catalog tests, the Next.js production build, ten focused Playwright tests, and live canonical-server contract checks. The final two-pass production rebuild used public APIs and a normalized per-table content fingerprint across 73 threads; exact readback preserved the human-reviewed summary, closed status, native parent provenance, and tent poles. Semantic table, dialog, labels, focus, and keyboard activation are browser-tested."
+        }
+      ]
+    },
+    {
+      "id": "coding-specialist-async-invocation-repair",
+      "title": "Repair Coding Specialist Async Invocation",
+      "created_at": "2026-08-05T00:03:55Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "use-async-jasper-specialist-path",
+          "content": "Make Jasper invoke its compiled LangGraph Coding specialist through the native async Deep Agents task path while preserving approval, persistence, streaming, and security boundaries. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T00:07:31Z",
+          "notes": "Converted Jasper's node and model/agent helper chain to native async invocation, preserving the compiled LangGraph Coding specialist and its approval, persistence, streaming, and security boundaries. Added a regression that delegates through the Deep Agents task tool to an async-only compiled Coding graph. Focused Jasper/Coding tests passed 29/29, the complete backend suite passed 175/175, and targeted Ruff checks passed. Repository-wide Ruff remains blocked by pre-existing import-order findings in backend/src/epub_attachments.py and backend/src/session_catalog_routes.py. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

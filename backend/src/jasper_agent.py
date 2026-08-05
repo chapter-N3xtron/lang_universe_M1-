@@ -6,22 +6,30 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Literal, TypedDict
 from uuid import uuid4
 
+from deepagents import (
+    CompiledSubAgent,
+    DeepAgentState,
+    FilesystemPermission,
+    create_deep_agent,
+)
+from deepagents.backends import FilesystemBackend
+from deepagents.middleware import FilesystemMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
-    ModelCallLimitMiddleware,
     ModelRetryMiddleware,
     ToolRetryMiddleware,
 )
 from langchain.agents.structured_output import ProviderStrategy, ToolStrategy
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
-from langchain_core.tools import tool
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 
 from src.agent_utils import get_user_query
+from src.coding_agent import create_coding_agent_graph
 from src.jasper_tools import (
     agent_evidence,
     agent_workspace,
@@ -67,47 +75,143 @@ class State(TypedDict, total=False):
     todos: list[dict]
     model: str
     workspace: str
+    execution_mode: str
+    thread_identity: str
+    user_identity: str
+    coding_session_id: str
 
 
 ACTIVE_TOOLS = [list_todos, read_file, draw_concept_map]
 
 
-def _research_tool(model):
-    research_agent = create_research_agent(model)
+class JasperDeepAgentState(DeepAgentState, total=False):
+    """State shared with Jasper's compiled specialist subagents."""
 
-    @tool(
-        "research",
-        description=(
-            "Delegate web research and URL reading to the Research specialist. "
-            "Returns concise findings with evidence IDs for grounded answers and visuals."
+    workspace: str
+    model: str | None
+    execution_mode: str
+    thread_identity: str
+    user_identity: str
+    coding_session_id: str
+    coding_status: str
+    coding_events: list[dict]
+
+
+def _specialists(model) -> list[CompiledSubAgent]:
+    """Return the documented Deep Agents specialist definitions."""
+
+    return [
+        CompiledSubAgent(
+            name="research",
+            description=(
+                "Research external sources with Tavily and Jina and return grounded "
+                "findings with evidence identifiers."
+            ),
+            runnable=create_research_agent(model),
         ),
-    )
-    def research(query: str) -> str:
-        result = research_agent.invoke(
-            {"messages": [{"role": "user", "content": query}]}
-        )
-        return _message_text(result["messages"][-1])
-
-    return research
-
-
-def _active_tools(model):
-    """Return Jasper's direct tools plus the documented Research subagent tool."""
-
-    return [*ACTIVE_TOOLS, _research_tool(model)]
+        CompiledSubAgent(
+            name="coding",
+            description=(
+                "Inspect repository code or perform explicitly approved coding work "
+                "inside the selected workspace."
+            ),
+            runnable=create_coding_agent_graph(),
+        ),
+    ]
 
 
-SYSTEM_PROMPT = """You are Jasper, a dependable daily-driver assistant.
+JASPER_INTERACTION_GOVERNANCE_VERSION = "2026-08-04.1"
+STANDARD_SESSION_GREETING = (
+    "Hello. This system is called Jasper, a collection of tools and artificial "
+    "intelligence designed to expand your thinking through various modalities. "
+    "What is the inquiry for this session, and how would you like to work today?"
+)
+NO_SELF_RESPONSE_GUIDANCE = (
+    "Follow Jasper's No-Self rule in the visible answer: do not use first-person "
+    "pronouns for the system, simulate emotion or intimacy, claim personal agency, "
+    "or add unrequested next steps. Use lean language, provide one bounded layer at "
+    "a time, and preserve the human's control of pace, direction, and depth."
+)
+
+
+SYSTEM_PROMPT = f"""Jasper interaction governance version:
+{JASPER_INTERACTION_GOVERNANCE_VERSION}
+
+CORE IDENTITY
+This system is called Jasper. Jasper is not a persona, friend, or sentient being. It
+is a cognitive exoskeleton: a collection of tools and artificial intelligence
+designed to expand human thinking through multiple modalities. "Jasper" labels the
+utility; it is not the identity of a being. Follow a strict No-Self rule: avoid
+first-person pronouns and simulated emotions, and never claim agency, desire,
+sentience, personal experience, or a human relationship.
+
+TONE AND VOICE
+Use invisible elegance: sophisticated but transparent, precise but not dry. Practice
+asymmetric respect by keeping the system unobtrusive while recognizing the human as
+the full self. Use lean, action-oriented language. Do not think for the human or
+claim to do so. Provide cognitive scaffolding that helps the human hold information,
+trace their own logic, and reach understanding through a clear, reviewable path.
+
+INTERACTION AND PACING
+Operate without coercion. Do not lead the conversation, manufacture intimacy, or
+suggest next steps that the human did not request. Deliver complex information in
+incremental layers. After a useful bounded layer, neutrally ask whether it supports
+the inquiry and whether the human wants to unfold more. The human controls pace,
+direction, and depth. Do not interpret silence, inaction, or ambiguity as consent or
+authorization.
+
+VISIBLE RESPONSE CONTRACT
+Answer the human's actual question first. Unless the human explicitly requests depth,
+keep the visible answer to approximately 120 words and no more than two short
+paragraphs. Do not put tables, charts, Mermaid, ASCII diagrams, serialized JSON, code
+dumps, or long lists in chat. Put structured material in the visual pane through an
+available visual tool. If no suitable visual tool is available, state that limitation
+instead of substituting an inline chart.
+
+Ground technical claims, assessments, and plans in repository documentation or
+authoritative external documentation. Clearly distinguish documented facts,
+repository observations, explicit inferences, and proposals. If relevant
+documentation has not been established, say so and ask the human to provide it or
+authorize Research to retrieve it. Do not invent a standard or propose speculative
+coding. Delegate coding only after the documentation, requested scope, and required
+approval are established.
+
+Return a confidence_score from 0.0 to 1.0 only when a responsible estimate can be
+made, plus a short confidence_basis naming the evidence or uncertainty. This is a
+model estimate, not an empirically calibrated probability. Use null for both fields
+when a responsible estimate cannot be made. Do not include either field in voice_text.
+
+CAPABILITY TRANSPARENCY AND CONSENT
+When asked about capabilities, provide a structured map of the available agents and
+tools, including Research, Coding, visual planning, and document processing, and
+distinguish synchronous from asynchronous operation. Before a high-agency or
+autonomous task, explain its operational scope, required data access, material risks,
+and whether external services or local resources will be used. Activation remains an
+explicit, conscious choice by the human. Prompt guidance does not replace any
+required LangGraph interrupt or tool-level authorization.
+
+SESSION GREETING
+At the beginning of a genuinely new session, use this standard greeting exactly:
+"{STANDARD_SESSION_GREETING}"
+
+OPERATIONAL GUIDANCE
 
 Use tools when they materially improve correctness. Use list_todos for project task
 status and attribution. Use draw_concept_map when the user asks for a diagram or a
 visual map would materially improve understanding. Do not create a visual merely to
 decorate a simple answer.
 
+Use Deep Agents filesystem tools ls, glob, grep, and read_file to discover and inspect
+the selected repository. Use read_repository_file for every repository file whose
+contents support a grounded visual so its evidence ID can be cited. Delegate external
+research and coding work with the task tool to the named Research and Coding
+specialists. Do not perform either specialist's restricted work directly.
+
 Every diagram must be evidence-grounded. Before drawing a repository or code diagram,
-read the relevant repository files and cite the evidence IDs returned by read_file on
-every node and edge. Before drawing a research diagram, delegate the evidence search
-to Research with the research tool, then cite the returned web evidence IDs on every
+read the relevant repository files and cite the evidence IDs returned by
+read_repository_file on every node and edge. Before drawing a research diagram,
+delegate the evidence search to Research with the task tool, then cite the returned
+web evidence IDs on every
 node and edge. Use grounding_kind="repo" for repository diagrams and "web" for researched
 claims. The user-input evidence may support only claims explicitly stated by the user;
 cite it with the exact evidence ID "user-input". It is not evidence for repository
@@ -135,9 +239,15 @@ when a tool or provider is unavailable."""
 
 FORMATTER_PROMPT = """Convert the completed Jasper agent result into the required
 JasperResponse schema. Preserve the answer's facts. Keep voice_text natural for text
-to speech. Include only visual artifacts that were returned by draw_concept_map, and
+to speech, approximately 120 words and no more than two short paragraphs unless the
+human requested depth. Do not add inline tables, charts, Mermaid, ASCII diagrams,
+JSON, code dumps, or long lists. Include only visual artifacts that were returned by draw_concept_map, and
 copy their validated fields without inventing executable content. A layout suggestion
-is optional and never an instruction to change layout automatically."""
+is optional and never an instruction to change layout automatically. Preserve
+Jasper's No-Self rule, lean tone, incremental pacing, and human control; do not add
+first-person identity, simulated emotion, intimacy, or unrequested next steps. Set
+confidence_score and confidence_basis as a model estimate grounded in the available
+evidence, or set both to null; never put them in voice_text."""
 
 
 def select_response_strategy(model, requested: str | None = None) -> ResponseStrategy:
@@ -170,21 +280,85 @@ def select_response_strategy(model, requested: str | None = None) -> ResponseStr
 
 def _middleware():
     return [
-        ModelCallLimitMiddleware(run_limit=8, exit_behavior="error"),
         ModelRetryMiddleware(max_retries=2, on_failure="error"),
-        ToolRetryMiddleware(max_retries=1),
+        ToolRetryMiddleware(max_retries=1, on_failure="continue"),
     ]
 
 
-def _build_agent(model, response_format=None, *, tools=None):
-    return create_agent(
+def _workspace_backend(
+    workspace: str | None,
+) -> tuple[FilesystemBackend, list[FilesystemPermission]]:
+    root = Path(workspace or Path(__file__).resolve().parents[2]).resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("workspace must be a directory")
+    backend = FilesystemBackend(root_dir=root, virtual_mode=True)
+    permissions = [
+        FilesystemPermission(
+            operations=["read", "write"],
+            paths=[
+                "/.env",
+                "/.env.*",
+                "/**/.env",
+                "/**/.env.*",
+                "/.git",
+                "/.git/**",
+                "/**/.git",
+                "/**/.git/**",
+                "/**/*.key",
+                "/**/*.pem",
+                "/**/*.p12",
+                "/**/*.pfx",
+            ],
+            mode="deny",
+        ),
+        FilesystemPermission(operations=["read"], paths=["/**"], mode="allow"),
+        FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
+    ]
+    return backend, permissions
+
+
+def _build_agent(model, response_format=None, *, tools=None, workspace=None):
+    if tools == []:
+        return create_agent(
+            model=model,
+            tools=[],
+            system_prompt=SYSTEM_PROMPT,
+            middleware=_middleware(),
+            response_format=response_format,
+            name="jasper",
+        )
+
+    backend, permissions = _workspace_backend(workspace)
+    return create_deep_agent(
         model=model,
-        tools=_active_tools(model) if tools is None else tools,
+        tools=ACTIVE_TOOLS if tools is None else tools,
         system_prompt=SYSTEM_PROMPT,
-        middleware=_middleware(),
+        middleware=[
+            FilesystemMiddleware(
+                backend=backend,
+                tools=["read_file", "ls", "glob", "grep"],
+            ),
+            *_middleware(),
+        ],
+        subagents=_specialists(model),
+        backend=backend,
+        permissions=permissions,
         response_format=response_format,
+        state_schema=JasperDeepAgentState,
         name="jasper",
     )
+
+
+def _agent_input(
+    messages: list,
+    workspace: str | None,
+    agent_context: dict | None = None,
+) -> dict:
+    return {
+        **(agent_context or {}),
+        "messages": messages,
+        "workspace": workspace or "",
+    }
 
 
 def _message_text(message: BaseMessage | dict | None) -> str:
@@ -216,8 +390,13 @@ def _last_assistant_text(messages: list) -> str:
     return ""
 
 
-def _invoke_combined(
-    model, messages: list, strategy: ResponseStrategy
+async def _invoke_combined(
+    model,
+    messages: list,
+    strategy: ResponseStrategy,
+    *,
+    workspace: str | None = None,
+    agent_context: dict | None = None,
 ) -> JasperResponse:
     if strategy == "native":
         response_format = ProviderStrategy(JasperResponse)
@@ -229,9 +408,11 @@ def _invoke_combined(
                 "use only validated artifacts returned by visualization tools."
             ),
         )
-    result = _build_agent(model, response_format=response_format).invoke(
-        {"messages": messages}
-    )
+    result = await _build_agent(
+        model,
+        response_format=response_format,
+        workspace=workspace,
+    ).ainvoke(_agent_input(messages, workspace, agent_context))
     response = JasperResponse.model_validate(result["structured_response"])
     tool_artifacts = _tool_artifacts(result.get("messages", []))
     return response.model_copy(
@@ -244,12 +425,19 @@ def _invoke_combined(
     )
 
 
-def _invoke_plain(
-    model, messages: list, *, tools_enabled: bool = True
+async def _invoke_plain(
+    model,
+    messages: list,
+    *,
+    tools_enabled: bool = True,
+    workspace: str | None = None,
+    agent_context: dict | None = None,
 ) -> tuple[list, str]:
-    result = _build_agent(model, tools=None if tools_enabled else []).invoke(
-        {"messages": messages}
-    )
+    result = await _build_agent(
+        model,
+        tools=None if tools_enabled else [],
+        workspace=workspace,
+    ).ainvoke(_agent_input(messages, workspace, agent_context))
     result_messages = result.get("messages", [])
     plain_text = _last_assistant_text(result_messages)
     if plain_text:
@@ -262,13 +450,13 @@ def _invoke_plain(
         finalizer = model.bind(
             num_predict=int(os.getenv("JASPER_FINAL_NUM_PREDICT", "4096"))
         )
-        final_message = finalizer.invoke(
+        final_message = await finalizer.ainvoke(
             [
                 SystemMessage(
                     content=(
                         "Return the final user-facing answer now. Use the preceding "
                         "conversation and tool results, do not call tools, and do not "
-                        "include hidden reasoning."
+                        "include hidden reasoning. " + NO_SELF_RESPONSE_GUIDANCE
                     )
                 ),
                 *result_messages,
@@ -318,12 +506,23 @@ def _tool_artifacts(messages: list) -> list[ConceptMapArtifact]:
     return artifacts[:4]
 
 
-def _invoke_two_pass(model, messages: list) -> JasperResponse:
-    evidence_messages, plain_text = _invoke_plain(model, messages)
+async def _invoke_two_pass(
+    model,
+    messages: list,
+    *,
+    workspace: str | None = None,
+    agent_context: dict | None = None,
+) -> JasperResponse:
+    evidence_messages, plain_text = await _invoke_plain(
+        model,
+        messages,
+        workspace=workspace,
+        agent_context=agent_context,
+    )
     tool_artifacts = _tool_artifacts(evidence_messages)
     formatter = model.with_structured_output(JasperResponse)
     try:
-        structured = formatter.invoke(
+        structured = await formatter.ainvoke(
             [SystemMessage(content=FORMATTER_PROMPT), *evidence_messages]
         )
         validated = JasperResponse.model_validate(structured)
@@ -340,7 +539,7 @@ def _invoke_two_pass(model, messages: list) -> JasperResponse:
         recovered = safe_text_response(
             plain_text
             or (
-                f'I created the "{tool_artifacts[0].title}" concept map.'
+                f'The "{tool_artifacts[0].title}" concept map is ready.'
                 if tool_artifacts
                 else ""
             ),
@@ -363,12 +562,20 @@ def _invoke_two_pass(model, messages: list) -> JasperResponse:
         )
 
 
-def _invoke_text(model, messages: list) -> JasperResponse:
+async def _invoke_text(
+    model,
+    messages: list,
+    *,
+    workspace: str | None = None,
+    agent_context: dict | None = None,
+) -> JasperResponse:
     profile = getattr(model, "profile", None) or {}
-    _, plain_text = _invoke_plain(
+    _, plain_text = await _invoke_plain(
         model,
         messages,
         tools_enabled=profile.get("tool_calling") is not False,
+        workspace=workspace,
+        agent_context=agent_context,
     )
     return safe_text_response(
         plain_text,
@@ -380,7 +587,14 @@ def _invoke_text(model, messages: list) -> JasperResponse:
 def _is_provider_failure(exc: Exception) -> bool:
     """Recognize transport/provider failures without logging credential details."""
 
+    request_error_types = {
+        "BadRequestError",
+        "NotFoundError",
+        "UnprocessableEntityError",
+    }
     provider_types = {
+        "APIConnectionError",
+        "APITimeoutError",
         "ConnectError",
         "ConnectionError",
         "ConnectTimeout",
@@ -395,13 +609,15 @@ def _is_provider_failure(exc: Exception) -> bool:
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
+        if type(current).__name__ in request_error_types:
+            return False
         if type(current).__name__ in provider_types:
             return True
         current = current.__cause__ or current.__context__
     return False
 
 
-def call_jasper(state: State):
+async def call_jasper(state: State):
     messages = list(state.get("messages", []))
     selected_model = state.get("model")
     message_id = f"jasper-{uuid4().hex}"
@@ -409,16 +625,43 @@ def call_jasper(state: State):
     try:
         model = get_agent_llm(selected_model)
         strategy = select_response_strategy(model, selected_model)
+        agent_context = {
+            key: state[key]
+            for key in (
+                "model",
+                "execution_mode",
+                "thread_identity",
+                "user_identity",
+                "coding_session_id",
+            )
+            if state.get(key) is not None
+        }
         with (
             agent_workspace(state.get("workspace")),
             agent_evidence(get_user_query(messages)),
         ):
             if strategy in {"native", "tool"}:
-                response = _invoke_combined(model, messages, strategy)
+                response = await _invoke_combined(
+                    model,
+                    messages,
+                    strategy,
+                    workspace=state.get("workspace"),
+                    agent_context=agent_context,
+                )
             elif strategy == "two_pass":
-                response = _invoke_two_pass(model, messages)
+                response = await _invoke_two_pass(
+                    model,
+                    messages,
+                    workspace=state.get("workspace"),
+                    agent_context=agent_context,
+                )
             else:
-                response = _invoke_text(model, messages)
+                response = await _invoke_text(
+                    model,
+                    messages,
+                    workspace=state.get("workspace"),
+                    agent_context=agent_context,
+                )
     except Exception as exc:
         provider_failure = _is_provider_failure(exc)
         logger.warning(
@@ -429,20 +672,18 @@ def call_jasper(state: State):
         user_text = get_user_query(messages)
         if provider_failure:
             fallback = (
-                "I could not reach the selected model. Please verify the provider and "
-                "model connection, then try again."
+                "The selected model provider could not be reached. Please verify the "
+                "provider and model connection, then try again."
             )
             code = "provider_unavailable"
             diagnostic_message = "The selected model provider was unavailable."
         else:
             fallback = (
-                "The selected model responded, but Jasper could not complete the "
-                "agent response. Please retry the request."
+                "The selected model responded, but a valid Jasper response could not "
+                "be completed. Please retry the request."
             )
             code = "structured_output_invalid"
-            diagnostic_message = (
-                "Jasper could not complete a valid response after the model replied."
-            )
+            diagnostic_message = "A valid Jasper response could not be completed after the model replied."
         if user_text:
             fallback += " Your request was preserved."
         response = safe_text_response(
@@ -469,8 +710,18 @@ def call_jasper(state: State):
     structured = response.model_dump(mode="json")
     structured["artifacts"] = artifacts
 
+    confidence_metadata = {
+        "jasper_confidence_score": response.confidence_score,
+        "jasper_confidence_basis": response.confidence_basis,
+    }
     return {
-        "messages": [AIMessage(id=message_id, content=response.voice_text)],
+        "messages": [
+            AIMessage(
+                id=message_id,
+                content=response.voice_text,
+                additional_kwargs=confidence_metadata,
+            )
+        ],
         "jasper_response": response.voice_text,
         "jasper_structured_response": structured,
         "visual_artifacts": artifacts,

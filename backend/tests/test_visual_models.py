@@ -65,11 +65,20 @@ def _artifact() -> ConceptMapArtifact:
 def test_jasper_response_round_trip():
     response = JasperResponse(
         voice_text="A neuron receives a signal and passes it along its axon.",
+        confidence_score=0.82,
+        confidence_basis="The explanation is grounded in the supplied evidence.",
         artifacts=[_artifact()],
     )
     restored = JasperResponse.model_validate_json(response.model_dump_json())
     assert restored == response
     assert restored.artifacts[0].renderer == "react_flow"
+    assert restored.confidence_score == 0.82
+
+
+def test_jasper_confidence_is_bounded_or_unknown():
+    assert JasperResponse(voice_text="Unknown.").confidence_score is None
+    with pytest.raises(ValidationError):
+        JasperResponse(voice_text="Overconfident.", confidence_score=1.01)
 
 
 def test_unknown_fields_are_rejected():

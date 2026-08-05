@@ -46,7 +46,9 @@ export const defaultSessionFilters: RuleGroupType = {
   rules: [],
 };
 
-function serializeRule(rule: RuleType | RuleGroupType): Record<string, unknown> {
+function serializeRule(
+  rule: RuleType | RuleGroupType,
+): Record<string, unknown> {
   if ("rules" in rule) {
     return {
       kind: "group",
@@ -84,7 +86,9 @@ function headers(authScheme?: string) {
 async function checkedJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || `Session catalog request failed (${response.status})`);
+    throw new Error(
+      body.detail || `Session catalog request failed (${response.status})`,
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -173,7 +177,9 @@ export async function fetchSessionArtifacts(
     `${apiUrl}/session-catalog/${encodeURIComponent(sessionId)}/artifacts?owner_id=${encodeURIComponent(LOCAL_OWNER_ID)}`,
     { headers: headers(authScheme) },
   );
-  const result = await checkedJson<{ artifacts: SessionArtifactEntry[] }>(response);
+  const result = await checkedJson<{ artifacts: SessionArtifactEntry[] }>(
+    response,
+  );
   return result.artifacts;
 }
 
@@ -245,6 +251,39 @@ export async function closeSession(
   return checkedJson<{ session_id: string; status: "closed" }>(response);
 }
 
+export async function openSession(apiUrl: string, authScheme?: string) {
+  const response = await fetch(`${apiUrl}/session-catalog/open`, {
+    method: "POST",
+    headers: headers(authScheme),
+    body: JSON.stringify({ owner_id: LOCAL_OWNER_ID }),
+  });
+  return checkedJson<{ thread_id: string; status: "open" }>(response);
+}
+
+export async function fetchModelPreference(
+  apiUrl: string,
+  authScheme?: string,
+) {
+  const response = await fetch(
+    `${apiUrl}/session-catalog/preferences/model?owner_id=${encodeURIComponent(LOCAL_OWNER_ID)}`,
+    { headers: headers(authScheme) },
+  );
+  return checkedJson<{ model_id: string | null }>(response);
+}
+
+export async function saveModelPreference(
+  apiUrl: string,
+  modelId: string,
+  authScheme?: string,
+) {
+  const response = await fetch(`${apiUrl}/session-catalog/preferences/model`, {
+    method: "PUT",
+    headers: headers(authScheme),
+    body: JSON.stringify({ owner_id: LOCAL_OWNER_ID, model_id: modelId }),
+  });
+  return checkedJson<{ model_id: string }>(response);
+}
+
 export async function forkSession(
   apiUrl: string,
   sessionId: string,
@@ -258,5 +297,7 @@ export async function forkSession(
       body: JSON.stringify({ owner_id: LOCAL_OWNER_ID }),
     },
   );
-  return checkedJson<{ thread_id: string; parent_session_id: string }>(response);
+  return checkedJson<{ thread_id: string; parent_session_id: string }>(
+    response,
+  );
 }

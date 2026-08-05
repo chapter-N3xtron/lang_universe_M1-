@@ -18,6 +18,27 @@ def test_coding_model_prefixes_select_expected_providers():
         "huggingface",
         "org/tool-model",
     )
+    assert _coding_provider_and_model("openai/gpt-test") == (
+        "openai",
+        "gpt-test",
+    )
+
+
+def test_openai_model_uses_official_langchain_integration(monkeypatch):
+    import langchain_openai
+
+    from src import llm
+
+    captured = {}
+    monkeypatch.setattr(
+        langchain_openai,
+        "ChatOpenAI",
+        lambda **kwargs: captured.update(kwargs) or SimpleNamespace(),
+    )
+
+    llm.get_coding_llm("openai/gpt-test")
+
+    assert captured == {"model": "gpt-test", "use_responses_api": True}
 
 
 def test_local_ollama_model_uses_local_endpoint_without_auth(monkeypatch):
@@ -112,6 +133,7 @@ def test_agent_model_routes_explicit_provider_models(monkeypatch):
     for model_name in (
         "ollama/qwen3.5:27b",
         "ollama-cloud/qwen3.5:397b",
+        "openai/gpt-test",
         "huggingface/org/tool-model",
         "hf/org/tool-model",
     ):

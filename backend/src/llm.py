@@ -45,7 +45,14 @@ def get_agent_llm(model_name: str | None = None):
 
     if not model_name or not any(
         model_name.startswith(prefix)
-        for prefix in ("ollama/", "ollama-cloud/", "huggingface/", "hf/", "ollama:")
+        for prefix in (
+            "openai/",
+            "ollama/",
+            "ollama-cloud/",
+            "huggingface/",
+            "hf/",
+            "ollama:",
+        )
     ):
         return get_llm(model_name)
     return get_coding_llm(
@@ -62,6 +69,7 @@ def get_chat_ui_llm():
 def _coding_provider_and_model(model_name: str | None) -> tuple[str, str]:
     selected = model_name or CODING_MODEL
     for prefix, provider in (
+        ("openai/", "openai"),
         ("ollama-cloud/", "ollama-cloud"),
         ("ollama/", "ollama"),
         ("huggingface/", "huggingface"),
@@ -77,6 +85,11 @@ def _coding_provider_and_model(model_name: str | None) -> tuple[str, str]:
 def get_coding_llm(model_name: str | None = None, *, num_predict: int | None = None):
     """Create the selected coding model without logging credential values."""
     provider, model = _coding_provider_and_model(model_name)
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(model=model, use_responses_api=True)
+
     if provider == "huggingface":
         from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 

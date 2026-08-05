@@ -13,7 +13,6 @@ import { Button } from "../ui/button";
 import { Message } from "@langchain/langgraph-sdk";
 import type { StreamContextType } from "@/providers/Stream";
 import { useSTT } from "@/hooks/useSTT";
-import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import {
   Select,
@@ -39,6 +38,10 @@ import { useFileUpload } from "@/hooks/use-file-upload";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { DOCUMENT_ACCEPT } from "@/lib/multimodal-utils";
+import {
+  fetchModelPreference,
+  saveModelPreference,
+} from "@/lib/session-catalog";
 
 const AGENT_OPTIONS = [
   { value: "", label: "Auto" },
@@ -80,13 +83,13 @@ interface ChatInputProps {
   voiceOptions: { id: string; name: string }[];
   chatStarted: boolean;
   targetAgent?: string;
-  targetModel?: string;
   streamActions: {
-    getMessages: () => Message[];
     submit: StreamContextType["submit"];
     stop: () => void;
   };
   onStartSubmit: () => void;
+  apiUrl: string;
+  authScheme?: string;
 }
 
 function isCloudModel(
@@ -113,9 +116,10 @@ function ChatInputImpl({
   voiceOptions,
   chatStarted,
   targetAgent,
-  targetModel,
   streamActions,
   onStartSubmit,
+  apiUrl,
+  authScheme,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -129,14 +133,20 @@ function ChatInputImpl({
       : agentValue(targetAgent);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string>("");
   const [isPickingWorkspace, setIsPickingWorkspace] = useState(false);
-  const [modelSelection, setModelSelection] = useState({
-    source: targetModel,
-    value: targetModel ?? "",
-  });
-  const selectedModel =
-    modelSelection.source === targetModel
-      ? modelSelection.value
-      : (targetModel ?? "");
+  const [selectedModel, setSelectedModel] = useState("");
+  useEffect(() => {
+    let active = true;
+    fetchModelPreference(apiUrl, authScheme)
+      .then(({ model_id }) => {
+        if (active && model_id) setSelectedModel(model_id);
+      })
+      .catch(() => {
+        // A persisted preference is optional; the profile/thread default remains usable.
+      });
+    return () => {
+      active = false;
+    };
+  }, [apiUrl, authScheme]);
   const effectiveSelectedModel = selectedModel || defaultModel;
   const selectedModelLabel =
     modelOptions.find((option) => option.value === effectiveSelectedModel)
@@ -197,14 +207,10 @@ function ChatInputImpl({
         ] as Message["content"],
       };
 
-      const toolMessages = ensureToolCallsHaveResponses(
-        streamActions.getMessages(),
-      );
-
       onStartSubmit();
       streamActions.submit(
         {
-          messages: [...toolMessages, newHumanMessage],
+          messages: [newHumanMessage],
           context: undefined,
           target_agent: selectedAgent,
           workspace: selectedWorkspace || undefined,
@@ -213,8 +219,9 @@ function ChatInputImpl({
         },
         {
           streamMode: ["messages"],
-          streamSubgraphs: true,
+          streamSubgraphs: false,
           streamResumable: true,
+          onDisconnect: "cancel",
           config: isCloudModel(
             effectiveSelectedModel,
             modelProviders,
@@ -229,11 +236,7 @@ function ChatInputImpl({
             workspace: selectedWorkspace || undefined,
             model: effectiveSelectedModel || undefined,
             execution_mode: executionMode,
-            messages: [
-              ...(prev.messages ?? []),
-              ...toolMessages,
-              newHumanMessage,
-            ],
+            messages: [...(prev.messages ?? []), newHumanMessage],
           }),
         },
       );
@@ -429,9 +432,12 @@ function ChatInputImpl({
                       <span>
                         <Select
                           value={effectiveSelectedModel}
-                          onValueChange={(value) =>
-                            setModelSelection({ source: targetModel, value })
-                          }
+                          onValueChange={(value) => {
+                            setSelectedModel(value);
+                            void saveModelPreference(apiUrl, value, authScheme).catch(
+                              () => toast.error("The model preference could not be saved."),
+                            );
+                          }}
                           disabled={modelsLoadError}
                         >
                           <SelectTrigger

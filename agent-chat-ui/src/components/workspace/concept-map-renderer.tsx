@@ -498,7 +498,7 @@ export function ConceptMapRenderer({
             {artifact.payload.sources.map((source, index) => (
               <li
                 key={source.id}
-                className="rounded-md border p-3 text-sm"
+                className="activity-card rounded-md border px-3 py-2 text-sm"
               >
                 <div className="font-medium">
                   [{index + 1}] {source.title}
@@ -508,12 +508,12 @@ export function ConceptMapRenderer({
                     href={source.locator}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-primary mt-1 block text-xs break-all underline"
+                    className="activity-card-muted mt-1 block text-xs break-all underline underline-offset-2"
                   >
                     {source.locator}
                   </a>
                 ) : (
-                  <div className="text-muted-foreground mt-1 text-xs break-all">
+                  <div className="activity-card-muted mt-1 text-xs break-all">
                     {source.locator}
                   </div>
                 )}

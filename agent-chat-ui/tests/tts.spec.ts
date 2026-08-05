@@ -11,7 +11,10 @@ import { test, expect } from "@playwright/test";
  */
 
 test.describe("TTS play/stop button", () => {
+  let spokenText: string | undefined;
+
   test.beforeEach(async ({ page }) => {
+    spokenText = undefined;
     await page.route("http://127.0.0.1:8123/info", (route) =>
       route.fulfill({ contentType: "application/json", body: "{}" }),
     );
@@ -63,6 +66,7 @@ test.describe("TTS play/stop button", () => {
 
     // Mock the streaming TTS endpoint with one silence chunk.
     await page.route("http://127.0.0.1:8000/api/tts/stream", async (route) => {
+      spokenText = route.request().postDataJSON().text;
       // 24000 samples of silence as Float32 little-endian PCM.
       const silence = new Float32Array(24000).fill(0);
       const bytes = new Uint8Array(silence.buffer);
@@ -118,6 +122,10 @@ test.describe("TTS play/stop button", () => {
               id: "msg-ai-1",
               type: "ai",
               content: [{ type: "text", text: "Hello back to you." }],
+              additional_kwargs: {
+                jasper_confidence_score: 0.82,
+                jasper_confidence_basis: "Grounded in the supplied documentation.",
+              },
             },
             { langgraph_node: "jasper" },
           ])}`,
@@ -146,6 +154,11 @@ test.describe("TTS play/stop button", () => {
                     id: "msg-ai-1",
                     type: "ai",
                     content: [{ type: "text", text: "Hello back to you." }],
+                    additional_kwargs: {
+                      jasper_confidence_score: 0.82,
+                      jasper_confidence_basis:
+                        "Grounded in the supplied documentation.",
+                    },
                   },
                 ],
               },
@@ -181,6 +194,9 @@ test.describe("TTS play/stop button", () => {
     // Wait for the assistant message to render.
     const aiMessage = page.locator("text=Hello back to you.").first();
     await expect(aiMessage).toBeVisible({ timeout: 15000 });
+    await expect(page.locator("[data-jasper-confidence]")).toContainText(
+      "Confidence 0.82 — model estimate, not empirically calibrated",
+    );
 
     // Locate the speak button within the AI message row.
     // It is a TooltipIconButton rendered by CommandBar inside AssistantMessage.
@@ -189,6 +205,7 @@ test.describe("TTS play/stop button", () => {
 
     // Click to speak.
     await speakBtn.click();
+    await expect.poll(() => spokenText).toBe("Hello back to you.");
 
     // The icon should switch to a stop square.
     const stopBtn = page.getByRole("button", { name: "Stop playback" });

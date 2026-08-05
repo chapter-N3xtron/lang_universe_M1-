@@ -39,6 +39,11 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.87 0 0);
+  --activity-card: oklch(0.38 0.075 24);
+  --activity-card-header: oklch(0.34 0.085 24);
+  --activity-card-foreground: oklch(0.91 0.018 24);
+  --activity-card-muted: oklch(0.76 0.025 24);
+  --activity-card-border: oklch(0.46 0.08 24);
 }
 
 .dark {
@@ -74,6 +79,11 @@
   --sidebar-accent-foreground: oklch(0.88 0.01 25);
   --sidebar-border: oklch(0.22 0.04 25);
   --sidebar-ring: oklch(0.5 0.18 25);
+  --activity-card: oklch(0.2 0.055 24);
+  --activity-card-header: oklch(0.24 0.07 24);
+  --activity-card-foreground: oklch(0.88 0.018 24);
+  --activity-card-muted: oklch(0.68 0.025 24);
+  --activity-card-border: oklch(0.32 0.07 24);
 }
 
 @theme inline {
@@ -142,6 +152,22 @@
 }
 
 @layer utilities {
+  .activity-card {
+    color: var(--activity-card-foreground);
+    background: var(--activity-card);
+    border-color: var(--activity-card-border);
+  }
+
+  .activity-card-header {
+    color: var(--activity-card-foreground);
+    background: var(--activity-card-header);
+    border-color: var(--activity-card-border);
+  }
+
+  .activity-card-muted {
+    color: var(--activity-card-muted);
+  }
+
   .concept-map-flow {
     --xy-background-color: var(--background);
     --xy-background-pattern-color: color-mix(

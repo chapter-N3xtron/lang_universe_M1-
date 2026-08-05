@@ -12,7 +12,7 @@ from langgraph.types import Command, interrupt
 
 from src.agent_utils import get_conversation_history, get_user_query
 from src.coding_agent import create_coding_agent_graph
-from src.jasper_agent import create_jasper_graph
+from src.jasper_agent import STANDARD_SESSION_GREETING, create_jasper_graph
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
 from src.research_agent import create_research_graph
@@ -42,6 +42,9 @@ class State(TypedDict):
     pending_approval: bool
     pending_agent: str
     todos: list[dict]
+    session_event: str
+    session_opened: bool
+    session_opening_version: str
 
 
 TODOS_FILE = os.getenv(
@@ -56,6 +59,17 @@ def _load_todos() -> list[dict]:
             return data.get("sections", [])
     except (FileNotFoundError, json.JSONDecodeError):
         return []
+
+
+def session_opening_node(_state: State) -> dict:
+    """Return the canonical opening without invoking a model."""
+
+    return {
+        "messages": [{"role": "assistant", "content": STANDARD_SESSION_GREETING}],
+        "active_agent": "jasper",
+        "session_opened": True,
+        "session_opening_version": "2026-08-03.1",
+    }
 
 
 AGENT_ROUTING = {
@@ -92,6 +106,9 @@ def supervisor_node(state: State):
     todos_data = _load_todos()
     messages = state["messages"]
     history = get_conversation_history(messages)
+
+    if state.get("session_event") == "open" and not state.get("session_opened"):
+        return Command(goto="session_opening", update={"todos": todos_data})
 
     # Specialist nodes return here through static edges. Finish the turn before
     # considering a sticky user-selected agent, otherwise an explicit selection
@@ -241,6 +258,8 @@ def _base_messages_to_dicts(messages: list) -> list[dict]:
         entry = {"role": role, "content": getattr(m, "content", "")}
         if role == "assistant" and hasattr(m, "tool_calls") and m.tool_calls:
             entry["tool_calls"] = m.tool_calls
+        if role == "assistant" and getattr(m, "additional_kwargs", None):
+            entry["additional_kwargs"] = m.additional_kwargs
         if role == "tool":
             entry["tool_call_id"] = getattr(m, "tool_call_id", "")
         result.append(entry)
@@ -263,6 +282,12 @@ def create_chat_ui():
                 "todos": state.get("todos", []),
                 "model": state.get("model", ""),
                 "workspace": state.get("workspace", os.getcwd()),
+                "execution_mode": state.get(
+                    "execution_mode", state.get("mode", "read_only")
+                ),
+                "thread_identity": state.get("thread_identity", ""),
+                "user_identity": state.get("user_identity", "anonymous"),
+                "coding_session_id": state.get("coding_session_id", ""),
             }
         )
         new_messages = result["messages"][input_count:]
@@ -336,6 +361,7 @@ def create_chat_ui():
         return {}
 
     graph.add_node("supervisor", supervisor_node)
+    graph.add_node("session_opening", session_opening_node)
     graph.add_node("approval", approval_node)
     graph.add_node("jasper", run_jasper)
     graph.add_node("coding", run_coding)
@@ -344,6 +370,7 @@ def create_chat_ui():
     graph.add_node("record_session", record_session)
 
     graph.add_edge(START, "supervisor")
+    graph.add_edge("session_opening", "record_session")
 
     for specialist in ["jasper", "coding", "research", "magic-coder"]:
         graph.add_edge(specialist, "record_session")

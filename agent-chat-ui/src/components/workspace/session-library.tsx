@@ -28,7 +28,9 @@ import { QueryBuilderShadcn } from "@/components/query-builder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getApiKey } from "@/lib/api-key";
 import {
+  LOCAL_OWNER_ID,
   defaultSessionFilters,
   fetchSavedSessionViews,
   fetchSessions,
@@ -36,6 +38,7 @@ import {
   type SessionCatalogRow,
   type SavedSessionView,
 } from "@/lib/session-catalog";
+import { createClient } from "@/providers/client";
 
 const SESSION_FIELDS: Field[] = [
   { name: "created_at", label: "Created", inputType: "datetime-local" },
@@ -138,7 +141,68 @@ export function SessionLibrary({
   const [cursorHistory, setCursorHistory] = useState<(string | null)[]>([]);
   const [viewName, setViewName] = useState("");
   const [visibility, setVisibility] = useState<VisibilityState>({});
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [sessionName, setSessionName] = useState("");
   const queryClient = useQueryClient();
+
+  const storeClient = useMemo(
+    () => createClient(apiUrl, getApiKey() ?? undefined, authScheme),
+    [apiUrl, authScheme],
+  );
+
+  const visibleColumns = columnOrder.filter((id) => visibility[id] !== false);
+  const queryInput = {
+    apiUrl,
+    authScheme,
+    filters,
+    sorting,
+    cursor,
+    pageSize,
+    search,
+    visibleColumns,
+  };
+  const sessionQuery = useQuery({
+    queryKey: ["session-catalog", queryInput],
+    queryFn: () => fetchSessions(queryInput),
+    enabled: Boolean(apiUrl),
+    placeholderData: (previous) => previous,
+  });
+  const sessionIds = sessionQuery.data?.rows.map((row) => row.session_id) ?? [];
+  const sessionNamesQuery = useQuery({
+    queryKey: ["session-store-names", apiUrl, sessionIds],
+    queryFn: async () =>
+      Object.fromEntries(
+        await Promise.all(
+          sessionIds.map(async (sessionId) => {
+            const item = await storeClient.store.getItem(
+              [LOCAL_OWNER_ID, "sessions"],
+              sessionId,
+            );
+            return [sessionId, item?.value.display_name] as const;
+          }),
+        ),
+      ),
+    enabled: Boolean(apiUrl && sessionIds.length),
+  });
+  const renameSession = useMutation({
+    mutationFn: async ({ sessionId, name }: { sessionId: string; name: string }) => {
+      const item = await storeClient.store.getItem(
+        [LOCAL_OWNER_ID, "sessions"],
+        sessionId,
+      );
+      if (!item) throw new Error("Session not found.");
+      await storeClient.store.putItem(
+        [LOCAL_OWNER_ID, "sessions"],
+        sessionId,
+        { ...item.value, display_name: name },
+        { index: false },
+      );
+    },
+    onSuccess: async () => {
+      setEditingSessionId(null);
+      await queryClient.invalidateQueries({ queryKey: ["session-store-names"] });
+    },
+  });
 
   const columns = useMemo(
     () => [
@@ -148,14 +212,46 @@ export function SessionLibrary({
       }),
       columnHelper.accessor("short_description", {
         header: "Session",
-        cell: (info) => (
-          <div className="min-w-64 max-w-xl">
-            <p className="font-medium">{info.getValue()}</p>
+        cell: (info) => {
+          const sessionId = info.row.original.session_id;
+          const name =
+            sessionNamesQuery.data?.[sessionId] ?? info.getValue();
+          return (
+          <div className="min-w-64 max-w-xl" onClick={(event) => event.stopPropagation()}>
+            {editingSessionId === sessionId ? (
+              <Input
+                autoFocus
+                aria-label="Session name"
+                value={sessionName}
+                onChange={(event) => setSessionName(event.target.value)}
+                onBlur={() => setEditingSessionId(null)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === "Escape") setEditingSessionId(null);
+                  if (event.key === "Enter" && sessionName.trim()) {
+                    renameSession.mutate({ sessionId, name: sessionName.trim() });
+                  }
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                className="font-medium hover:underline"
+                onClick={() => {
+                  setEditingSessionId(sessionId);
+                  setSessionName(String(name));
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                {String(name)}
+              </button>
+            )}
             <p className="text-muted-foreground mt-1 line-clamp-3 text-sm leading-5">
               {info.row.original.long_description}
             </p>
           </div>
-        ),
+          );
+        },
       }),
       columnHelper.accessor("active_minutes", {
         header: "Observed time",
@@ -191,26 +287,9 @@ export function SessionLibrary({
         ),
       }),
     ],
-    [],
+    [editingSessionId, renameSession, sessionName, sessionNamesQuery.data],
   );
 
-  const visibleColumns = columnOrder.filter((id) => visibility[id] !== false);
-  const queryInput = {
-    apiUrl,
-    authScheme,
-    filters,
-    sorting,
-    cursor,
-    pageSize,
-    search,
-    visibleColumns,
-  };
-  const sessionQuery = useQuery({
-    queryKey: ["session-catalog", queryInput],
-    queryFn: () => fetchSessions(queryInput),
-    enabled: Boolean(apiUrl),
-    placeholderData: (previous) => previous,
-  });
   const savedViewsQuery = useQuery({
     queryKey: ["session-catalog-views", apiUrl],
     queryFn: () => fetchSavedSessionViews(apiUrl, authScheme),

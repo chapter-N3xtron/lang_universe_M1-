@@ -77,6 +77,8 @@ export type Title = string;
 export type Renderer = "react_flow";
 export type SourceMessageId = string | null;
 export type Title1 = string;
+export type ConfidenceBasis = string | null;
+export type ConfidenceScore = number | null;
 export type Code = "structured_output_unavailable" | "structured_output_invalid" | "provider_unavailable";
 export type Message = string;
 export type Recoverable = boolean;
@@ -87,6 +89,8 @@ export type VoiceText = string;
 
 export interface JasperResponse {
   artifacts?: Artifacts;
+  confidence_basis?: ConfidenceBasis;
+  confidence_score?: ConfidenceScore;
   diagnostic?: ResponseDiagnostic | null;
   layout_suggestion?: LayoutSuggestion | null;
   version?: Version;

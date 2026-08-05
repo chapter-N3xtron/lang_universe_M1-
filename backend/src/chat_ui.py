@@ -340,7 +340,7 @@ def create_chat_ui():
                 {
                     "messages": task_messages,
                     "workspace": state.get("workspace"),
-                    "execution_mode": execution_mode or "read_only",
+                    "execution_mode": execution_mode or "approval",
                     "model": state.get("model"),
                     "thread_identity": state.get("thread_identity")
                     or configurable.get("thread_id", ""),

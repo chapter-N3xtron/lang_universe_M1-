@@ -154,7 +154,7 @@ function ChatInputImpl({
   const selectedModelLocation =
     modelProviders[effectiveSelectedModel] === "ollama" ? "Local" : "Cloud";
   const [executionMode, setExecutionMode] = useState<"read_only" | "approval">(
-    "read_only",
+    "approval",
   );
   const localModels = sortModelOptions(
     modelOptions.filter((option) => modelProviders[option.value] === "ollama"),
@@ -420,7 +420,9 @@ function ChatInputImpl({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="read_only">Read only</SelectItem>
-                    <SelectItem value="approval">Ask to edit</SelectItem>
+                    <SelectItem value="approval">
+                      Full repo (review)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>

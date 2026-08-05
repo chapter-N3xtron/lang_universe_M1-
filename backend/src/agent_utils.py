@@ -61,11 +61,13 @@ def get_user_query(messages: list) -> str:
             if isinstance(content, str):
                 return content
             if isinstance(content, list):
+                text_blocks: list[str] = []
                 for block in content:
                     if isinstance(block, str):
-                        return block
+                        text_blocks.append(block)
                     if isinstance(block, dict) and isinstance(block.get("text"), str):
-                        return block["text"]
+                        text_blocks.append(block["text"])
+                return "\n\n".join(text for text in text_blocks if text.strip())
     return ""
 
 

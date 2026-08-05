@@ -5,7 +5,7 @@ from typing import Annotated, TypedDict
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 from deepagents.graph import DeepAgentState
-from deepagents.middleware.filesystem import FilesystemPermission
+from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemPermission
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
@@ -100,6 +100,12 @@ def create_research_agent(model=None, *, workspace: str | None = None, store=Non
             read_saved_source,
         ],
         system_prompt=RESEARCH_PROMPT,
+        middleware=[
+            FilesystemMiddleware(
+                backend=backend,
+                tools=["read_file", "ls", "glob", "grep"],
+            )
+        ],
         backend=backend,
         permissions=permissions,
         state_schema=ResearchState,

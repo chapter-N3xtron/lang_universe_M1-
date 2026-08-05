@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-05T03:25:14Z",
+  "updated_at": "2026-08-05T04:01:13Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2484,6 +2484,33 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": "Focused Coding, security, persistence, and event tests passed 55/55; the full backend suite passed 206/206; changed-file Ruff, JSON validation, and diff checks passed. The recreated Agent Server is healthy, its SSH agent socket is present, and local Git repository access passes. Remote Git authentication remains blocked because the forwarded host SSH agent currently reports no usable identity; no commit or push was attempted. Report unit and live results separately; do not perform a real commit or push without a specific user-authored repository change and approval. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "restore-coder-openspec-access",
+      "title": "Restore Coder OpenSpec Access",
+      "created_at": "2026-08-05T04:01:13Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "default-coder-to-reviewed-repository-access",
+          "content": "Default direct top-level Coding requests to approval mode, preserve explicit read-only selection, deliver all typed and attached textual request blocks to Coding, and expose the existing OpenSpec installation through the native Deep Agents shell PATH. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-05T04:01:13Z",
+          "notes": "The UI now defaults to Full repo (review); omitted direct-Coding modes resolve to approval while explicit read_only remains unchanged; typed and attached text blocks are joined into the Coding task; LocalShellBackend prepends the persistent coding-tools paths. The rebuilt Agent Server is healthy and its actual Coding backend executes openspec --version successfully as 1.7.0. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-coder-openspec-access",
+          "content": "Verify focused payload, approval-default, read-only preservation, native shell, production UI, OpenSpec status, and full backend behavior without mutating OpenSpec artifacts during the access check. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Focused backend tests passed 81/81; changed-file Ruff, TypeScript, targeted ESLint, production build, and focused Chromium passed. Live Coding backend OpenSpec 1.7.0 passed. The existing research-agent-promotion scaffold is correctly incomplete and strict validation reports missing delta specs. Full backend reached 208 passed with one failure in the pre-existing uncommitted Research tool-surface test fixture; that work remains preserved. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

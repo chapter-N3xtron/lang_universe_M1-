@@ -57,6 +57,26 @@ def test_handles_list_content():
     assert get_user_query(msgs) == "describe this"
 
 
+def test_combines_typed_request_and_attached_plan_text():
+    msgs = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Implement the attached plan."},
+                {
+                    "type": "text-plain",
+                    "text": "# Full plan\n\nRun OpenSpec before implementation.",
+                },
+            ],
+        }
+    ]
+
+    assert get_user_query(msgs) == (
+        "Implement the attached plan.\n\n"
+        "# Full plan\n\nRun OpenSpec before implementation."
+    )
+
+
 def test_ignores_tool_and_system_messages():
     """System and tool messages are not user messages."""
     msgs = [

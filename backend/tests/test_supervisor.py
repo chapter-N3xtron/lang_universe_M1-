@@ -583,9 +583,57 @@ def test_direct_coding_uses_latest_user_task_and_fails_closed_without_result(
         )
 
     assert coding_inputs[0]["messages"][0].content == "Inspect the selected workspace"
+    assert coding_inputs[0]["execution_mode"] == "read_only"
     assert jasper_inputs[0]["messages"][-1]["name"] == "coding"
     assert "missing_final_result" in jasper_inputs[0]["messages"][-1]["content"]
     assert result["coding_status"] == "error"
+
+
+def test_direct_coding_defaults_to_approval_when_mode_is_omitted(tmp_path):
+    coding_inputs = []
+
+    class FakeCodingApp:
+        async def ainvoke(self, state, config=None):
+            coding_inputs.append(state)
+            return {
+                "messages": [
+                    *state["messages"],
+                    AIMessage(content="OpenSpec is ready for approval-mode work."),
+                ],
+                "coding_status": "completed",
+                "coding_events": [],
+            }
+
+    async def fake_call_jasper(state):
+        return {
+            "messages": [AIMessage(content=state["messages"][-1]["content"])],
+            "visual_artifacts": [],
+        }
+
+    _clear_src_modules()
+    with (
+        patch("src.chat_ui.create_coding_agent_graph", return_value=FakeCodingApp()),
+        patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper),
+    ):
+        from src.chat_ui import create_chat_ui
+
+        asyncio.run(
+            _compile(create_chat_ui()).ainvoke(
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "Create the OpenSpec change",
+                        }
+                    ],
+                    "workspace": str(tmp_path),
+                    "target_agent": "coding",
+                },
+                config={"configurable": {"thread_id": "coding-default-approval"}},
+            )
+        )
+
+    assert coding_inputs[0]["execution_mode"] == "approval"
 
 
 def test_auto_concept_map_routing_is_owned_by_jasper_without_model_guessing():

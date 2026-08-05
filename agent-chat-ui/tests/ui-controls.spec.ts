@@ -141,6 +141,21 @@ test.describe("UI controls render and respond", () => {
     await expect(trigger).toHaveText("Cloud · ollama-cloud/qwen3.5:397b");
   });
 
+  test("coding access defaults to full repository access with review", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    const trigger = page.locator('button[aria-label="Select coding access"]');
+    await expect(trigger).toBeVisible({ timeout: 10000 });
+    await expect(trigger).toHaveText("Full repo (review)");
+
+    await trigger.click();
+    const dropdown = page.locator('[data-slot="select-content"]');
+    await dropdown.getByText("Read only").click();
+    await expect(trigger).toHaveText("Read only");
+  });
+
   test("selected cloud model is sent in the run payload", async ({ page }) => {
     await page.route("**/threads", async (route) => {
       if (route.request().method() !== "POST") {

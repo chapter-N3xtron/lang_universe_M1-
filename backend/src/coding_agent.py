@@ -58,6 +58,7 @@ _SENSITIVE_VIRTUAL_PATHS = [
 ]
 _SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str], Any] = OrderedDict()
 _SESSION_AGENT_CACHE_SIZE = 8
+_CODING_TOOL_PATHS = ("/opt/coding-tools/node/bin", "/opt/coding-tools/pnpm")
 
 _LOCAL_APPROVAL_INTERRUPT_ON = {
     "write_file": {
@@ -200,6 +201,13 @@ def _build_deep_agent(
             virtual_mode=True,
             timeout=120,
             max_output_bytes=100_000,
+            env={
+                "PATH": os.pathsep.join(
+                    (*_CODING_TOOL_PATHS, os.environ.get("PATH", ""))
+                ),
+                "NPM_CONFIG_PREFIX": "/opt/coding-tools/node",
+                "PNPM_HOME": "/opt/coding-tools/pnpm",
+            },
             inherit_env=True,
         )
         if approval_mode

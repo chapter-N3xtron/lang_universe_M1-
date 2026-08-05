@@ -25,6 +25,15 @@ def test_research_agent_is_built_with_read_only_evidence_tools(tmp_path):
     assert kwargs["name"] == "research"
 
 
+def test_research_deep_agent_exposes_no_write_or_execute_tools(tmp_path):
+    model = MagicMock(profile={})
+    agent = research_agent.create_research_agent(model, workspace=str(tmp_path))
+    tool_names = set(agent.nodes["tools"].bound.tools_by_name)
+
+    assert {"read_file", "ls", "glob", "grep", "web_search", "read_url"} <= tool_names
+    assert tool_names.isdisjoint({"write_file", "edit_file", "delete", "execute"})
+
+
 @pytest.mark.asyncio
 async def test_standalone_research_profile_passes_selected_context_and_returns_findings(tmp_path):
     model = MagicMock()

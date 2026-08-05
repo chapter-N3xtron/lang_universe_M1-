@@ -270,6 +270,14 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
         "virtual_mode": True,
         "timeout": 120,
         "max_output_bytes": 100_000,
+        "env": {
+            "PATH": (
+                "/opt/coding-tools/node/bin:/opt/coding-tools/pnpm:"
+                + coding_agent.os.environ.get("PATH", "")
+            ),
+            "NPM_CONFIG_PREFIX": "/opt/coding-tools/node",
+            "PNPM_HOME": "/opt/coding-tools/pnpm",
+        },
         "inherit_env": True,
     }
     assert captured["agent"]["tools"] == []

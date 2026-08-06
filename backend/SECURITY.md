@@ -27,8 +27,8 @@ The following native tools produce standard LangGraph human-in-the-loop interrup
 - `execute`
 
 Reviewers may approve, edit, or reject writes, edits, and commands. Deletions may be
-approved or rejected. Existing approval expiry, cancellation, checkpoint recovery,
-and result-return behavior remains in the Coding graph.
+approved or rejected. Native LangGraph checkpoints preserve pending approvals and
+resume them on the same thread without an application-level replay bridge.
 
 Shell commands start in the selected workspace, have a 120-second default timeout,
 and return at most 100,000 bytes. The backend inherits the Agent Server environment

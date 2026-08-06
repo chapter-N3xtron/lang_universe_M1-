@@ -24,6 +24,15 @@ def test_coding_model_prefixes_select_expected_providers():
     )
 
 
+def test_default_coding_model_is_gpt_5_6(monkeypatch):
+    from src import llm
+
+    monkeypatch.setattr(llm, "CODING_MODEL", "openai/gpt-5.6-terra")
+    monkeypatch.setattr(llm, "CODING_MODEL_PROVIDER", "openai")
+
+    assert llm._coding_provider_and_model(None) == ("openai", "gpt-5.6-terra")
+
+
 def test_openai_model_uses_official_langchain_integration(monkeypatch):
     import langchain_openai
 
@@ -140,6 +149,21 @@ def test_agent_model_routes_explicit_provider_models(monkeypatch):
         assert llm.get_agent_llm(model_name) is expected
         assert captured["model_name"] == model_name
         assert captured["num_predict"] == 2048
+
+
+def test_model_list_always_contains_the_default_coder(monkeypatch):
+    from src import web_server
+
+    monkeypatch.setenv("CODING_MODEL", "openai/gpt-5.6-terra")
+    monkeypatch.setenv("CODING_MODELS", "ollama/qwen3.5:27b")
+    monkeypatch.setattr(web_server, "list_openai_gpt_models", lambda: [])
+    monkeypatch.setattr(web_server, "list_ollama_cloud_models", lambda: [])
+    monkeypatch.setattr(web_server, "list_ollama_models", lambda: [])
+
+    result = web_server.list_models()
+
+    assert result["default"] == "openai/gpt-5.6-terra"
+    assert result["models"][0]["id"] == "openai/gpt-5.6-terra"
 
 
 def test_coding_model_keeps_the_shorter_default_generation_limit(monkeypatch):

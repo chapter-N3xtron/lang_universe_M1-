@@ -292,6 +292,17 @@ def create_chat_ui():
     async def run_jasper(
         state, config: RunnableConfig
     ) -> Command[Literal["coding", "research", "record_session"]]:
+        latest = state.get("messages", [])[-1:] or [{}]
+        latest = latest[0]
+        latest_role = (
+            latest.get("role") if isinstance(latest, dict) else latest.type
+        )
+        latest_name = (
+            latest.get("name") if isinstance(latest, dict) else latest.name
+        )
+        if latest_role in {"assistant", "ai"} and latest_name == "coding":
+            return Command(goto="record_session")
+
         configurable = config.get("configurable", {})
         result = await call_jasper(
             {

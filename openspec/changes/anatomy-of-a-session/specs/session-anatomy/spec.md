@@ -1,0 +1,60 @@
+## Purpose
+
+Anatomy of a Session defines an Inquiry-oriented body of work whose assembled materials and durable user-authored Perspective remain intelligible, attributable, and revisitable over time.
+
+## ADDED Requirements
+
+### Requirement: Inquiry-oriented session body of work
+The system SHALL represent a session as an Inquiry-oriented body of work rather than only an ordered conversation transcript. A session SHALL be able to associate materials assembled in the inquiry and retain enough artifact identity, source/provenance status where applicable, and session relationship information for the user to distinguish the materials that informed their work.
+
+#### Scenario: User reviews an inquiry with assembled materials
+- **WHEN** a user revisits a session containing multiple inquiry materials
+- **THEN** the session SHALL present those materials as associated with the same Inquiry-oriented body of work rather than representing them only as undifferentiated chat messages
+
+#### Scenario: Session contains sourced and user-created materials
+- **WHEN** a session includes sourced research material and a user-created artifact
+- **THEN** the session SHALL retain their distinguishable artifact identities and applicable source/provenance status
+
+### Requirement: Recognized session artifact categories
+The system SHALL support associating visualizations or charts, PDFs, research outputs, polls, and a durable Perspective with an Inquiry-oriented session. Research outputs SHALL include links, saved pages, reports, and research-pass reports as distinguishable forms. The recognized categories do not require every session to contain every form and do not limit future session materials that conform to the session’s provenance and relationship boundaries.
+
+#### Scenario: Inquiry combines several artifact forms
+- **WHEN** a user assembles a chart, a PDF, a saved page, a research report, a research-pass report, and a poll during an inquiry
+- **THEN** the session SHALL be able to associate each material with that session using its applicable recognized artifact form
+
+#### Scenario: Inquiry has no poll or PDF
+- **WHEN** a session contains only a research link and a Perspective
+- **THEN** the session SHALL remain a valid Inquiry-oriented body of work without implying that a poll, PDF, chart, or other absent artifact was created
+
+### Requirement: Durable user-authored Perspective
+The system SHALL provide a durable Perspective associated with a session that records the user’s current understanding, conclusion, decision, or stance based on the materials they have assembled. The Perspective SHALL be identified as user-authored; the system SHALL NOT attribute a model-generated summary, research report, poll result, visualization, or decision-tool output to the user as their Perspective without the user’s authorship.
+
+#### Scenario: User records a current conclusion
+- **WHEN** the user authors a statement of their current conclusion after reviewing session materials
+- **THEN** the system SHALL retain that statement as the session’s user-authored Perspective and distinguish it from the underlying materials and generated outputs
+
+#### Scenario: Generated material is available but not adopted
+- **WHEN** a session contains a generated summary, report, poll result, visualization, or decision-tool output that the user has not authored as Perspective
+- **THEN** the system SHALL retain the material without labeling or presenting it as the user’s Perspective
+
+### Requirement: Perspective revisitation and revision
+The system SHALL allow the user to revisit and update their durable Perspective as the inquiry develops. An updated Perspective SHALL represent the user’s then-current understanding, conclusion, decision, or stance and SHALL NOT be treated as evidence that the earlier Perspective was erroneous, that the user must maintain the update, or that the inquiry has reached a final answer.
+
+#### Scenario: New material changes the user’s understanding
+- **WHEN** the user revisits a session after assembling new or reconsidered material and updates their Perspective
+- **THEN** the session SHALL retain the updated user-authored Perspective as their current view without preventing later revision
+
+#### Scenario: User leaves a Perspective unchanged
+- **WHEN** a user reviews additional session material and chooses not to update their Perspective
+- **THEN** the system SHALL preserve the existing Perspective without inferring agreement, finality, authorization, or a required decision
+
+### Requirement: Non-prescriptive illustrative inquiry support
+The system SHALL permit sessions and Perspectives to support learning, dense-text or scientific inquiry, social or political perspective formation, voting considerations, and decision-tool outputs as illustrative uses. For social or political inquiry and voting considerations, the system SHALL present materials and Perspective as support for the user’s own deliberation and SHALL NOT prescribe, infer, or represent a political conclusion, candidate preference, vote, or stance as the user’s own.
+
+#### Scenario: User considers a voting-related inquiry
+- **WHEN** a user assembles materials and records a Perspective while considering a vote
+- **THEN** the session SHALL preserve the user-authored Perspective and associated materials without prescribing or asserting a candidate preference, vote, or political conclusion for the user
+
+#### Scenario: User uses decision-tool output during scientific inquiry
+- **WHEN** a user associates a decision-tool output with dense scientific materials and records or revises a Perspective
+- **THEN** the system SHALL retain the decision-tool output as material distinct from the user-authored Perspective and allow the user to determine whether it informs their current view

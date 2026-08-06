@@ -87,6 +87,39 @@ def _execute_model(command: str):
     )
 
 
+def _chained_approval_model():
+    return ToolCallingModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "write_file",
+                        "args": {"file_path": "/first.txt", "content": "first"},
+                        "id": "write-first",
+                    },
+                    {
+                        "name": "write_file",
+                        "args": {"file_path": "/second.txt", "content": "second"},
+                        "id": "write-second",
+                    },
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "execute",
+                        "args": {"command": "pwd"},
+                        "id": "execute-after-writes",
+                    }
+                ],
+            ),
+            AIMessage(content="chained approvals completed"),
+        ]
+    )
+
+
 def _approval_app(monkeypatch, tmp_path: Path, model):
     from src import coding_agent
 
@@ -411,7 +444,7 @@ def test_production_wrapper_surfaces_and_resumes_approval(monkeypatch, tmp_path)
     assert (tmp_path / "approved.txt").read_text() == "approved"
 
 
-def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_to_jasper(
+def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_directly(
     monkeypatch, tmp_path
 ):
     from src import chat_ui, coding_agent
@@ -462,53 +495,58 @@ def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_to_jasper(
         )
     )
 
-    assert jasper_inputs[0]["messages"][-1]["name"] == "coding"
-    assert jasper_inputs[0]["messages"][-1]["content"] == (
-        "OpenSpec installation was rejected and was not completed."
-    )
+    assert jasper_inputs == []
+    assert result["messages"][-1]["name"] == "coding"
     assert result["messages"][-1]["content"] == (
         "OpenSpec installation was rejected and was not completed."
     )
     assert result["coding_status"] == "completed"
 
 
-def test_expired_approval_is_rejected_without_writing(monkeypatch, tmp_path):
+def test_native_wrapper_resumes_ordered_chained_approval_batches(
+    monkeypatch, tmp_path
+):
     from src import coding_agent
 
-    nested = _approval_app(monkeypatch, tmp_path, _write_model())
+    nested = _approval_app(monkeypatch, tmp_path, _chained_approval_model())
 
     async def session_agent(*_args):
         return nested
 
     monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
-    monkeypatch.setattr(coding_agent, "_approval_deadline", lambda *_args: 100.0)
-    monkeypatch.setattr(coding_agent, "_now", lambda: 200.0)
-    monkeypatch.setenv("CODING_APPROVAL_TIMEOUT_SECONDS", "1")
-
     graph = StateGraph(coding_agent.CodingAgentState)
     graph.add_node("coding", coding_agent.deep_agents_coding_node)
     graph.add_edge(START, "coding")
     app = graph.compile(checkpointer=InMemorySaver())
-    config = {"configurable": {"thread_id": "outer-expired"}}
+    config = {"configurable": {"thread_id": "outer-chained-approvals"}}
     initial = {
-        "messages": [{"role": "user", "content": "write the file"}],
+        "messages": [{"role": "user", "content": "complete the chained work"}],
         "workspace": str(tmp_path),
         "execution_mode": "approval",
-        "thread_identity": "nested-expired",
+        "thread_identity": "nested-chained-approvals",
     }
 
     first = asyncio.run(app.ainvoke(initial, config=config))
-    assert "expires_at" in first["__interrupt__"][0].value
+    assert len(first["__interrupt__"][0].value["action_requests"]) == 2
+
+    second = asyncio.run(
+        app.ainvoke(
+            Command(
+                resume={
+                    "decisions": [{"type": "approve"}, {"type": "approve"}]
+                }
+            ),
+            config=config,
+        )
+    )
+    assert len(second["__interrupt__"][0].value["action_requests"]) == 1
+
     result = asyncio.run(
         app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
     )
-
-    assert result["coding_status"] == "cancelled"
-    assert any(
-        event["kind"] == "approval" and event["status"] == "expired"
-        for event in result["coding_events"]
-    )
-    assert not (tmp_path / "approved.txt").exists()
+    assert result["coding_status"] == "completed"
+    assert (tmp_path / "first.txt").read_text() == "first"
+    assert (tmp_path / "second.txt").read_text() == "second"
 
 
 def test_coding_node_propagates_cancellation(monkeypatch, tmp_path):

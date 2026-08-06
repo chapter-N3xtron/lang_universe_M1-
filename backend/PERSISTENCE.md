@@ -1,37 +1,38 @@
 # Deep Agents persistence
 
-The LangGraph server remains the source of truth for UI conversation history.
-The coding agent receives that history on its first turn, then persists its own
-tool, subagent, summary, and pending-approval state in a nested LangGraph
-checkpointer.
+The LangGraph Agent Server checkpoint for each Jasper thread is the source of truth
+for that thread's transcript, graph position, tool results, and resumable execution.
+Coder runs as a native nested LangGraph subgraph and inherits that checkpoint context,
+so pending file and command approvals propagate directly to Agent Chat UI and resume
+on the same thread.
 
-Sessions use an opaque SHA-256 identifier derived from:
+Coder does not maintain a second live checkpoint history. LangGraph checkpoints retain
+failed-run execution evidence, while the selected Git repository remains authoritative
+for actual files and diffs. The application does not scan the filesystem or copy an
+inferred patch into Store after a failed command. A later explicitly approved Coder
+turn can inspect `git status` and `git diff` when recovery is needed.
 
-- authenticated user identity (or `anonymous` for the local single-user UI),
-- LangGraph UI thread ID, and
-- the resolved repository root.
+The existing LangGraph Store session manifest remains authoritative for linked threads,
+workspace relationships, returned session summaries, Research evidence references,
+and visual artifacts. The application-owned PostgreSQL `session_catalog` schema is a
+rebuildable query projection for the session list and detail UI; it never owns
+checkpoint execution state.
 
-This prevents one UI thread from reusing coding state in another repository or
-another user's session. Raw repository and user values are not embedded in the
-checkpoint thread ID.
+Forks import sanitized checkpoint values into a new Agent Server thread. A fork is
+blocked while the source has pending work and never inherits pending approval or
+unfinished specialist execution. Completed transcript values, artifact and evidence
+references, and workspace links are inherited through existing Agent Server and Store
+APIs.
 
-The default database is `data/deep_agents_checkpoints.sqlite3`, which survives
-backend and LangGraph restarts without requiring Docker. Set
-`CODING_CHECKPOINT_DB_URI` to use the installed async Postgres checkpointer in a
-deployment that exposes a dedicated connection URI. Credential values belong
-only in the runtime environment or secret manager.
-
-Repository `AGENTS.md` is loaded as read-only Deep Agents memory on each agent
-construction. Workspace-local `.agents/skills/` is loaded when present. Both
-remain repository-scoped; the mutation policy prevents the coding agent from
-rewriting `AGENTS.md`.
-
-The local sidecar exposes scoped lifecycle operations:
+The former nested Coder checkpoint database is legacy read-only data. Its opaque
+SHA-256 session ID remains available only for scoped export compatibility through:
 
 - `GET /api/coding-sessions/export`
-- `POST /api/coding-sessions/reset`
 
-Both require the thread, workspace, and user scope used to derive the session.
-Reset deletes only that opaque checkpoint thread. Export returns the latest
-checkpoint's messages and metadata; it does not expose database credentials or
-other session IDs.
+`POST /api/coding-sessions/reset` returns `410 Gone`; starting a linked thread or fork
+is the supported clean-context path. Legacy data is not replayed into native thread
+checkpoints.
+
+Repository `AGENTS.md` is loaded as read-only Deep Agents memory on each agent
+construction. Workspace-local `.agents/skills/` is loaded when present. Credential
+values remain only in the runtime environment or secret manager.

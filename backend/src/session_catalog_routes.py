@@ -12,8 +12,8 @@ from psycopg.rows import dict_row
 
 from src.session_catalog import SCHEMA, ensure_catalog_schema, query_sessions
 from src.session_catalog_models import (
-    SavedViewInput,
     ModelPreferenceInput,
+    SavedViewInput,
     SessionCloseInput,
     SessionForkInput,
     SessionOpenInput,
@@ -165,6 +165,25 @@ async def session_artifacts(
 
 @router.post("/{session_id}/close")
 async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, Any]:
+    client = _agent_server_client()
+    item = await client.store.get_item((body.owner_id, "sessions"), session_id)
+    if not item:
+        raise HTTPException(404, "Session not found.")
+    value = dict(item.get("value", {}))
+    value.update(
+        {
+            "status": "closed",
+            "long_description": body.summary or value.get("long_description", ""),
+            "tent_poles": body.tent_poles,
+            "summary_human_reviewed": body.summary is not None,
+            "summary_version": int(value.get("summary_version", 1))
+            + (1 if body.summary is not None else 0),
+        }
+    )
+    await client.store.put_item(
+        (body.owner_id, "sessions"), session_id, value, index=False
+    )
+
     await ensure_catalog_schema()
     async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:  # noqa: SIM117
         async with connection.cursor(row_factory=dict_row) as cursor:
@@ -241,44 +260,63 @@ async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, A
 
 @router.post("/{session_id}/fork")
 async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any]:
-    """Use Agent Server thread APIs; prior tools are never replayed."""
-
-    await ensure_catalog_schema()
-    async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:  # noqa: SIM117
-        async with connection.cursor(row_factory=dict_row) as cursor:
-            await cursor.execute(
-                f"SELECT * FROM {SCHEMA}.sessions "
-                "WHERE session_id = %s AND owner_id = %s",
-                (session_id, body.owner_id),
-            )
-            source = await cursor.fetchone()
-    if not source:
-        raise HTTPException(404, "Session not found.")
+    """Fork a settled Agent Server thread; pending actions are never copied."""
 
     client = _agent_server_client()
+    parent_item = await client.store.get_item((body.owner_id, "sessions"), session_id)
+    if not parent_item:
+        raise HTTPException(404, "Session not found.")
+    parent_value = dict(parent_item.get("value", {}))
+    source_thread_id = str(parent_value.get("thread_id") or session_id)
+    checkpoint = await client.threads.get_state(
+        source_thread_id, checkpoint_id=body.checkpoint_id
+    )
+    if checkpoint.get("tasks") or checkpoint.get("next") or checkpoint.get("interrupts"):
+        raise HTTPException(
+            409, "Resolve the pending thread action before creating a fork."
+        )
+
     metadata = {
         "graph_id": "chat_ui",
         "owner_id": body.owner_id,
-        "parent_thread_id": source["thread_id"],
+        "parent_thread_id": source_thread_id,
         "parent_session_id": session_id,
     }
     if body.checkpoint_id:
-        checkpoint = await client.threads.get_state(
-            source["thread_id"], checkpoint_id=body.checkpoint_id
-        )
-        values = checkpoint.get("values", {})
         copied = await client.threads.create(
             graph_id="chat_ui",
             metadata=metadata,
-            supersteps=[{"updates": [{"values": values, "as_node": "__input__"}]}],
+            supersteps=[
+                {
+                    "updates": [
+                        {
+                            "values": dict(checkpoint.get("values", {})),
+                            "as_node": "__input__",
+                        }
+                    ]
+                }
+            ],
         )
     else:
-        copied = await client.threads.copy(source["thread_id"])
+        copied = await client.threads.copy(source_thread_id)
         if not isinstance(copied, dict) or not copied.get("thread_id"):
             raise HTTPException(502, "Agent Server did not return the copied thread.")
         await client.threads.update(copied["thread_id"], metadata=metadata)
     new_thread_id = str(copied["thread_id"])
 
+    fork_value = {
+        **parent_value,
+        "session_id": new_thread_id,
+        "thread_id": new_thread_id,
+        "status": "forked",
+        "parent_session_id": session_id,
+        "parent_thread_id": source_thread_id,
+    }
+    await client.store.put_item(
+        (body.owner_id, "sessions"), new_thread_id, fork_value, index=False
+    )
+
+    await ensure_catalog_schema()
     async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:  # noqa: SIM117
         async with connection.cursor() as cursor:
             await cursor.execute(
@@ -294,10 +332,10 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
                     new_thread_id,
                     body.owner_id,
                     session_id,
-                    source["thread_id"],
-                    source["short_description"],
-                    source["long_description"],
-                    source["summary_version"],
+                    source_thread_id,
+                    str(parent_value.get("short_description", "Untitled session")),
+                    str(parent_value.get("long_description", "")),
+                    int(parent_value.get("summary_version", 1)),
                 ),
             )
             await cursor.execute(
@@ -336,20 +374,6 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
                 (new_thread_id, session_id, body.owner_id),
             )
 
-    parent_item = await client.store.get_item((body.owner_id, "sessions"), session_id)
-    parent_value = dict(parent_item.get("value", {})) if parent_item else {}
-    parent_value.update(
-        {
-            "session_id": new_thread_id,
-            "thread_id": new_thread_id,
-            "status": "forked",
-            "parent_session_id": session_id,
-            "parent_thread_id": source["thread_id"],
-        }
-    )
-    await client.store.put_item(
-        (body.owner_id, "sessions"), new_thread_id, parent_value, index=False
-    )
     return {
         "session_id": new_thread_id,
         "thread_id": new_thread_id,

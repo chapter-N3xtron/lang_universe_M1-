@@ -1,27 +1,24 @@
 ## Why
 
-Research is user-approved as an independently addressable top-level specialist, but the promotion must be specified as a bounded, auditable handoff rather than treated as an implicit implementation detail. Formal tracking is needed to preserve read-only authority, durable evidence provenance, session continuity, accessible source review, and complete release verification while keeping `todos.json` as the project-level task authority.
+Research is already partially present as a top-level specialist, but its autonomous in-depth workflow, durable evidence/report boundary, report-presentation boundary, and human-understandable progress contract need an explicit, reviewable architecture. The approved direction permits review of LangChain's Open Deep Research reference implementation for either selective adaptation or possible core internal architecture use without claiming adoption, installation, code copying, or implementation completion.
 
 ## What Changes
 
-- Specify the visible lifecycle `Jasper -> Research -> Jasper -> record_session -> END` while retaining direct UI-selected entry to the existing top-level `research` node.
-- Specify Jasper's documented `transfer_to_research` parent-graph Command, exact bounded handoff state, matching tool-call/result messages, final-only Research return, and materially-needed delegation rule.
-- Remove Research from Jasper's hidden `CompiledSubAgent` list while preserving Research as an independently addressable top-level agent.
-- Restrict Research to web search, explicitly selected page reads, reopening saved evidence, supported upload analysis, and safe read-only selected-workspace discovery and reads.
-- Specify status-aware, bounded, immutable evidence records in the existing Agent Server LangGraph Store, lightweight checkpoint/session references, deduplication, preserved versions, offline reopen, and fork inheritance without body copying.
-- Seed Jasper's evidence registry from saved session evidence and require every researched visual concept-map node and edge to cite valid saved evidence IDs.
-- Add or complete the Sources view in the existing session visual workspace, including complete source metadata, immutable provenance, accessible session-specific renaming, and source-restricted `Map all` / `map selected` request composition through the existing composer.
-- Preserve Research provenance and configured Research voice; Jasper introduces the transition and provides final synthesis. URLs remain clickable but are not spoken by TTS.
-- Exclude custom persistence, migrations, databases, APIs or evidence services, vector indexes, OCR, whole-site crawling, shell/execute, Research mutation tools, host-filesystem access, and speculative services.
-- Require focused and full automated checks, real Agent Server graph inspection, and a separately reported live-provider smoke test before implementation todos may be completed.
+- Establish Research—not Jasper—as the owner of autonomous in-depth research. Research remains a visible, independently addressable top-level LangGraph specialist; Jasper assigns or reopens its work, retains the session relationship, introduces the transition, receives its result, and may synthesize it.
+- Record the canonical accessible text/structured cited report artifact as authoritative. It must durably preserve content, citations, limitations, immutable evidence references/IDs, retrieval status, provenance, and source metadata.
+- Specify an eventual Research-owned report renderer/service boundary that consumes only saved canonical report/evidence references and offers human-facing style selection with safe defaults. It can support configurable clean, accessible, professional work presentation and separately configurable personal-interest/creative presentation. Style must never alter substance.
+- State that consistent branded/stylized report output, potentially including printable/exportable PDF, is intended; renderer, templates, output formats, dependencies, final visual identity, branding, artifact-storage lifecycle, and export/open/download authorization remain explicit open decisions.
+- Document Open Deep Research (<https://github.com/langchain-ai/open_deep_research>) as a candidate for selective adaptation **or potential Research core internal architecture**, integrated with the existing LangGraph Store/session evidence layer and Jasper access paths, only after license, version/compatibility, security, governance, and integration review. It is neither installed nor adopted by this change.
+- Preserve that Jasper may present saved Research reports and create evidence-grounded visual concept maps from saved report/evidence references without rereading the web or claiming Research authorship.
+- Retain durable evidence semantics, Store/checkpoint separation, offline report reopening, visual citation validation, dashboard sanitization, all existing security boundaries, autonomous Research direction, persistence/dashboard requirements, and OCR exclusion.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `top-level-research-handoff`: Visible top-level routing, bounded Jasper–Research transfer, direct entry, read-only Research authority, and final-only return behavior.
-- `durable-session-evidence`: Status-aware bounded evidence, immutable Agent Server Store records, lightweight session references, provenance, deduplication/versioning, reopen, fork inheritance, and visual concept-map citation rules.
-- `session-sources-view`: Complete session source review, accessible session-specific renaming, immutable provenance, visual usage, and source-restricted visual concept-map request composition.
+- `top-level-research-handoff`: Visible Research ownership, bounded Jasper–Research handoff/reopen lifecycle, authorized autonomous research workflow, Research provenance, and Jasper presentation of saved reports/visual concept maps.
+- `durable-session-evidence`: Bounded immutable/versioned evidence, authoritative canonical cited reports, renderer input integrity, checkpoint/Store separation, offline reopening, and evidence-grounded visual generation.
+- `session-sources-view`: Human-understandable research status, progress, sources, limitations, durable-artifact review, sanitized-history presentation, accessible saved-report presentation, and evidence-restricted visual concept-map composition.
 
 ### Modified Capabilities
 
@@ -31,15 +28,32 @@ Research is user-approved as an independently addressable top-level specialist, 
 
 ### Observed repository baseline
 
-- `backend/src/chat_ui.py` already defines a top-level `research` node, direct supervisor routing, delegated return to Jasper, and `record_session` termination paths.
-- `backend/src/jasper_agent.py` currently returns no hidden compiled specialists and defines `transfer_to_research` with `graph=Command.PARENT`.
-- `backend/src/research_agent.py` already exposes read-only Deep Agents filesystem middleware and returns a final Research message with Research speaker provenance.
-- `backend/src/research_evidence.py` already contains a 50,000-character bound and Agent Server Store namespaces for evidence bodies and session source records.
-- `agent-chat-ui/src/components/workspace/session-sources.tsx` already contains a Sources view, session-specific display-name editing, links, visual usage, and visual concept-map request composition.
-- These observations describe existing code only; they do not establish full conformance or completion of the user-defined requirements.
+- `backend/src/chat_ui.py` already defines top-level `research`, `jasper`, and `record_session` nodes, routes direct Research to recording, and returns Jasper-delegated Research to Jasper.
+- `backend/src/jasper_agent.py` already exposes a parent-graph `transfer_to_research` tool and no hidden compiled Research specialist.
+- `backend/src/research_agent.py` already creates a read-only Deep Agents Research graph with selected-workspace discovery/reads and Research-provenance final output.
+- `backend/src/research_evidence.py` already bounds stored content to 50,000 characters and uses Store namespaces for evidence bodies and session-source metadata.
+- `agent-chat-ui/src/components/workspace/session-sources.tsx` already shows session sources, permits session display-name edits, and composes a visual concept map request.
+- These are observed implementation facts, not conformance, renderer availability, security, accessibility, lifecycle, retention, export, or release-completion claims.
 
-### Proposed affected areas
+### Repository/reference facts
 
-- Backend graph and handoff contracts, Research tool exposure, workspace/attachment safety, evidence schemas and Store behavior, visual evidence validation, session recording/fork behavior, Sources workspace components, composer integration, accessibility, provenance, and TTS presentation.
-- Project implementation authority remains the existing todos `implement-visible-jasper-research-handoff`, `persist-bounded-session-research-evidence`, `add-session-sources-view-and-renaming`, and `verify-top-level-research-and-session-sources` in `todos.json`. OpenSpec tasks link to those IDs and do not replace or override their truthful statuses.
-- Governance review remains required under `GOVERNANCE_FRAMEWORK.md`, especially human editorial ownership, visual/voice separation, session continuity, specialist participation, authorization, and durable LangGraph boundaries.
+- The official Open Deep Research repository is <https://github.com/langchain-ai/open_deep_research>. Its license, version/compatibility, security posture, governance fit, and integration fit have not been accepted by this change.
+
+### User-approved proposed architecture
+
+- Research is the in-depth research engine and a visible top-level specialist. Jasper coordinates the human-facing relationship and can present saved Research reports or create grounded visual concept maps from saved Research artifacts/evidence without a new web read.
+- LangGraph checkpoints hold bounded working context and resumable run state. The existing LangGraph Store is the durable session boundary for evidence/report artifacts and lightweight references.
+- The canonical accessible text/structured report artifact is authoritative. An eventual Research-owned renderer/service consumes saved canonical report/evidence references, preserves every substantive and provenance field in every representation, and exposes safe human-facing style selection.
+
+### Open decisions
+
+- Renderer/service implementation, templates, output formats, PDF/print support, dependencies, final visual identity, branding, stylization, storage lifecycle, and export/open/download authorization.
+- Whether Open Deep Research is selectively adapted or becomes Research’s core internal architecture after the required review.
+- Provider/library approval, autonomous authority, external disclosure/consent, provider terms, secret-manager-only credentials, budgets, stop conditions, retention/deletion, and voice/provenance presentation. Governance reference: `GOVERNANCE_FRAMEWORK.md`.
+
+### Affected areas and constraints
+
+- Future implementation may affect the top-level graph, Research workflow/tool contracts, checkpoint state, Store schemas, canonical report/evidence validation, renderer boundary, style selection, session recording, visual workspace/dashboard presentation, accessibility, provenance, and voice presentation.
+- Existing implementation authority remains in the four current `todos.json` items: `implement-visible-jasper-research-handoff`, `persist-bounded-session-research-evidence`, `add-session-sources-view-and-renaming`, and `verify-top-level-research-and-session-sources`. OpenSpec tasks sequence and clarify those items without replacing their truthful statuses.
+- The renderer/service has no authority to access secrets, raw authentication material, unsupported local paths, protected workspace material, or the web; it cannot introduce attribution laundering. Research retains report authorship and provenance.
+- No runtime, UI, PDF/rendering, dependency, or application-code implementation is authorized by this planning revision. OCR remains pending and separate.

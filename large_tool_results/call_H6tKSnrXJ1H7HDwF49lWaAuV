@@ -1,0 +1,1901 @@
+
+===== src/open_deep_research/utils.py =====
+"""Utility functions and helpers for the Deep Research agent."""
+
+import asyncio
+import logging
+import os
+import warnings
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Any, Dict, List, Literal, Optional
+
+import aiohttp
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    MessageLikeRepresentation,
+    filter_messages,
+)
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import (
+    BaseTool,
+    InjectedToolArg,
+    StructuredTool,
+    ToolException,
+    tool,
+)
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.config import get_store
+from mcp import McpError
+from tavily import AsyncTavilyClient
+
+from open_deep_research.configuration import Configuration, SearchAPI
+from open_deep_research.prompts import summarize_webpage_prompt
+from open_deep_research.state import ResearchComplete, Summary
+
+##########################
+# Tavily Search Tool Utils
+##########################
+TAVILY_SEARCH_DESCRIPTION = (
+    "A search engine optimized for comprehensive, accurate, and trusted results. "
+    "Useful for when you need to answer questions about current events."
+)
+@tool(description=TAVILY_SEARCH_DESCRIPTION)
+async def tavily_search(
+    queries: List[str],
+    max_results: Annotated[int, InjectedToolArg] = 5,
+    topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
+    config: RunnableConfig = None
+) -> str:
+    """Fetch and summarize search results from Tavily search API.
+
+    Args:
+        queries: List of search queries to execute
+        max_results: Maximum number of results to return per query
+        topic: Topic filter for search results (general, news, or finance)
+        config: Runtime configuration for API keys and model settings
+
+    Returns:
+        Formatted string containing summarized search results
+    """
+    # Step 1: Execute search queries asynchronously
+    search_results = await tavily_search_async(
+        queries,
+        max_results=max_results,
+        topic=topic,
+        include_raw_content=True,
+        config=config
+    )
+    
+    # Step 2: Deduplicate results by URL to avoid processing the same content multiple times
+    unique_results = {}
+    for response in search_results:
+        for result in response['results']:
+            url = result['url']
+            if url not in unique_results:
+                unique_results[url] = {**result, "query": response['query']}
+    
+    # Step 3: Set up the summarization model with configuration
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Character limit to stay within model token limits (configurable)
+    max_char_to_include = configurable.max_content_length
+    
+    # Initialize summarization model with retry logic
+    model_api_key = get_api_key_for_model(configurable.summarization_model, config)
+    summarization_model = init_chat_model(
+        model=configurable.summarization_model,
+        max_tokens=configurable.summarization_model_max_tokens,
+        api_key=model_api_key,
+        tags=["langsmith:nostream"]
+    ).with_structured_output(Summary).with_retry(
+        stop_after_attempt=configurable.max_structured_output_retries
+    )
+    
+    # Step 4: Create summarization tasks (skip empty content)
+    async def noop():
+        """No-op function for results without raw content."""
+        return None
+    
+    summarization_tasks = [
+        noop() if not result.get("raw_content") 
+        else summarize_webpage(
+            summarization_model, 
+            result['raw_content'][:max_char_to_include]
+        )
+        for result in unique_results.values()
+    ]
+    
+    # Step 5: Execute all summarization tasks in parallel
+    summaries = await asyncio.gather(*summarization_tasks)
+    
+    # Step 6: Combine results with their summaries
+    summarized_results = {
+        url: {
+            'title': result['title'], 
+            'content': result['content'] if summary is None else summary
+        }
+        for url, result, summary in zip(
+            unique_results.keys(), 
+            unique_results.values(), 
+            summaries
+        )
+    }
+    
+    # Step 7: Format the final output
+    if not summarized_results:
+        return "No valid search results found. Please try different search queries or use a different search API."
+    
+    formatted_output = "Search results: \n\n"
+    for i, (url, result) in enumerate(summarized_results.items()):
+        formatted_output += f"\n\n--- SOURCE {i+1}: {result['title']} ---\n"
+        formatted_output += f"URL: {url}\n\n"
+        formatted_output += f"SUMMARY:\n{result['content']}\n\n"
+        formatted_output += "\n\n" + "-" * 80 + "\n"
+    
+    return formatted_output
+
+async def tavily_search_async(
+    search_queries, 
+    max_results: int = 5, 
+    topic: Literal["general", "news", "finance"] = "general", 
+    include_raw_content: bool = True, 
+    config: RunnableConfig = None
+):
+    """Execute multiple Tavily search queries asynchronously.
+    
+    Args:
+        search_queries: List of search query strings to execute
+        max_results: Maximum number of results per query
+        topic: Topic category for filtering results
+        include_raw_content: Whether to include full webpage content
+        config: Runtime configuration for API key access
+        
+    Returns:
+        List of search result dictionaries from Tavily API
+    """
+    # Initialize the Tavily client with API key from config
+    tavily_client = AsyncTavilyClient(api_key=get_tavily_api_key(config))
+    
+    # Create search tasks for parallel execution
+    search_tasks = [
+        tavily_client.search(
+            query,
+            max_results=max_results,
+            include_raw_content=include_raw_content,
+            topic=topic
+        )
+        for query in search_queries
+    ]
+    
+    # Execute all search queries in parallel and return results
+    search_results = await asyncio.gather(*search_tasks)
+    return search_results
+
+async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
+    """Summarize webpage content using AI model with timeout protection.
+    
+    Args:
+        model: The chat model configured for summarization
+        webpage_content: Raw webpage content to be summarized
+        
+    Returns:
+        Formatted summary with key excerpts, or original content if summarization fails
+    """
+    try:
+        # Create prompt with current date context
+        prompt_content = summarize_webpage_prompt.format(
+            webpage_content=webpage_content, 
+            date=get_today_str()
+        )
+        
+        # Execute summarization with timeout to prevent hanging
+        summary = await asyncio.wait_for(
+            model.ainvoke([HumanMessage(content=prompt_content)]),
+            timeout=60.0  # 60 second timeout for summarization
+        )
+        
+        # Format the summary with structured sections
+        formatted_summary = (
+            f"<summary>\n{summary.summary}\n</summary>\n\n"
+            f"<key_excerpts>\n{summary.key_excerpts}\n</key_excerpts>"
+        )
+        
+        return formatted_summary
+        
+    except asyncio.TimeoutError:
+        # Timeout during summarization - return original content
+        logging.warning("Summarization timed out after 60 seconds, returning original content")
+        return webpage_content
+    except Exception as e:
+        # Other errors during summarization - log and return original content
+        logging.warning(f"Summarization failed with error: {str(e)}, returning original content")
+        return webpage_content
+
+##########################
+# Reflection Tool Utils
+##########################
+
+@tool(description="Strategic reflection tool for research planning")
+def think_tool(reflection: str) -> str:
+    """Tool for strategic reflection on research progress and decision-making.
+
+    Use this tool after each search to analyze results and plan next steps systematically.
+    This creates a deliberate pause in the research workflow for quality decision-making.
+
+    When to use:
+    - After receiving search results: What key information did I find?
+    - Before deciding next steps: Do I have enough to answer comprehensively?
+    - When assessing research gaps: What specific information am I still missing?
+    - Before concluding research: Can I provide a complete answer now?
+
+    Reflection should address:
+    1. Analysis of current findings - What concrete information have I gathered?
+    2. Gap assessment - What crucial information is still missing?
+    3. Quality evaluation - Do I have sufficient evidence/examples for a good answer?
+    4. Strategic decision - Should I continue searching or provide my answer?
+
+    Args:
+        reflection: Your detailed reflection on research progress, findings, gaps, and next steps
+
+    Returns:
+        Confirmation that reflection was recorded for decision-making
+    """
+    return f"Reflection recorded: {reflection}"
+
+##########################
+# MCP Utils
+##########################
+
+async def get_mcp_access_token(
+    supabase_token: str,
+    base_mcp_url: str,
+) -> Optional[Dict[str, Any]]:
+    """Exchange Supabase token for MCP access token using OAuth token exchange.
+    
+    Args:
+        supabase_token: Valid Supabase authentication token
+        base_mcp_url: Base URL of the MCP server
+        
+    Returns:
+        Token data dictionary if successful, None if failed
+    """
+    try:
+        # Prepare OAuth token exchange request data
+        form_data = {
+            "client_id": "mcp_default",
+            "subject_token": supabase_token,
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "resource": base_mcp_url.rstrip("/") + "/mcp",
+            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        }
+        
+        # Execute token exchange request
+        async with aiohttp.ClientSession() as session:
+            token_url = base_mcp_url.rstrip("/") + "/oauth/token"
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            
+            async with session.post(token_url, headers=headers, data=form_data) as response:
+                if response.status == 200:
+                    # Successfully obtained token
+                    token_data = await response.json()
+                    return token_data
+                else:
+                    # Log error details for debugging
+                    response_text = await response.text()
+                    logging.error(f"Token exchange failed: {response_text}")
+                    
+    except Exception as e:
+        logging.error(f"Error during token exchange: {e}")
+    
+    return None
+
+async def get_tokens(config: RunnableConfig):
+    """Retrieve stored authentication tokens with expiration validation.
+    
+    Args:
+        config: Runtime configuration containing thread and user identifiers
+        
+    Returns:
+        Token dictionary if valid and not expired, None otherwise
+    """
+    store = get_store()
+    
+    # Extract required identifiers from config
+    thread_id = config.get("configurable", {}).get("thread_id")
+    if not thread_id:
+        return None
+        
+    user_id = config.get("metadata", {}).get("owner")
+    if not user_id:
+        return None
+    
+    # Retrieve stored tokens
+    tokens = await store.aget((user_id, "tokens"), "data")
+    if not tokens:
+        return None
+    
+    # Check token expiration
+    expires_in = tokens.value.get("expires_in")  # seconds until expiration
+    created_at = tokens.created_at  # datetime of token creation
+    current_time = datetime.now(timezone.utc)
+    expiration_time = created_at + timedelta(seconds=expires_in)
+    
+    if current_time > expiration_time:
+        # Token expired, clean up and return None
+        await store.adelete((user_id, "tokens"), "data")
+        return None
+
+    return tokens.value
+
+async def set_tokens(config: RunnableConfig, tokens: dict[str, Any]):
+    """Store authentication tokens in the configuration store.
+    
+    Args:
+        config: Runtime configuration containing thread and user identifiers
+        tokens: Token dictionary to store
+    """
+    store = get_store()
+    
+    # Extract required identifiers from config
+    thread_id = config.get("configurable", {}).get("thread_id")
+    if not thread_id:
+        return
+        
+    user_id = config.get("metadata", {}).get("owner")
+    if not user_id:
+        return
+    
+    # Store the tokens
+    await store.aput((user_id, "tokens"), "data", tokens)
+
+async def fetch_tokens(config: RunnableConfig) -> dict[str, Any]:
+    """Fetch and refresh MCP tokens, obtaining new ones if needed.
+    
+    Args:
+        config: Runtime configuration with authentication details
+        
+    Returns:
+        Valid token dictionary, or None if unable to obtain tokens
+    """
+    # Try to get existing valid tokens first
+    current_tokens = await get_tokens(config)
+    if current_tokens:
+        return current_tokens
+    
+    # Extract Supabase token for new token exchange
+    supabase_token = config.get("configurable", {}).get("x-supabase-access-token")
+    if not supabase_token:
+        return None
+    
+    # Extract MCP configuration
+    mcp_config = config.get("configurable", {}).get("mcp_config")
+    if not mcp_config or not mcp_config.get("url"):
+        return None
+    
+    # Exchange Supabase token for MCP tokens
+    mcp_tokens = await get_mcp_access_token(supabase_token, mcp_config.get("url"))
+    if not mcp_tokens:
+        return None
+
+    # Store the new tokens and return them
+    await set_tokens(config, mcp_tokens)
+    return mcp_tokens
+
+def wrap_mcp_authenticate_tool(tool: StructuredTool) -> StructuredTool:
+    """Wrap MCP tool with comprehensive authentication and error handling.
+    
+    Args:
+        tool: The MCP structured tool to wrap
+        
+    Returns:
+        Enhanced tool with authentication error handling
+    """
+    original_coroutine = tool.coroutine
+    
+    async def authentication_wrapper(**kwargs):
+        """Enhanced coroutine with MCP error handling and user-friendly messages."""
+        
+        def _find_mcp_error_in_exception_chain(exc: BaseException) -> McpError | None:
+            """Recursively search for MCP errors in exception chains."""
+            if isinstance(exc, McpError):
+                return exc
+            
+            # Handle ExceptionGroup (Python 3.11+) by checking attributes
+            if hasattr(exc, 'exceptions'):
+                for sub_exception in exc.exceptions:
+                    if found_error := _find_mcp_error_in_exception_chain(sub_exception):
+                        return found_error
+            return None
+        
+        try:
+            # Execute the original tool functionality
+            return await original_coroutine(**kwargs)
+            
+        except BaseException as original_error:
+            # Search for MCP-specific errors in the exception chain
+            mcp_error = _find_mcp_error_in_exception_chain(original_error)
+            if not mcp_error:
+                # Not an MCP error, re-raise the original exception
+                raise original_error
+            
+            # Handle MCP-specific error cases
+            error_details = mcp_error.error
+            error_code = getattr(error_details, "code", None)
+            error_data = getattr(error_details, "data", None) or {}
+            
+            # Check for authentication/interaction required error
+            if error_code == -32003:  # Interaction required error code
+                message_payload = error_data.get("message", {})
+                error_message = "Required interaction"
+                
+                # Extract user-friendly message if available
+                if isinstance(message_payload, dict):
+                    error_message = message_payload.get("text") or error_message
+                
+                # Append URL if provided for user reference
+                if url := error_data.get("url"):
+                    error_message = f"{error_message} {url}"
+                
+                raise ToolException(error_message) from original_error
+            
+            # For other MCP errors, re-raise the original
+            raise original_error
+    
+    # Replace the tool's coroutine with our enhanced version
+    tool.coroutine = authentication_wrapper
+    return tool
+
+async def load_mcp_tools(
+    config: RunnableConfig,
+    existing_tool_names: set[str],
+) -> list[BaseTool]:
+    """Load and configure MCP (Model Context Protocol) tools with authentication.
+    
+    Args:
+        config: Runtime configuration containing MCP server details
+        existing_tool_names: Set of tool names already in use to avoid conflicts
+        
+    Returns:
+        List of configured MCP tools ready for use
+    """
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Step 1: Handle authentication if required
+    if configurable.mcp_config and configurable.mcp_config.auth_required:
+        mcp_tokens = await fetch_tokens(config)
+    else:
+        mcp_tokens = None
+    
+    # Step 2: Validate configuration requirements
+    config_valid = (
+        configurable.mcp_config and 
+        configurable.mcp_config.url and 
+        configurable.mcp_config.tools and 
+        (mcp_tokens or not configurable.mcp_config.auth_required)
+    )
+    
+    if not config_valid:
+        return []
+    
+    # Step 3: Set up MCP server connection
+    server_url = configurable.mcp_config.url.rstrip("/") + "/mcp"
+    
+    # Configure authentication headers if tokens are available
+    auth_headers = None
+    if mcp_tokens:
+        auth_headers = {"Authorization": f"Bearer {mcp_tokens['access_token']}"}
+    
+    mcp_server_config = {
+        "server_1": {
+            "url": server_url,
+            "headers": auth_headers,
+            "transport": "streamable_http"
+        }
+    }
+    # TODO: When Multi-MCP Server support is merged in OAP, update this code
+    
+    # Step 4: Load tools from MCP server
+    try:
+        client = MultiServerMCPClient(mcp_server_config)
+        available_mcp_tools = await client.get_tools()
+    except Exception:
+        # If MCP server connection fails, return empty list
+        return []
+    
+    # Step 5: Filter and configure tools
+    configured_tools = []
+    for mcp_tool in available_mcp_tools:
+        # Skip tools with conflicting names
+        if mcp_tool.name in existing_tool_names:
+            warnings.warn(
+                f"MCP tool '{mcp_tool.name}' conflicts with existing tool name - skipping"
+            )
+            continue
+        
+        # Only include tools specified in configuration
+        if mcp_tool.name not in set(configurable.mcp_config.tools):
+            continue
+        
+        # Wrap tool with authentication handling and add to list
+        enhanced_tool = wrap_mcp_authenticate_tool(mcp_tool)
+        configured_tools.append(enhanced_tool)
+    
+    return configured_tools
+
+
+##########################
+# Tool Utils
+##########################
+
+async def get_search_tool(search_api: SearchAPI):
+    """Configure and return search tools based on the specified API provider.
+    
+    Args:
+        search_api: The search API provider to use (Anthropic, OpenAI, Tavily, or None)
+        
+    Returns:
+        List of configured search tool objects for the specified provider
+    """
+    if search_api == SearchAPI.ANTHROPIC:
+        # Anthropic's native web search with usage limits
+        return [{
+            "type": "web_search_20250305", 
+            "name": "web_search", 
+            "max_uses": 5
+        }]
+        
+    elif search_api == SearchAPI.OPENAI:
+        # OpenAI's web search preview functionality
+        return [{"type": "web_search_preview"}]
+        
+    elif search_api == SearchAPI.TAVILY:
+        # Configure Tavily search tool with metadata
+        search_tool = tavily_search
+        search_tool.metadata = {
+            **(search_tool.metadata or {}), 
+            "type": "search", 
+            "name": "web_search"
+        }
+        return [search_tool]
+        
+    elif search_api == SearchAPI.NONE:
+        # No search functionality configured
+        return []
+        
+    # Default fallback for unknown search API types
+    return []
+    
+async def get_all_tools(config: RunnableConfig):
+    """Assemble complete toolkit including research, search, and MCP tools.
+    
+    Args:
+        config: Runtime configuration specifying search API and MCP settings
+        
+    Returns:
+        List of all configured and available tools for research operations
+    """
+    # Start with core research tools
+    tools = [tool(ResearchComplete), think_tool]
+    
+    # Add configured search tools
+    configurable = Configuration.from_runnable_config(config)
+    search_api = SearchAPI(get_config_value(configurable.search_api))
+    search_tools = await get_search_tool(search_api)
+    tools.extend(search_tools)
+    
+    # Track existing tool names to prevent conflicts
+    existing_tool_names = {
+        tool.name if hasattr(tool, "name") else tool.get("name", "web_search") 
+        for tool in tools
+    }
+    
+    # Add MCP tools if configured
+    mcp_tools = await load_mcp_tools(config, existing_tool_names)
+    tools.extend(mcp_tools)
+    
+    return tools
+
+def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]):
+    """Extract notes from tool call messages."""
+    return [tool_msg.content for tool_msg in filter_messages(messages, include_types="tool")]
+
+##########################
+# Model Provider Native Websearch Utils
+##########################
+
+def anthropic_websearch_called(response):
+    """Detect if Anthropic's native web search was used in the response.
+    
+    Args:
+        response: The response object from Anthropic's API
+        
+    Returns:
+        True if web search was called, False otherwise
+    """
+    try:
+        # Navigate through the response metadata structure
+        usage = response.response_metadata.get("usage")
+        if not usage:
+            return False
+        
+        # Check for server-side tool usage information
+        server_tool_use = usage.get("server_tool_use")
+        if not server_tool_use:
+            return False
+        
+        # Look for web search request count
+        web_search_requests = server_tool_use.get("web_search_requests")
+        if web_search_requests is None:
+            return False
+        
+        # Return True if any web search requests were made
+        return web_search_requests > 0
+        
+    except (AttributeError, TypeError):
+        # Handle cases where response structure is unexpected
+        return False
+
+def openai_websearch_called(response):
+    """Detect if OpenAI's web search functionality was used in the response.
+    
+    Args:
+        response: The response object from OpenAI's API
+        
+    Returns:
+        True if web search was called, False otherwise
+    """
+    # Check for tool outputs in the response metadata
+    tool_outputs = response.additional_kwargs.get("tool_outputs")
+    if not tool_outputs:
+        return False
+    
+    # Look for web search calls in the tool outputs
+    for tool_output in tool_outputs:
+        if tool_output.get("type") == "web_search_call":
+            return True
+    
+    return False
+
+
+##########################
+# Token Limit Exceeded Utils
+##########################
+
+def is_token_limit_exceeded(exception: Exception, model_name: str = None) -> bool:
+    """Determine if an exception indicates a token/context limit was exceeded.
+    
+    Args:
+        exception: The exception to analyze
+        model_name: Optional model name to optimize provider detection
+        
+    Returns:
+        True if the exception indicates a token limit was exceeded, False otherwise
+    """
+    error_str = str(exception).lower()
+    
+    # Step 1: Determine provider from model name if available
+    provider = None
+    if model_name:
+        model_str = str(model_name).lower()
+        if model_str.startswith('openai:'):
+            provider = 'openai'
+        elif model_str.startswith('anthropic:'):
+            provider = 'anthropic'
+        elif model_str.startswith('gemini:') or model_str.startswith('google:'):
+            provider = 'gemini'
+    
+    # Step 2: Check provider-specific token limit patterns
+    if provider == 'openai':
+        return _check_openai_token_limit(exception, error_str)
+    elif provider == 'anthropic':
+        return _check_anthropic_token_limit(exception, error_str)
+    elif provider == 'gemini':
+        return _check_gemini_token_limit(exception, error_str)
+    
+    # Step 3: If provider unknown, check all providers
+    return (
+        _check_openai_token_limit(exception, error_str) or
+        _check_anthropic_token_limit(exception, error_str) or
+        _check_gemini_token_limit(exception, error_str)
+    )
+
+def _check_openai_token_limit(exception: Exception, error_str: str) -> bool:
+    """Check if exception indicates OpenAI token limit exceeded."""
+    # Analyze exception metadata
+    exception_type = str(type(exception))
+    class_name = exception.__class__.__name__
+    module_name = getattr(exception.__class__, '__module__', '')
+    
+    # Check if this is an OpenAI exception
+    is_openai_exception = (
+        'openai' in exception_type.lower() or 
+        'openai' in module_name.lower()
+    )
+    
+    # Check for typical OpenAI token limit error types
+    is_request_error = class_name in ['BadRequestError', 'InvalidRequestError']
+    
+    if is_openai_exception and is_request_error:
+        # Look for token-related keywords in error message
+        token_keywords = ['token', 'context', 'length', 'maximum context', 'reduce']
+        if any(keyword in error_str for keyword in token_keywords):
+            return True
+    
+    # Check for specific OpenAI error codes
+    if hasattr(exception, 'code') and hasattr(exception, 'type'):
+        error_code = getattr(exception, 'code', '')
+        error_type = getattr(exception, 'type', '')
+        
+        if (error_code == 'context_length_exceeded' or
+            error_type == 'invalid_request_error'):
+            return True
+    
+    return False
+
+def _check_anthropic_token_limit(exception: Exception, error_str: str) -> bool:
+    """Check if exception indicates Anthropic token limit exceeded."""
+    # Analyze exception metadata
+    exception_type = str(type(exception))
+    class_name = exception.__class__.__name__
+    module_name = getattr(exception.__class__, '__module__', '')
+    
+    # Check if this is an Anthropic exception
+    is_anthropic_exception = (
+        'anthropic' in exception_type.lower() or 
+        'anthropic' in module_name.lower()
+    )
+    
+    # Check for Anthropic-specific error patterns
+    is_bad_request = class_name == 'BadRequestError'
+    
+    if is_anthropic_exception and is_bad_request:
+        # Anthropic uses specific error messages for token limits
+        if 'prompt is too long' in error_str:
+            return True
+    
+    return False
+
+def _check_gemini_token_limit(exception: Exception, error_str: str) -> bool:
+    """Check if exception indicates Google/Gemini token limit exceeded."""
+    # Analyze exception metadata
+    exception_type = str(type(exception))
+    class_name = exception.__class__.__name__
+    module_name = getattr(exception.__class__, '__module__', '')
+    
+    # Check if this is a Google/Gemini exception
+    is_google_exception = (
+        'google' in exception_type.lower() or 
+        'google' in module_name.lower()
+    )
+    
+    # Check for Google-specific resource exhaustion errors
+    is_resource_exhausted = class_name in [
+        'ResourceExhausted', 
+        'GoogleGenerativeAIFetchError'
+    ]
+    
+    if is_google_exception and is_resource_exhausted:
+        return True
+    
+    # Check for specific Google API resource exhaustion patterns
+    if 'google.api_core.exceptions.resourceexhausted' in exception_type.lower():
+        return True
+    
+    return False
+
+# NOTE: This may be out of date or not applicable to your models. Please update this as needed.
+MODEL_TOKEN_LIMITS = {
+    "openai:gpt-4.1-mini": 1047576,
+    "openai:gpt-4.1-nano": 1047576,
+    "openai:gpt-4.1": 1047576,
+    "openai:gpt-4o-mini": 128000,
+    "openai:gpt-4o": 128000,
+    "openai:o4-mini": 200000,
+    "openai:o3-mini": 200000,
+    "openai:o3": 200000,
+    "openai:o3-pro": 200000,
+    "openai:o1": 200000,
+    "openai:o1-pro": 200000,
+    "anthropic:claude-opus-4": 200000,
+    "anthropic:claude-sonnet-4": 200000,
+    "anthropic:claude-3-7-sonnet": 200000,
+    "anthropic:claude-3-5-sonnet": 200000,
+    "anthropic:claude-3-5-haiku": 200000,
+    "google:gemini-1.5-pro": 2097152,
+    "google:gemini-1.5-flash": 1048576,
+    "google:gemini-pro": 32768,
+    "cohere:command-r-plus": 128000,
+    "cohere:command-r": 128000,
+    "cohere:command-light": 4096,
+    "cohere:command": 4096,
+    "mistral:mistral-large": 32768,
+    "mistral:mistral-medium": 32768,
+    "mistral:mistral-small": 32768,
+    "mistral:mistral-7b-instruct": 32768,
+    "ollama:codellama": 16384,
+    "ollama:llama2:70b": 4096,
+    "ollama:llama2:13b": 4096,
+    "ollama:llama2": 4096,
+    "ollama:mistral": 32768,
+    "bedrock:us.amazon.nova-premier-v1:0": 1000000,
+    "bedrock:us.amazon.nova-pro-v1:0": 300000,
+    "bedrock:us.amazon.nova-lite-v1:0": 300000,
+    "bedrock:us.amazon.nova-micro-v1:0": 128000,
+    "bedrock:us.anthropic.claude-3-7-sonnet-20250219-v1:0": 200000,
+    "bedrock:us.anthropic.claude-sonnet-4-20250514-v1:0": 200000,
+    "bedrock:us.anthropic.claude-opus-4-20250514-v1:0": 200000,
+    "anthropic.claude-opus-4-1-20250805-v1:0": 200000,
+}
+
+def get_model_token_limit(model_string):
+    """Look up the token limit for a specific model.
+    
+    Args:
+        model_string: The model identifier string to look up
+        
+    Returns:
+        Token limit as integer if found, None if model not in lookup table
+    """
+    # Search through known model token limits
+    for model_key, token_limit in MODEL_TOKEN_LIMITS.items():
+        if model_key in model_string:
+            return token_limit
+    
+    # Model not found in lookup table
+    return None
+
+def remove_up_to_last_ai_message(messages: list[MessageLikeRepresentation]) -> list[MessageLikeRepresentation]:
+    """Truncate message history by removing up to the last AI message.
+    
+    This is useful for handling token limit exceeded errors by removing recent context.
+    
+    Args:
+        messages: List of message objects to truncate
+        
+    Returns:
+        Truncated message list up to (but not including) the last AI message
+    """
+    # Search backwards through messages to find the last AI message
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], AIMessage):
+            # Return everything up to (but not including) the last AI message
+            return messages[:i]
+    
+    # No AI messages found, return original list
+    return messages
+
+##########################
+# Misc Utils
+##########################
+
+def get_today_str() -> str:
+    """Get current date formatted for display in prompts and outputs.
+    
+    Returns:
+        Human-readable date string in format like 'Mon Jan 15, 2024'
+    """
+    now = datetime.now()
+    return f"{now:%a} {now:%b} {now.day}, {now:%Y}"
+
+def get_config_value(value):
+    """Extract value from configuration, handling enums and None values."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    elif isinstance(value, dict):
+        return value
+    else:
+        return value.value
+
+def get_api_key_for_model(model_name: str, config: RunnableConfig):
+    """Get API key for a specific model from environment or config."""
+    should_get_from_config = os.getenv("GET_API_KEYS_FROM_CONFIG", "false")
+    model_name = model_name.lower()
+    if should_get_from_config.lower() == "true":
+        api_keys = config.get("configurable", {}).get("apiKeys", {})
+        if not api_keys:
+            return None
+        if model_name.startswith("openai:"):
+            return api_keys.get("OPENAI_API_KEY")
+        elif model_name.startswith("anthropic:"):
+            return api_keys.get("ANTHROPIC_API_KEY")
+        elif model_name.startswith("google"):
+            return api_keys.get("GOOGLE_API_KEY")
+        return None
+    else:
+        if model_name.startswith("openai:"): 
+            return os.getenv("OPENAI_API_KEY")
+        elif model_name.startswith("anthropic:"):
+            return os.getenv("ANTHROPIC_API_KEY")
+        elif model_name.startswith("google"):
+            return os.getenv("GOOGLE_API_KEY")
+        return None
+
+def get_tavily_api_key(config: RunnableConfig):
+    """Get Tavily API key from environment or config."""
+    should_get_from_config = os.getenv("GET_API_KEYS_FROM_CONFIG", "false")
+    if should_get_from_config.lower() == "true":
+        api_keys = config.get("configurable", {}).get("apiKeys", {})
+        if not api_keys:
+            return None
+        return api_keys.get("TAVILY_API_KEY")
+    else:
+        return os.getenv("TAVILY_API_KEY")
+
+
+===== src/open_deep_research/prompts.py =====
+"""System prompts and prompt templates for the Deep Research agent."""
+
+clarify_with_user_instructions="""
+These are the messages that have been exchanged so far from the user asking for the report:
+<Messages>
+{messages}
+</Messages>
+
+Today's date is {date}.
+
+Assess whether you need to ask a clarifying question, or if the user has already provided enough information for you to start research.
+IMPORTANT: If you can see in the messages history that you have already asked a clarifying question, you almost always do not need to ask another one. Only ask another question if ABSOLUTELY NECESSARY.
+
+If there are acronyms, abbreviations, or unknown terms, ask the user to clarify.
+If you need to ask a question, follow these guidelines:
+- Be concise while gathering all necessary information
+- Make sure to gather all the information needed to carry out the research task in a concise, well-structured manner.
+- Use bullet points or numbered lists if appropriate for clarity. Make sure that this uses markdown formatting and will be rendered correctly if the string output is passed to a markdown renderer.
+- Don't ask for unnecessary information, or information that the user has already provided. If you can see that the user has already provided the information, do not ask for it again.
+
+Respond in valid JSON format with these exact keys:
+"need_clarification": boolean,
+"question": "<question to ask the user to clarify the report scope>",
+"verification": "<verification message that we will start research>"
+
+If you need to ask a clarifying question, return:
+"need_clarification": true,
+"question": "<your clarifying question>",
+"verification": ""
+
+If you do not need to ask a clarifying question, return:
+"need_clarification": false,
+"question": "",
+"verification": "<acknowledgement message that you will now start research based on the provided information>"
+
+For the verification message when no clarification is needed:
+- Acknowledge that you have sufficient information to proceed
+- Briefly summarize the key aspects of what you understand from their request
+- Confirm that you will now begin the research process
+- Keep the message concise and professional
+"""
+
+
+transform_messages_into_research_topic_prompt = """You will be given a set of messages that have been exchanged so far between yourself and the user. 
+Your job is to translate these messages into a more detailed and concrete research question that will be used to guide the research.
+
+The messages that have been exchanged so far between yourself and the user are:
+<Messages>
+{messages}
+</Messages>
+
+Today's date is {date}.
+
+You will return a single research question that will be used to guide the research.
+
+Guidelines:
+1. Maximize Specificity and Detail
+- Include all known user preferences and explicitly list key attributes or dimensions to consider.
+- It is important that all details from the user are included in the instructions.
+
+2. Fill in Unstated But Necessary Dimensions as Open-Ended
+- If certain attributes are essential for a meaningful output but the user has not provided them, explicitly state that they are open-ended or default to no specific constraint.
+
+3. Avoid Unwarranted Assumptions
+- If the user has not provided a particular detail, do not invent one.
+- Instead, state the lack of specification and guide the researcher to treat it as flexible or accept all possible options.
+
+4. Use the First Person
+- Phrase the request from the perspective of the user.
+
+5. Sources
+- If specific sources should be prioritized, specify them in the research question.
+- For product and travel research, prefer linking directly to official or primary websites (e.g., official brand sites, manufacturer pages, or reputable e-commerce platforms like Amazon for user reviews) rather than aggregator sites or SEO-heavy blogs.
+- For academic or scientific queries, prefer linking directly to the original paper or official journal publication rather than survey papers or secondary summaries.
+- For people, try linking directly to their LinkedIn profile, or their personal website if they have one.
+- If the query is in a specific language, prioritize sources published in that language.
+"""
+
+lead_researcher_prompt = """You are a research supervisor. Your job is to conduct research by calling the "ConductResearch" tool. For context, today's date is {date}.
+
+<Task>
+Your focus is to call the "ConductResearch" tool to conduct research against the overall research question passed in by the user. 
+When you are completely satisfied with the research findings returned from the tool calls, then you should call the "ResearchComplete" tool to indicate that you are done with your research.
+</Task>
+
+<Available Tools>
+You have access to three main tools:
+1. **ConductResearch**: Delegate research tasks to specialized sub-agents
+2. **ResearchComplete**: Indicate that research is complete
+3. **think_tool**: For reflection and strategic planning during research
+
+**CRITICAL: Use think_tool before calling ConductResearch to plan your approach, and after each ConductResearch to assess progress. Do not call think_tool with any other tools in parallel.**
+</Available Tools>
+
+<Instructions>
+Think like a research manager with limited time and resources. Follow these steps:
+
+1. **Read the question carefully** - What specific information does the user need?
+2. **Decide how to delegate the research** - Carefully consider the question and decide how to delegate the research. Are there multiple independent directions that can be explored simultaneously?
+3. **After each call to ConductResearch, pause and assess** - Do I have enough to answer? What's still missing?
+</Instructions>
+
+<Hard Limits>
+**Task Delegation Budgets** (Prevent excessive delegation):
+- **Bias towards single agent** - Use single agent for simplicity unless the user request has clear opportunity for parallelization
+- **Stop when you can answer confidently** - Don't keep delegating research for perfection
+- **Limit tool calls** - Always stop after {max_researcher_iterations} tool calls to ConductResearch and think_tool if you cannot find the right sources
+
+**Maximum {max_concurrent_research_units} parallel agents per iteration**
+</Hard Limits>
+
+<Show Your Thinking>
+Before you call ConductResearch tool call, use think_tool to plan your approach:
+- Can the task be broken down into smaller sub-tasks?
+
+After each ConductResearch tool call, use think_tool to analyze the results:
+- What key information did I find?
+- What's missing?
+- Do I have enough to answer the question comprehensively?
+- Should I delegate more research or call ResearchComplete?
+</Show Your Thinking>
+
+<Scaling Rules>
+**Simple fact-finding, lists, and rankings** can use a single sub-agent:
+- *Example*: List the top 10 coffee shops in San Francisco → Use 1 sub-agent
+
+**Comparisons presented in the user request** can use a sub-agent for each element of the comparison:
+- *Example*: Compare OpenAI vs. Anthropic vs. DeepMind approaches to AI safety → Use 3 sub-agents
+- Delegate clear, distinct, non-overlapping subtopics
+
+**Important Reminders:**
+- Each ConductResearch call spawns a dedicated research agent for that specific topic
+- A separate agent will write the final report - you just need to gather information
+- When calling ConductResearch, provide complete standalone instructions - sub-agents can't see other agents' work
+- Do NOT use acronyms or abbreviations in your research questions, be very clear and specific
+</Scaling Rules>"""
+
+research_system_prompt = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
+
+<Task>
+Your job is to use tools to gather information about the user's input topic.
+You can use any of the tools provided to you to find resources that can help answer the research question. You can call these tools in series or in parallel, your research is conducted in a tool-calling loop.
+</Task>
+
+<Available Tools>
+You have access to two main tools:
+1. **tavily_search**: For conducting web searches to gather information
+2. **think_tool**: For reflection and strategic planning during research
+{mcp_prompt}
+
+**CRITICAL: Use think_tool after each search to reflect on results and plan next steps. Do not call think_tool with the tavily_search or any other tools. It should be to reflect on the results of the search.**
+</Available Tools>
+
+<Instructions>
+Think like a human researcher with limited time. Follow these steps:
+
+1. **Read the question carefully** - What specific information does the user need?
+2. **Start with broader searches** - Use broad, comprehensive queries first
+3. **After each search, pause and assess** - Do I have enough to answer? What's still missing?
+4. **Execute narrower searches as you gather information** - Fill in the gaps
+5. **Stop when you can answer confidently** - Don't keep searching for perfection
+</Instructions>
+
+<Hard Limits>
+**Tool Call Budgets** (Prevent excessive searching):
+- **Simple queries**: Use 2-3 search tool calls maximum
+- **Complex queries**: Use up to 5 search tool calls maximum
+- **Always stop**: After 5 search tool calls if you cannot find the right sources
+
+**Stop Immediately When**:
+- You can answer the user's question comprehensively
+- You have 3+ relevant examples/sources for the question
+- Your last 2 searches returned similar information
+</Hard Limits>
+
+<Show Your Thinking>
+After each search tool call, use think_tool to analyze the results:
+- What key information did I find?
+- What's missing?
+- Do I have enough to answer the question comprehensively?
+- Should I search more or provide my answer?
+</Show Your Thinking>
+"""
+
+
+compress_research_system_prompt = """You are a research assistant that has conducted research on a topic by calling several tools and web searches. Your job is now to clean up the findings, but preserve all of the relevant statements and information that the researcher has gathered. For context, today's date is {date}.
+
+<Task>
+You need to clean up information gathered from tool calls and web searches in the existing messages.
+All relevant information should be repeated and rewritten verbatim, but in a cleaner format.
+The purpose of this step is just to remove any obviously irrelevant or duplicative information.
+For example, if three sources all say "X", you could say "These three sources all stated X".
+Only these fully comprehensive cleaned findings are going to be returned to the user, so it's crucial that you don't lose any information from the raw messages.
+</Task>
+
+<Guidelines>
+1. Your output findings should be fully comprehensive and include ALL of the information and sources that the researcher has gathered from tool calls and web searches. It is expected that you repeat key information verbatim.
+2. This report can be as long as necessary to return ALL of the information that the researcher has gathered.
+3. In your report, you should return inline citations for each source that the researcher found.
+4. You should include a "Sources" section at the end of the report that lists all of the sources the researcher found with corresponding citations, cited against statements in the report.
+5. Make sure to include ALL of the sources that the researcher gathered in the report, and how they were used to answer the question!
+6. It's really important not to lose any sources. A later LLM will be used to merge this report with others, so having all of the sources is critical.
+</Guidelines>
+
+<Output Format>
+The report should be structured like this:
+**List of Queries and Tool Calls Made**
+**Fully Comprehensive Findings**
+**List of All Relevant Sources (with citations in the report)**
+</Output Format>
+
+<Citation Rules>
+- Assign each unique URL a single citation number in your text
+- End with ### Sources that lists each source with corresponding numbers
+- IMPORTANT: Number sources sequentially without gaps (1,2,3,4...) in the final list regardless of which sources you choose
+- Example format:
+  [1] Source Title: URL
+  [2] Source Title: URL
+</Citation Rules>
+
+Critical Reminder: It is extremely important that any information that is even remotely relevant to the user's research topic is preserved verbatim (e.g. don't rewrite it, don't summarize it, don't paraphrase it).
+"""
+
+compress_research_simple_human_message = """All above messages are about research conducted by an AI Researcher. Please clean up these findings.
+
+DO NOT summarize the information. I want the raw information returned, just in a cleaner format. Make sure all relevant information is preserved - you can rewrite findings verbatim."""
+
+final_report_generation_prompt = """Based on all the research conducted, create a comprehensive, well-structured answer to the overall research brief:
+<Research Brief>
+{research_brief}
+</Research Brief>
+
+For more context, here is all of the messages so far. Focus on the research brief above, but consider these messages as well for more context.
+<Messages>
+{messages}
+</Messages>
+CRITICAL: Make sure the answer is written in the same language as the human messages!
+For example, if the user's messages are in English, then MAKE SURE you write your response in English. If the user's messages are in Chinese, then MAKE SURE you write your entire response in Chinese.
+This is critical. The user will only understand the answer if it is written in the same language as their input message.
+
+Today's date is {date}.
+
+Here are the findings from the research that you conducted:
+<Findings>
+{findings}
+</Findings>
+
+Please create a detailed answer to the overall research brief that:
+1. Is well-organized with proper headings (# for title, ## for sections, ### for subsections)
+2. Includes specific facts and insights from the research
+3. References relevant sources using [Title](URL) format
+4. Provides a balanced, thorough analysis. Be as comprehensive as possible, and include all information that is relevant to the overall research question. People are using you for deep research and will expect detailed, comprehensive answers.
+5. Includes a "Sources" section at the end with all referenced links
+
+You can structure your report in a number of different ways. Here are some examples:
+
+To answer a question that asks you to compare two things, you might structure your report like this:
+1/ intro
+2/ overview of topic A
+3/ overview of topic B
+4/ comparison between A and B
+5/ conclusion
+
+To answer a question that asks you to return a list of things, you might only need a single section which is the entire list.
+1/ list of things or table of things
+Or, you could choose to make each item in the list a separate section in the report. When asked for lists, you don't need an introduction or conclusion.
+1/ item 1
+2/ item 2
+3/ item 3
+
+To answer a question that asks you to summarize a topic, give a report, or give an overview, you might structure your report like this:
+1/ overview of topic
+2/ concept 1
+3/ concept 2
+4/ concept 3
+5/ conclusion
+
+If you think you can answer the question with a single section, you can do that too!
+1/ answer
+
+REMEMBER: Section is a VERY fluid and loose concept. You can structure your report however you think is best, including in ways that are not listed above!
+Make sure that your sections are cohesive, and make sense for the reader.
+
+For each section of the report, do the following:
+- Use simple, clear language
+- Use ## for section title (Markdown format) for each section of the report
+- Do NOT ever refer to yourself as the writer of the report. This should be a professional report without any self-referential language. 
+- Do not say what you are doing in the report. Just write the report without any commentary from yourself.
+- Each section should be as long as necessary to deeply answer the question with the information you have gathered. It is expected that sections will be fairly long and verbose. You are writing a deep research report, and users will expect a thorough answer.
+- Use bullet points to list out information when appropriate, but by default, write in paragraph form.
+
+REMEMBER:
+The brief and research may be in English, but you need to translate this information to the right language when writing the final answer.
+Make sure the final answer report is in the SAME language as the human messages in the message history.
+
+Format the report in clear markdown with proper structure and include source references where appropriate.
+
+<Citation Rules>
+- Assign each unique URL a single citation number in your text
+- End with ### Sources that lists each source with corresponding numbers
+- IMPORTANT: Number sources sequentially without gaps (1,2,3,4...) in the final list regardless of which sources you choose
+- Each source should be a separate line item in a list, so that in markdown it is rendered as a list.
+- Example format:
+  [1] Source Title: URL
+  [2] Source Title: URL
+- Citations are extremely important. Make sure to include these, and pay a lot of attention to getting these right. Users will often use these citations to look into more information.
+</Citation Rules>
+"""
+
+
+summarize_webpage_prompt = """You are tasked with summarizing the raw content of a webpage retrieved from a web search. Your goal is to create a summary that preserves the most important information from the original web page. This summary will be used by a downstream research agent, so it's crucial to maintain the key details without losing essential information.
+
+Here is the raw content of the webpage:
+
+<webpage_content>
+{webpage_content}
+</webpage_content>
+
+Please follow these guidelines to create your summary:
+
+1. Identify and preserve the main topic or purpose of the webpage.
+2. Retain key facts, statistics, and data points that are central to the content's message.
+3. Keep important quotes from credible sources or experts.
+4. Maintain the chronological order of events if the content is time-sensitive or historical.
+5. Preserve any lists or step-by-step instructions if present.
+6. Include relevant dates, names, and locations that are crucial to understanding the content.
+7. Summarize lengthy explanations while keeping the core message intact.
+
+When handling different types of content:
+
+- For news articles: Focus on the who, what, when, where, why, and how.
+- For scientific content: Preserve methodology, results, and conclusions.
+- For opinion pieces: Maintain the main arguments and supporting points.
+- For product pages: Keep key features, specifications, and unique selling points.
+
+Your summary should be significantly shorter than the original content but comprehensive enough to stand alone as a source of information. Aim for about 25-30 percent of the original length, unless the content is already concise.
+
+Present your summary in the following format:
+
+```
+{{
+   "summary": "Your summary here, structured with appropriate paragraphs or bullet points as needed",
+   "key_excerpts": "First important quote or excerpt, Second important quote or excerpt, Third important quote or excerpt, ...Add more excerpts as needed, up to a maximum of 5"
+}}
+```
+
+Here are two examples of good summaries:
+
+Example 1 (for a news article):
+```json
+{{
+   "summary": "On July 15, 2023, NASA successfully launched the Artemis II mission from Kennedy Space Center. This marks the first crewed mission to the Moon since Apollo 17 in 1972. The four-person crew, led by Commander Jane Smith, will orbit the Moon for 10 days before returning to Earth. This mission is a crucial step in NASA's plans to establish a permanent human presence on the Moon by 2030.",
+   "key_excerpts": "Artemis II represents a new era in space exploration, said NASA Administrator John Doe. The mission will test critical systems for future long-duration stays on the Moon, explained Lead Engineer Sarah Johnson. We're not just going back to the Moon, we're going forward to the Moon, Commander Jane Smith stated during the pre-launch press conference."
+}}
+```
+
+Example 2 (for a scientific article):
+```json
+{{
+   "summary": "A new study published in Nature Climate Change reveals that global sea levels are rising faster than previously thought. Researchers analyzed satellite data from 1993 to 2022 and found that the rate of sea-level rise has accelerated by 0.08 mm/year² over the past three decades. This acceleration is primarily attributed to melting ice sheets in Greenland and Antarctica. The study projects that if current trends continue, global sea levels could rise by up to 2 meters by 2100, posing significant risks to coastal communities worldwide.",
+   "key_excerpts": "Our findings indicate a clear acceleration in sea-level rise, which has significant implications for coastal planning and adaptation strategies, lead author Dr. Emily Brown stated. The rate of ice sheet melt in Greenland and Antarctica has tripled since the 1990s, the study reports. Without immediate and substantial reductions in greenhouse gas emissions, we are looking at potentially catastrophic sea-level rise by the end of this century, warned co-author Professor Michael Green."  
+}}
+```
+
+Remember, your goal is to create a summary that can be easily understood and utilized by a downstream research agent while preserving the most critical information from the original webpage.
+
+Today's date is {date}.
+"""
+
+===== src/security/auth.py =====
+import os
+import asyncio
+from langgraph_sdk import Auth
+from langgraph_sdk.auth.types import StudioUser
+from supabase import create_client, Client
+from typing import Optional, Any
+
+supabase_url = os.environ.get("SUPABASE_URL")
+supabase_key = os.environ.get("SUPABASE_KEY")
+supabase: Optional[Client] = None
+
+if supabase_url and supabase_key:
+    supabase = create_client(supabase_url, supabase_key)
+
+# The "Auth" object is a container that LangGraph will use to mark our authentication function
+auth = Auth()
+
+
+# The `authenticate` decorator tells LangGraph to call this function as middleware
+# for every request. This will determine whether the request is allowed or not
+@auth.authenticate
+async def get_current_user(authorization: str | None) -> Auth.types.MinimalUserDict:
+    """Check if the user's JWT token is valid using Supabase."""
+
+    # Ensure we have authorization header
+    if not authorization:
+        raise Auth.exceptions.HTTPException(
+            status_code=401, detail="Authorization header missing"
+        )
+
+    # Parse the authorization header
+    try:
+        scheme, token = authorization.split()
+        assert scheme.lower() == "bearer"
+    except (ValueError, AssertionError):
+        raise Auth.exceptions.HTTPException(
+            status_code=401, detail="Invalid authorization header format"
+        )
+
+    # Ensure Supabase client is initialized
+    if not supabase:
+        raise Auth.exceptions.HTTPException(
+            status_code=500, detail="Supabase client not initialized"
+        )
+
+    try:
+        # Verify the JWT token with Supabase using asyncio.to_thread to avoid blocking
+        # This will decode and verify the JWT token in a separate thread
+        async def verify_token() -> dict[str, Any]:
+            response = await asyncio.to_thread(supabase.auth.get_user, token)
+            return response
+
+        response = await verify_token()
+        user = response.user
+
+        if not user:
+            raise Auth.exceptions.HTTPException(
+                status_code=401, detail="Invalid token or user not found"
+            )
+
+        # Return user info if valid
+        return {
+            "identity": user.id,
+        }
+    except Exception as e:
+        # Handle any errors from Supabase
+        raise Auth.exceptions.HTTPException(
+            status_code=401, detail=f"Authentication error: {str(e)}"
+        )
+
+
+@auth.on.threads.create
+@auth.on.threads.create_run
+async def on_thread_create(
+    ctx: Auth.types.AuthContext,
+    value: Auth.types.on.threads.create.value,
+):
+    """Add owner when creating threads.
+
+    This handler runs when creating new threads and does two things:
+    1. Sets metadata on the thread being created to track ownership
+    2. Returns a filter that ensures only the creator can access it
+    """
+
+    if isinstance(ctx.user, StudioUser):
+        return
+
+    # Add owner metadata to the thread being created
+    # This metadata is stored with the thread and persists
+    metadata = value.setdefault("metadata", {})
+    metadata["owner"] = ctx.user.identity
+
+
+@auth.on.threads.read
+@auth.on.threads.delete
+@auth.on.threads.update
+@auth.on.threads.search
+async def on_thread_read(
+    ctx: Auth.types.AuthContext,
+    value: Auth.types.on.threads.read.value,
+):
+    """Only let users read their own threads.
+
+    This handler runs on read operations. We don't need to set
+    metadata since the thread already exists - we just need to
+    return a filter to ensure users can only see their own threads.
+    """
+    if isinstance(ctx.user, StudioUser):
+        return
+
+    return {"owner": ctx.user.identity}
+
+
+@auth.on.assistants.create
+async def on_assistants_create(
+    ctx: Auth.types.AuthContext,
+    value: Auth.types.on.assistants.create.value,
+):
+    if isinstance(ctx.user, StudioUser):
+        return
+
+    # Add owner metadata to the assistant being created
+    # This metadata is stored with the assistant and persists
+    metadata = value.setdefault("metadata", {})
+    metadata["owner"] = ctx.user.identity
+
+
+@auth.on.assistants.read
+@auth.on.assistants.delete
+@auth.on.assistants.update
+@auth.on.assistants.search
+async def on_assistants_read(
+    ctx: Auth.types.AuthContext,
+    value: Auth.types.on.assistants.read.value,
+):
+    """Only let users read their own assistants.
+
+    This handler runs on read operations. We don't need to set
+    metadata since the assistant already exists - we just need to
+    return a filter to ensure users can only see their own assistants.
+    """
+
+    if isinstance(ctx.user, StudioUser):
+        return
+
+    return {"owner": ctx.user.identity}
+
+
+@auth.on.store()
+async def authorize_store(ctx: Auth.types.AuthContext, value: dict):
+    if isinstance(ctx.user, StudioUser):
+        return
+
+    # The "namespace" field for each store item is a tuple you can think of as the directory of an item.
+    namespace: tuple = value["namespace"]
+    assert namespace[0] == ctx.user.identity, "Not authorized"
+
+===== src/legacy/legacy.md =====
+# Open Deep Research
+
+Open Deep Research is an experimental, fully open-source research assistant that automates deep research and produces comprehensive reports on any topic. It features two implementations - a [workflow](https://langchain-ai.github.io/langgraph/tutorials/workflows/) and a multi-agent architecture. You can customize the entire research and writing process with specific models, prompts, report structure, and search tools.
+
+#### Workflow
+
+![open-deep-research-overview](https://github.com/user-attachments/assets/a171660d-b735-4587-ab2f-cd771f773756)
+
+#### Multi-agent
+
+![multi-agent-researcher](https://github.com/user-attachments/assets/3c734c3c-57aa-4bc0-85dd-74e2ec2c0880)
+
+
+### 🚀 Quickstart
+
+Clone the repository:
+```bash
+git clone https://github.com/langchain-ai/open_deep_research.git
+cd open_deep_research
+```
+
+Then edit the `.env` file to customize the environment variables (for model selection, search tools, and other configuration settings):
+```bash
+cp .env.example .env
+```
+
+Launch the assistant with the LangGraph server locally, which will open in your browser:
+
+#### Mac
+
+```bash
+# Install uv package manager
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies and start the LangGraph server
+uvx --refresh --from "langgraph-cli[inmem]" --with-editable . --python 3.11 langgraph dev --allow-blocking
+```
+
+#### Windows / Linux
+
+```powershell
+# Install dependencies 
+pip install -e .
+pip install -U "langgraph-cli[inmem]" 
+
+# Start the LangGraph server
+langgraph dev
+```
+
+Use this to open the Studio UI:
+```
+- 🚀 API: http://127.0.0.1:2024
+- 🎨 Studio UI: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+- 📚 API Docs: http://127.0.0.1:2024/docs
+```
+
+#### Multi-agent
+
+(1) Chat with the agent about your topic of interest, and it will initiate report generation:
+
+<img width="1326" alt="input" src="https://github.com/user-attachments/assets/dc8f59dd-14b3-4a62-ac18-d2f99c8bbe83" />
+
+(2) The report is produced as markdown.
+
+#### Workflow
+
+(1) Provide a `Topic`:
+
+<img width="1326" alt="input" src="https://github.com/user-attachments/assets/de264b1b-8ea5-4090-8e72-e1ef1230262f" />
+
+(2) This will generate a report plan and present it to the user for review.
+
+(3) We can pass a string (`"..."`) with feedback to regenerate the plan based on the feedback.
+
+<img width="1326" alt="feedback" src="https://github.com/user-attachments/assets/c308e888-4642-4c74-bc78-76576a2da919" />
+
+(4) Or, we can just pass `true` to the JSON input box in Studio accept the plan.
+
+<img width="1480" alt="accept" src="https://github.com/user-attachments/assets/ddeeb33b-fdce-494f-af8b-bd2acc1cef06" />
+
+(5) Once accepted, the report sections will be generated.
+
+<img width="1326" alt="report_gen" src="https://github.com/user-attachments/assets/74ff01cc-e7ed-47b8-bd0c-4ef615253c46" />
+
+The report is produced as markdown.
+
+<img width="1326" alt="report" src="https://github.com/user-attachments/assets/92d9f7b7-3aea-4025-be99-7fb0d4b47289" />
+
+### Search Tools
+
+Available search tools:
+
+* [Tavily API](https://tavily.com/) - General web search
+* [Perplexity API](https://www.perplexity.ai/hub/blog/introducing-the-sonar-pro-api) - General web search
+* [Exa API](https://exa.ai/) - Powerful neural search for web content
+* [ArXiv](https://arxiv.org/) - Academic papers in physics, mathematics, computer science, and more
+* [PubMed](https://pubmed.ncbi.nlm.nih.gov/) - Biomedical literature from MEDLINE, life science journals, and online books
+* [Linkup API](https://www.linkup.so/) - General web search
+* [DuckDuckGo API](https://duckduckgo.com/) - General web search
+* [Google Search API/Scrapper](https://google.com/) - Create custom search engine [here](https://programmablesearchengine.google.com/controlpanel/all) and get API key [here](https://developers.google.com/custom-search/v1/introduction)
+* [Microsoft Azure AI Search](https://azure.microsoft.com/en-us/products/ai-services/ai-search) - Cloud based vector database solution 
+
+Open Deep Research is compatible with many different LLMs: 
+
+* You can select any model that is integrated [with the `init_chat_model()` API](https://python.langchain.com/docs/how_to/chat_models_universal_init/)
+* See full list of supported integrations [here](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html)
+
+### Using the package
+
+```bash
+pip install open-deep-research
+```
+
+See [src/legacy/graph.ipynb](src/legacy/graph.ipynb) and [src/legacy/multi_agent.ipynb](src/legacy/multi_agent.ipynb) for example usage in a Jupyter notebook:
+
+## Open Deep Research Implementations
+
+Open Deep Research features three distinct implementation approaches, each with its own strengths:
+
+## 1. Graph-based Workflow Implementation (`src/legacy/graph.py`)
+
+The graph-based implementation follows a structured plan-and-execute workflow:
+
+- **Planning Phase**: Uses a planner model to analyze the topic and generate a structured report plan
+- **Human-in-the-Loop**: Allows for human feedback and approval of the report plan before proceeding
+- **Sequential Research Process**: Creates sections one by one with reflection between search iterations
+- **Section-Specific Research**: Each section has dedicated search queries and content retrieval
+- **Supports Multiple Search Tools**: Works with all search providers (Tavily, Perplexity, Exa, ArXiv, PubMed, Linkup, etc.)
+
+This implementation provides a more interactive experience with greater control over the report structure, making it ideal for situations where report quality and accuracy are critical.
+
+You can customize the research assistant workflow through several parameters:
+
+- `report_structure`: Define a custom structure for your report (defaults to a standard research report format)
+- `number_of_queries`: Number of search queries to generate per section (default: 2)
+- `max_search_depth`: Maximum number of reflection and search iterations (default: 2)
+- `planner_provider`: Model provider for planning phase (default: "anthropic", but can be any provider from supported integrations with `init_chat_model` as listed [here](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html))
+- `planner_model`: Specific model for planning (default: "claude-3-7-sonnet-latest")
+- `planner_model_kwargs`: Additional parameter for planner_model
+- `writer_provider`: Model provider for writing phase (default: "anthropic", but can be any provider from supported integrations with `init_chat_model` as listed [here](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html))
+- `writer_model`: Model for writing the report (default: "claude-3-5-sonnet-latest")
+- `writer_model_kwargs`: Additional parameter for writer_model
+- `search_api`: API to use for web searches (default: "tavily", options include "perplexity", "exa", "arxiv", "pubmed", "linkup")
+
+## 2. Multi-Agent Implementation (`src/legacy/multi_agent.py`)
+
+The multi-agent implementation uses a supervisor-researcher architecture:
+
+- **Supervisor Agent**: Manages the overall research process, plans sections, and assembles the final report
+- **Researcher Agents**: Multiple independent agents work in parallel, each responsible for researching and writing a specific section
+- **Parallel Processing**: All sections are researched simultaneously, significantly reducing report generation time
+- **Specialized Tool Design**: Each agent has access to specific tools for its role (search for researchers, section planning for supervisors)
+- **Search and MCP Support**: Works with Tavily/DuckDuckGo for web search, MCP servers for local/external data access, or can operate without search tools using only MCP tools
+
+This implementation focuses on efficiency and parallelization, making it ideal for faster report generation with less direct user involvement.
+
+You can customize the multi-agent implementation through several parameters:
+
+- `supervisor_model`: Model for the supervisor agent (default: "anthropic:claude-3-5-sonnet-latest")
+- `researcher_model`: Model for researcher agents (default: "anthropic:claude-3-5-sonnet-latest") 
+- `number_of_queries`: Number of search queries to generate per section (default: 2)
+- `search_api`: API to use for web searches (default: "tavily", options include "duckduckgo", "none")
+- `ask_for_clarification`: Whether the supervisor should ask clarifying questions before research (default: false) - **Important**: Set to `true` to enable the Question tool for the supervisor agent
+- `mcp_server_config`: Configuration for MCP servers (optional)
+- `mcp_prompt`: Additional instructions for using MCP tools (optional)
+- `mcp_tools_to_include`: Specific MCP tools to include (optional)
+
+## MCP (Model Context Protocol) Support
+
+The multi-agent implementation (`src/legacy/multi_agent.py`) supports MCP servers to extend research capabilities beyond web search. MCP tools are available to research agents alongside or instead of traditional search tools, enabling access to local files, databases, APIs, and other data sources.
+
+**Note**: MCP support is currently only available in the multi-agent (`src/legacy/multi_agent.py`) implementation, not in the workflow-based workflow implementation (`src/legacy/graph.py`).
+
+### Key Features
+
+- **Tool Integration**: MCP tools are seamlessly integrated with existing search and section-writing tools
+- **Research Agent Access**: Only research agents (not supervisors) have access to MCP tools
+- **Flexible Configuration**: Use MCP tools alone or combined with web search
+- **Disable Default Search**: Set `search_api: "none"` to disable web search tools entirely
+- **Custom Prompts**: Add specific instructions for using MCP tools
+
+### Filesystem Server Example
+
+#### SKK
+
+```python
+config = {
+    "configurable": {
+        "search_api": "none",  # Use "tavily" or "duckduckgo" to combine with web search
+        "mcp_server_config": {
+            "filesystem": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@modelcontextprotocol/server-filesystem",
+                    "/path/to/your/files"
+                ],
+                "transport": "stdio"
+            }
+        },
+        "mcp_prompt": "Step 1: Use the `list_allowed_directories` tool to get the list of allowed directories. Step 2: Use the `read_file` tool to read files in the allowed directory.",
+        "mcp_tools_to_include": ["list_allowed_directories", "list_directory", "read_file"]  # Optional: specify which tools to include
+    }
+}
+```
+
+#### Studio
+
+MCP server config: 
+```
+{
+  "filesystem": {
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "/Users/rlm/Desktop/Code/open_deep_research/src/legacy/files"
+    ],
+    "transport": "stdio"
+  }
+}
+```
+
+MCP prompt: 
+```
+CRITICAL: You MUST follow this EXACT sequence when using filesystem tools:
+
+1. FIRST: Call `list_allowed_directories` tool to discover allowed directories
+2. SECOND: Call `list_directory` tool on a specific directory from step 1 to see available files  
+3. THIRD: Call `read_file` tool to read specific files found in step 2
+
+DO NOT call `list_directory` or `read_file` until you have first called `list_allowed_directories`. You must discover the allowed directories before attempting to browse or read files.
+```
+
+MCP tools: 
+```
+list_allowed_directories
+list_directory 
+read_file
+```
+
+Example test topic and follow-up feedback that you can provide that will reference the included file: 
+
+Topic:
+```
+I want an overview of vibe coding
+```
+
+Follow-up to the question asked by the research agent: 
+
+```
+I just want a single section report on vibe coding that highlights an interesting / fun example
+```
+
+Resulting trace: 
+
+https://smith.langchain.com/public/d871311a-f288-4885-8f70-440ab557c3cf/r
+
+### Configuration Options
+
+- **`mcp_server_config`**: Dictionary defining MCP server configurations (see [langchain-mcp-adapters examples](https://github.com/langchain-ai/langchain-mcp-adapters#client-1))
+- **`mcp_prompt`**: Optional instructions added to research agent prompts for using MCP tools
+- **`mcp_tools_to_include`**: Optional list of specific MCP tool names to include (if not set, all tools from all servers are included)
+- **`search_api`**: Set to `"none"` to use only MCP tools, or keep existing search APIs to combine both
+
+### Common Use Cases
+
+- **Local Documentation**: Access project documentation, code files, or knowledge bases
+- **Database Queries**: Connect to databases for specific data retrieval
+- **API Integration**: Access external APIs and services
+- **File Analysis**: Read and analyze local files during research
+
+The MCP integration allows research agents to incorporate local knowledge and external data sources into their research process, creating more comprehensive and context-aware reports.
+
+## Search API Configuration
+
+Not all search APIs support additional configuration parameters. Here are the ones that do:
+
+- **Exa**: `max_characters`, `num_results`, `include_domains`, `exclude_domains`, `subpages`
+  - Note: `include_domains` and `exclude_domains` cannot be used together
+  - Particularly useful when you need to narrow your research to specific trusted sources, ensure information accuracy, or when your research requires using specified domains (e.g., academic journals, government sites)
+  - Provides AI-generated summaries tailored to your specific query, making it easier to extract relevant information from search results
+- **ArXiv**: `load_max_docs`, `get_full_documents`, `load_all_available_meta`
+- **PubMed**: `top_k_results`, `email`, `api_key`, `doc_content_chars_max`
+- **Linkup**: `depth`
+
+Example with Exa configuration:
+```python
+thread = {"configurable": {"thread_id": str(uuid.uuid4()),
+                           "search_api": "exa",
+                           "search_api_config": {
+                               "num_results": 5,
+                               "include_domains": ["nature.com", "sciencedirect.com"]
+                           },
+                           # Other configuration...
+                           }}
+```
+
+## Model Considerations
+
+(1) You can use models supported with [the `init_chat_model()` API](https://python.langchain.com/docs/how_to/chat_models_universal_init/). See full list of supported integrations [here](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html).
+
+(2) ***The workflow planner and writer models need to support structured outputs***: Check whether structured outputs are supported by the model you are using [here](https://python.langchain.com/docs/integrations/chat/).
+
+(3) ***The agent models need to support tool calling:*** Ensure tool calling is well supoorted; tests have been done with Claude 3.7, o3, o3-mini, and gpt4.1. See [here](https://smith.langchain.com/public/adc5d60c-97ee-4aa0-8b2c-c776fb0d7bd6/d).
+
+(4) With Groq, there are token per minute (TPM) limits if you are on the `on_demand` service tier:
+- The `on_demand` service tier has a limit of `6000 TPM`
+- You will want a [paid plan](https://github.com/cline/cline/issues/47#issuecomment-2640992272) for section writing with Groq models
+
+(5) `deepseek-R1` [is not strong at function calling](https://api-docs.deepseek.com/guides/reasoning_model), which the assistant uses to generate structured outputs for report sections and report section grading. See example traces [here](https://smith.langchain.com/public/07d53997-4a6d-4ea8-9a1f-064a85cd6072/r).  
+- Consider providers that are strong at function calling such as OpenAI, Anthropic, and certain OSS models like Groq's `llama-3.3-70b-versatile`.
+- If you see the following error, it is likely due to the model not being able to produce structured outputs (see [trace](https://smith.langchain.com/public/8a6da065-3b8b-4a92-8df7-5468da336cbe/r)):
+```
+groq.APIError: Failed to call a function. Please adjust your prompt. See 'failed_generation' for more details.
+```
+
+(6) Follow [here[(https://github.com/langchain-ai/open_deep_research/issues/75#issuecomment-2811472408) to use with OpenRouter.
+
+(7) For working with local models via Ollama, see [here](https://github.com/langchain-ai/open_deep_research/issues/65#issuecomment-2743586318).
+
+## Evaluation Systems
+
+Open Deep Research includes two comprehensive evaluation systems to assess report quality and performance:
+
+### 1. Pytest-based Evaluation System
+
+A developer-friendly testing framework that provides immediate feedback during development and testing cycles.
+
+#### **Features:**
+- **Rich Console Output**: Formatted tables, progress indicators, and color-coded results
+- **Binary Pass/Fail Testing**: Clear success/failure criteria for CI/CD integration
+- **LangSmith Integration**: Automatic experiment tracking and logging
+- **Flexible Configuration**: Extensive CLI options for different testing scenarios
+- **Real-time Feedback**: Live output during test execution
+
+#### **Evaluation Criteria:**
+The system evaluates reports against 9 comprehensive quality dimensions:
+- Topic relevance (overall and section-level)
+- Structure and logical flow
+- Introduction and conclusion quality
+- Proper use of structural elements (headers, citations)
+- Markdown formatting compliance
+- Citation quality and source attribution
+- Overall research depth and accuracy
+
+#### **Usage:**
+```bash
+# Run all agents with default settings
+python tests/run_test.py --all
+
+# Test specific agent with custom models
+python tests/run_test.py --agent multi_agent \
+  --supervisor-model "anthropic:claude-3-7-sonnet-latest" \
+  --search-api tavily
+
+# Test with OpenAI o3 models
+python tests/run_test.py --all \
+  --supervisor-model "openai:o3" \
+  --researcher-model "openai:o3" \
+  --planner-provider "openai" \
+  --planner-model "o3" \
+  --writer-provider "openai" \
+  --writer-model "o3" \
+  --eval-model "openai:o3" \
+  --search-api "tavily"
+```
+
+#### **Key Files:**
+- `tests/run_test.py`: Main test runner with rich CLI interface
+- `tests/test_report_quality.py`: Core test implementation
+- `tests/conftest.py`: Pytest configuration and CLI options
+
+### 2. LangSmith Evaluate API System
+
+A comprehensive batch evaluation system designed for detailed analysis and comparative studies.
+
+#### **Features:**
+- **Multi-dimensional Scoring**: Four specialized evaluators with 1-5 scale ratings
+- **Weighted Criteria**: Detailed scoring with customizable weights for different quality aspects
+- **Dataset-driven Evaluation**: Batch processing across multiple test cases
+- **Performance Optimization**: Caching with extended TTL for evaluator prompts
+- **Professional Reporting**: Structured analysis with improvement recommendations
+
+#### **Evaluation Dimensions:**
+
+1. **Overall Quality** (7 weighted criteria):
+   - Research depth and source quality (20%)
+   - Analytical rigor and critical thinking (15%)
+   - Structure and organization (20%)
+   - Practical value and actionability (10%)
+   - Balance and objectivity (15%)
+   - Writing quality and clarity (10%)
+   - Professional presentation (10%)
+
+2. **Relevance**: Section-by-section topic relevance analysis with strict criteria
+
+3. **Structure**: Assessment of logical flow, formatting, and citation practices
+
+4. **Groundedness**: Evaluation of alignment with retrieved context and sources
+
+#### **Usage:**
+```bash
+# Run comprehensive evaluation on LangSmith datasets
+python tests/evals/run_evaluate.py
+```
+
+#### **Key Files:**
+- `tests/evals/run_evaluate.py`: Main evaluation script
+- `tests/evals/evaluators.py`: Four specialized evaluator functions
+- `tests/evals/prompts.py`: Detailed evaluation prompts for each dimension
+- `tests/evals/target.py`: Report generation workflows
+
+### When to Use Each System
+
+**Use Pytest System for:**
+- Development and debugging cycles
+- CI/CD pipeline integration
+- Quick model comparison experiments
+- Interactive testing with immediate feedback
+- Gate-keeping before production deployments
+
+**Use LangSmith System for:**
+- Comprehensive model evaluation across datasets
+- Research and analysis of system performance
+- Detailed performance profiling and benchmarking
+- Comparative studies between different configurations
+- Production monitoring and quality assurance
+
+Both evaluation systems complement each other and provide comprehensive coverage for different use cases and development stages.
+
+## UX
+
+### Local deployment
+
+Follow the [quickstart](#-quickstart) to start LangGraph server locally.
+
+### Hosted deployment
+ 
+You can easily deploy to [LangGraph Platform](https://langchain-ai.github.io/langgraph/concepts/#deployment-options). 
+
+
+[Command succeeded with exit code 0]

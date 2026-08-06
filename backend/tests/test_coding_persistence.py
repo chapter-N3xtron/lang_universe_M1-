@@ -200,26 +200,17 @@ def test_export_and_reset_affect_only_selected_session(monkeypatch, tmp_path):
     asyncio.run(scenario())
 
 
-def test_scoped_export_reads_reconstructed_agent_state(monkeypatch, tmp_path):
+def test_scoped_export_reads_legacy_agent_state(monkeypatch, tmp_path):
     from src import coding_agent
 
-    class App:
-        async def aget_state(self, _config):
-            return type(
-                "Snapshot",
-                (),
-                {
-                    "values": {
-                        "messages": [AIMessage(content="exported coding conversation")]
-                    },
-                    "created_at": "2026-07-30T00:00:00Z",
-                },
-            )()
+    async def export_legacy(session_id):
+        return {
+            "session_id": session_id,
+            "exists": True,
+            "messages": [{"type": "ai", "content": "legacy coding conversation"}],
+        }
 
-    async def session_agent(*_args):
-        return App()
-
-    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
+    monkeypatch.setattr(coding_agent, "export_coding_session", export_legacy)
     result = asyncio.run(
         coding_agent.export_coding_session_state(
             thread_identity="export-thread",
@@ -228,4 +219,4 @@ def test_scoped_export_reads_reconstructed_agent_state(monkeypatch, tmp_path):
         )
     )
     assert result["exists"] is True
-    assert result["messages"][0]["content"] == "exported coding conversation"
+    assert result["messages"][0]["content"] == "legacy coding conversation"

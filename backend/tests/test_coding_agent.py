@@ -210,7 +210,7 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
         "virtual_mode": True,
     }
     assert captured["agent"]["model"] is model
-    assert captured["agent"]["checkpointer"] is False
+    assert captured["agent"]["checkpointer"] is None
     assert captured["agent"]["tools"] == []
     assert captured["agent"]["interrupt_on"] is None
     permissions = captured["agent"]["permissions"]

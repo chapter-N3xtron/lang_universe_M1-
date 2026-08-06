@@ -22,6 +22,7 @@ class CodingEventEmitter:
         self._text_buffer = ""
         self._text_emitted = 0
         self._tool_ids: set[str] = set()
+        self.latest_values: dict[str, Any] = {}
 
     def emit(self, kind: str, status: str, **data: Any) -> None:
         if len(self.events) >= MAX_EVENTS_PER_RUN:
@@ -85,6 +86,8 @@ class CodingEventEmitter:
             self._consume_message(message)
         elif mode == "updates":
             self._consume_update(payload)
+        elif mode == "values" and isinstance(payload, dict):
+            self.latest_values = payload
 
     def _consume_message(self, message: Any) -> None:
         content = getattr(message, "content", "")

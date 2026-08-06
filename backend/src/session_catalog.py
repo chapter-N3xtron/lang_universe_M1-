@@ -364,16 +364,16 @@ async def record_session_projection(
         "parent_session_id": state.get("parent_session_id"),
         "parent_thread_id": state.get("parent_thread_id"),
     }
+    await _write_store_records(
+        runtime,
+        owner_id=owner_id,
+        thread_id=thread_id,
+        session=session,
+        workspace=workspace,
+        artifacts=artifacts,
+    )
     uri = _database_uri()
     if not uri:
-        await _write_store_records(
-            runtime,
-            owner_id=owner_id,
-            thread_id=thread_id,
-            session=session,
-            workspace=workspace,
-            artifacts=artifacts,
-        )
         return
     await ensure_catalog_schema()
     async with await psycopg.AsyncConnection.connect(uri) as connection:  # noqa: SIM117

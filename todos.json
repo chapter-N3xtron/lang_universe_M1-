@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-05T04:01:13Z",
+  "updated_at": "2026-08-05T21:35:49Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2271,7 +2271,7 @@
       "todos": [
         {
           "id": "implement-visible-jasper-research-handoff",
-          "content": "Remove Research from Jasper's hidden Deep Agents subagent list and implement a typed top-level Jasper to Research to Jasper LangGraph handoff carrying only the task, selected model and workspace, thread identity, user identity, saved evidence references, and required AI and tool message pair. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Implement the approved visible top-level Jasper to Research to Jasper lifecycle: Research owns authorized autonomous in-depth research and canonical report authorship/provenance; Jasper assigns or reopens it, preserves the session relationship, introduces/receives its result, may synthesize or present saved Research reports, and may create evidence-grounded visual concept maps from saved report/evidence references without rereading the web or claiming Research work as Jasper work. Retain only the typed bounded task, selected model/workspace, thread/user identities, saved evidence/report references, and required AI/tool message pair. Evaluate Open Deep Research for both selective adaptation and potential core internal architecture after license/version/compatibility, security, governance, and integration review; do not claim adoption, install, or copy it. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "in_progress",
           "agent": "research",
           "completed_by_model": null,
@@ -2280,7 +2280,7 @@
         },
         {
           "id": "persist-bounded-session-research-evidence",
-          "content": "Persist immutable bounded visited-page, unopened-search-snippet, supported-upload, and safe workspace-file evidence bodies in the existing LangGraph Store while retaining lightweight session references in checkpoint state; support deduplication, changed-content versions, reopening saved evidence, and fork inheritance without copying bodies. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Persist immutable/content-versioned evidence records and structured cited report artifacts in the existing LangGraph Store: evidence retains source/provider identifier or URL, bounded retrieved/extracted content, status, timestamp, hash/version, provenance, and required metadata; reports cite evidence IDs and reopen without web calls. Keep short-lived working context/resumable run state in bounded LangGraph checkpoints and lightweight session references only; support deduplication, changed-content versions, and fork inheritance without copying bodies. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "in_progress",
           "agent": "research",
           "completed_by_model": null,
@@ -2289,7 +2289,7 @@
         },
         {
           "id": "add-session-sources-view-and-renaming",
-          "content": "Add a dedicated Sources view to the existing session visual workspace that lists all session evidence, opens web URLs, shows provenance and visual usage, supports accessible click-name then Enter session-only renaming through the existing LangGraph Store pattern, and composes Jasper requests for all or selected sources. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Add the future Research dashboard/visual-workspace contract: show research status, brief/subquestions, progress, sources visited/read, retrieval failures/limitations, report status, durable evidence/report artifacts, and sanitized execution history; never expose chain-of-thought, secrets, raw auth data, or unsafe tool details. Retain accessible Sources review/session-only renaming and compose Jasper visual requests from selected saved evidence and/or report evidence references without rereading the web, with evidence-grounding/citation validation. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "in_progress",
           "agent": "coding",
           "completed_by_model": null,
@@ -2298,7 +2298,7 @@
         },
         {
           "id": "verify-top-level-research-and-session-sources",
-          "content": "Verify visible Jasper to Research to Jasper routing, ordinary Jasper isolation, read-only workspace and upload protections, snippet versus visited-page persistence, saved-source reuse, visual evidence validation, fork reference inheritance, Sources view accessibility and renaming, then run focused tests, changed-file lint, frontend build, browser tests, and the full backend suite. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Verify visible Jasper to Research to Jasper routing/reopen and ordinary Jasper isolation; authorized bounded Research workflow and stop behavior; read-only workspace/upload protections; evidence/report checkpoint-Store separation, metadata/status integrity, offline reopen, reuse, versioning and fork inheritance; evidence-grounded visuals; and dashboard accessibility/sanitization. Verify selective Open Deep Research adaptation only after license/version/security review. Run focused tests, markdown/format checks, changed-file lint, frontend build, browser tests, full backend suite, OpenSpec strict validation, and separately reported authorized live-provider evidence. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "pending",
           "agent": "research",
           "completed_by_model": null,
@@ -2511,6 +2511,12 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": "Focused backend tests passed 81/81; changed-file Ruff, TypeScript, targeted ESLint, production build, and focused Chromium passed. Live Coding backend OpenSpec 1.7.0 passed. The existing research-agent-promotion scaffold is correctly incomplete and strict validation reports missing delta specs. Full backend reached 208 passed with one failure in the pre-existing uncommitted Research tool-surface test fixture; that work remains preserved. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    }
+  ]
+}
+tion scaffold is correctly incomplete and strict validation reports missing delta specs. Full backend reached 208 passed with one failure in the pre-existing uncommitted Research tool-surface test fixture; that work remains preserved. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

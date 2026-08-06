@@ -5,24 +5,18 @@ from __future__ import annotations
 import asyncio
 import operator
 import os
-import time
 from collections import OrderedDict
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.config import get_stream_writer
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
 
 from src.coding_events import CodingEventEmitter
-from src.coding_persistence import (
-    coding_session_id,
-    get_coding_checkpointer,
-    reset_coding_session,
-)
+from src.coding_persistence import coding_session_id, export_coding_session
 from src.llm import get_coding_llm
 
 
@@ -78,10 +72,6 @@ _LOCAL_APPROVAL_INTERRUPT_ON = {
         "description": "Review a shell command rooted in the selected repository.",
     },
 }
-
-
-def _now() -> float:
-    return time.time()
 
 
 def _validated_workspace(raw_workspace: str | None) -> Path:
@@ -173,7 +163,7 @@ def _build_deep_agent(
     workspace: Path,
     model_name: str | None,
     execution_mode: str = "read_only",
-    checkpointer: Any = False,
+    checkpointer: Any = None,
 ):
     (
         permission_type,
@@ -252,12 +242,11 @@ async def _session_agent(workspace: Path, model_name: str | None, execution_mode
         app = _SESSION_AGENT_CACHE.pop(key)
         _SESSION_AGENT_CACHE[key] = app
         return app
-    checkpointer = await get_coding_checkpointer()
     app = _build_deep_agent(
         workspace,
         model_name,
         execution_mode=mode,
-        checkpointer=checkpointer,
+        checkpointer=None,
     )
     _SESSION_AGENT_CACHE[key] = app
     while len(_SESSION_AGENT_CACHE) > _SESSION_AGENT_CACHE_SIZE:
@@ -272,53 +261,14 @@ async def export_coding_session_state(
     user_identity: str = "anonymous",
     model_name: str | None = None,
 ) -> dict[str, Any]:
+    del model_name
     workspace = _validated_workspace(str(workspace))
     session_id = coding_session_id(
         thread_identity=thread_identity,
         workspace=workspace,
         user_identity=user_identity,
     )
-    app = await _session_agent(workspace, model_name, "read_only")
-    snapshot = await app.aget_state({"configurable": {"thread_id": session_id}})
-    return {
-        "session_id": session_id,
-        "exists": bool(snapshot.values),
-        "created_at": getattr(snapshot, "created_at", None),
-        "messages": [
-            _export_message(message) for message in snapshot.values.get("messages", [])
-        ],
-    }
-
-
-async def reset_coding_session_state(
-    *, thread_identity: str, workspace: Path, user_identity: str = "anonymous"
-) -> bool:
-    workspace = _validated_workspace(str(workspace))
-    session_id = coding_session_id(
-        thread_identity=thread_identity,
-        workspace=workspace,
-        user_identity=user_identity,
-    )
-    return await reset_coding_session(session_id)
-
-
-async def _session_snapshot(app: Any, config: dict[str, Any]):
-    return await app.aget_state(config)
-
-
-def _snapshot_interrupts(snapshot: Any) -> tuple[Any, ...]:
-    return tuple(
-        pending
-        for task in snapshot.tasks
-        for pending in getattr(task, "interrupts", ())
-    )
-
-
-def _last_user_message(messages: list[Any]) -> Any | None:
-    for message in reversed(messages):
-        if _message_type(message) in {"human", "user"}:
-            return message
-    return None
+    return await export_coding_session(session_id)
 
 
 def _current_turn_output(messages: list[Any]) -> list[Any]:
@@ -328,123 +278,67 @@ def _current_turn_output(messages: list[Any]) -> list[Any]:
     return messages
 
 
+def _message_text(message: Any) -> str:
+    content = (
+        message.get("content", "")
+        if isinstance(message, dict)
+        else getattr(message, "content", "")
+    )
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "\n".join(
+            str(block.get("text", ""))
+            for block in content
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+        ).strip()
+    return ""
+
+
 def _has_final_assistant_message(messages: list[Any]) -> bool:
-    for message in reversed(messages):
-        if _message_type(message) not in {"ai", "assistant"} or _tool_calls(message):
-            continue
-        content = (
-            message.get("content", "")
-            if isinstance(message, dict)
-            else getattr(message, "content", "")
-        )
-        if isinstance(content, str) and content.strip():
-            return True
-        if isinstance(content, list) and content:
-            return True
-    return False
-
-
-def _approval_deadline(created_at: str | None, timeout_seconds: int) -> float:
-    if created_at:
-        try:
-            created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            return created.timestamp() + timeout_seconds
-        except ValueError:
-            pass
-    return _now() + timeout_seconds
+    return any(
+        _message_type(message) in {"ai", "assistant"}
+        and not _tool_calls(message)
+        and bool(_message_text(message))
+        for message in reversed(messages)
+    )
 
 
 async def _invoke_session(
     app: Any,
     input_messages: list[Any],
-    config: dict[str, Any],
+    config: RunnableConfig,
     *,
-    approval_mode: bool,
     emitter: CodingEventEmitter,
-) -> tuple[dict[str, Any], bool]:
-    snapshot = await _session_snapshot(app, config)
-    pending = _snapshot_interrupts(snapshot)
-    if pending:
-        result: dict[str, Any] = {"__interrupt__": pending}
-    else:
-        has_history = bool(snapshot.values.get("messages"))
-        latest_user = _last_user_message(input_messages)
-        messages = (
-            [latest_user] if has_history and latest_user is not None else input_messages
-        )
-        result = await _stream_session(app, {"messages": messages}, config, emitter)
-
-    approval_expired = False
-    while interruptions := result.get("__interrupt__"):
-        if not approval_mode:
-            raise RuntimeError("read-only session unexpectedly requested approval")
-        timeout_seconds = max(
-            1, int(os.getenv("CODING_APPROVAL_TIMEOUT_SECONDS", "900"))
-        )
-        snapshot = await _session_snapshot(app, config)
-        deadline = _approval_deadline(
-            getattr(snapshot, "created_at", None), timeout_seconds
-        )
-        request = dict(interruptions[0].value)
-        request["expires_at"] = datetime.fromtimestamp(deadline, tz=UTC).isoformat()
-        emitter.flush_text()
-        emitter.emit(
-            "approval",
-            "required",
-            action_count=len(request.get("action_requests", [])),
-            expires_at=request["expires_at"],
-        )
-        review = interrupt(request)
-        if _now() > deadline:
-            approval_expired = True
-            review = {
-                "decisions": [
-                    {
-                        "type": "reject",
-                        "message": "Approval expired before execution.",
-                    }
-                    for _action in request.get("action_requests", [])
-                ]
-            }
-        decision_types = (
-            [
-                decision.get("type", "unknown")
-                for decision in review.get("decisions", [])
-                if isinstance(decision, dict)
-            ]
-            if isinstance(review, dict)
-            else []
-        )
-        emitter.emit("approval", "resolved", decisions=decision_types)
-        result = await _stream_session(app, Command(resume=review), config, emitter)
-    return result, approval_expired
+) -> dict[str, Any]:
+    return await _stream_session(
+        app, {"messages": input_messages}, config, emitter
+    )
 
 
 async def _stream_session(
     app: Any,
     payload: Any,
-    config: dict[str, Any],
+    config: RunnableConfig,
     emitter: CodingEventEmitter,
 ) -> dict[str, Any]:
-    """Stream native graph events, then return the durable state snapshot."""
+    """Stream the native nested graph and let its interrupts propagate."""
     if not hasattr(app, "astream"):
         return await app.ainvoke(payload, config=config)
 
     async for event in app.astream(
         payload,
         config=config,
-        stream_mode=["messages", "updates"],
+        stream_mode=["messages", "updates", "values"],
         subgraphs=True,
     ):
         emitter.consume(event)
-    snapshot = await _session_snapshot(app, config)
-    pending = _snapshot_interrupts(snapshot)
-    if pending:
-        return {"__interrupt__": pending}
-    return dict(snapshot.values)
+    return dict(emitter.latest_values)
 
 
-async def deep_agents_coding_node(state: CodingAgentState) -> dict[str, Any]:
+async def deep_agents_coding_node(
+    state: CodingAgentState, config: RunnableConfig = None
+) -> dict[str, Any]:
     writer = _event_writer()
     session_id = ""
     error_type = None
@@ -452,30 +346,26 @@ async def deep_agents_coding_node(state: CodingAgentState) -> dict[str, Any]:
     try:
         workspace = _validated_workspace(state.get("workspace"))
         execution_mode = _execution_mode(state.get("execution_mode"))
-        input_messages = state.get("messages", [])
-        thread_identity = state.get("thread_identity", "")
+        input_messages = list(state.get("messages", []))
+        thread_identity = str(state.get("thread_identity") or "")
         if not thread_identity:
             raise InvalidWorkspaceError("thread identity is required")
         session_id = coding_session_id(
             thread_identity=thread_identity,
             workspace=workspace,
-            user_identity=state.get("user_identity", "anonymous"),
+            user_identity=str(state.get("user_identity") or "anonymous"),
         )
         emitter = CodingEventEmitter(writer, session_id)
         emitter.emit("status", "running")
         app = await _session_agent(workspace, state.get("model"), execution_mode)
-        nested_config = {"configurable": {"thread_id": session_id}}
         invocation = _invoke_session(
             app,
             input_messages,
-            nested_config,
-            approval_mode=execution_mode == "approval",
+            config or {},
             emitter=emitter,
         )
         timeout_seconds = int(os.getenv("CODING_AGENT_TIMEOUT_SECONDS", "240"))
-        result, approval_expired = await asyncio.wait_for(
-            invocation, timeout=timeout_seconds
-        )
+        result = await asyncio.wait_for(invocation, timeout=timeout_seconds)
         all_messages = result.get("messages", [])
         new_messages = _current_turn_output(all_messages)
         emitter.flush_text()
@@ -500,19 +390,18 @@ async def deep_agents_coding_node(state: CodingAgentState) -> dict[str, Any]:
                 "coding_status": "error",
                 "coding_events": emitter.events,
             }
-        final_status = "cancelled" if approval_expired else "completed"
-        if approval_expired:
-            emitter.emit("approval", "expired")
-        emitter.emit("status", final_status)
+        emitter.emit("status", "completed")
         return {
             "messages": new_messages,
             "coding_session_id": session_id,
-            "coding_status": final_status,
+            "coding_status": "completed",
             "coding_events": emitter.events,
         }
     except asyncio.CancelledError:
         emitter.flush_text()
         emitter.emit("status", "cancelled")
+        raise
+    except GraphBubbleUp:
         raise
     except InvalidWorkspaceError:
         error_code = "invalid_workspace"
@@ -520,8 +409,6 @@ async def deep_agents_coding_node(state: CodingAgentState) -> dict[str, Any]:
         error_code = "dependency_unavailable"
     except TimeoutError:
         error_code = "agent_timeout"
-    except GraphBubbleUp:
-        raise
     except Exception as exc:
         error_code = "agent_failure"
         error_type = type(exc).__name__

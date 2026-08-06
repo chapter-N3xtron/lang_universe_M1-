@@ -469,7 +469,7 @@ def test_jasper_passes_selected_workspace_and_langgraph_thread_to_coding():
     assert captured[0]["thread_identity"] == "jasper-coding-thread"
 
 
-def test_coding_receives_explicit_task_and_returns_named_result_to_jasper(tmp_path):
+def test_coding_receives_explicit_task_and_returns_named_result_directly(tmp_path):
     coding_inputs = []
     jasper_inputs = []
 
@@ -528,10 +528,8 @@ def test_coding_receives_explicit_task_and_returns_named_result_to_jasper(tmp_pa
     assert coding_state["thread_identity"] == "coding-return-thread"
     assert coding_state["user_identity"] == "test-user"
     assert coding_config["configurable"]["thread_id"] == "coding-return-thread"
-    assert jasper_inputs[0]["messages"][-1]["name"] == "coding"
-    assert jasper_inputs[0]["messages"][-1]["content"] == (
-        "Coder completed and verified the task."
-    )
+    assert jasper_inputs == []
+    assert result["messages"][-1]["name"] == "coding"
     assert result["messages"][-1]["content"] == (
         "Coder completed and verified the task."
     )
@@ -584,8 +582,9 @@ def test_direct_coding_uses_latest_user_task_and_fails_closed_without_result(
 
     assert coding_inputs[0]["messages"][0].content == "Inspect the selected workspace"
     assert coding_inputs[0]["execution_mode"] == "read_only"
-    assert jasper_inputs[0]["messages"][-1]["name"] == "coding"
-    assert "missing_final_result" in jasper_inputs[0]["messages"][-1]["content"]
+    assert jasper_inputs == []
+    assert result["messages"][-1]["name"] == "coding"
+    assert "missing_final_result" in result["messages"][-1]["content"]
     assert result["coding_status"] == "error"
 
 

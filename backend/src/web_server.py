@@ -17,10 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from src.coding_agent import (
-    export_coding_session_state,
-    reset_coding_session_state,
-)
+from src.coding_agent import export_coding_session_state
 from src.document_attachments import (
     MAX_ATTACHMENT_BYTES,
     DocumentAttachmentError,
@@ -115,13 +112,11 @@ def _session_workspace(raw_workspace: str) -> Path:
 
 
 @app.post("/api/coding-sessions/reset")
-async def reset_coding_session_api(scope: CodingSessionScope) -> dict:
-    removed = await reset_coding_session_state(
-        thread_identity=scope.thread_id,
-        workspace=_session_workspace(scope.workspace),
-        user_identity=scope.user_id,
+async def reset_coding_session_api(_scope: CodingSessionScope) -> dict:
+    raise HTTPException(
+        status_code=410,
+        detail="Coder-only reset is retired; start a linked thread or fork instead.",
     )
-    return {"removed": removed}
 
 
 @app.get("/api/coding-sessions/export")
@@ -275,12 +270,19 @@ def fs_pick_folder(starting_path: str | None = None) -> FSPickResponse:
 @app.get("/api/models")
 def list_models() -> dict:
     """List configured Deep Agents models plus discovered local Ollama models."""
-    default = os.getenv("CODING_MODEL", "ollama/qwen3.5:27b")
-    configured = [
-        model.strip()
-        for model in os.getenv("CODING_MODELS", default).split(",")
-        if model.strip()
-    ]
+    default = os.getenv("CODING_MODEL", "openai/gpt-5.6-terra")
+    configured = list(
+        dict.fromkeys(
+            [
+                default,
+                *[
+                    model.strip()
+                    for model in os.getenv("CODING_MODELS", "").split(",")
+                    if model.strip()
+                ],
+            ]
+        )
+    )
 
     def provider(model_id: str) -> str:
         if model_id.startswith("openai/"):

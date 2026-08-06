@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-05T21:35:49Z",
+  "updated_at": "2026-08-06T14:16:17Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2271,12 +2271,12 @@
       "todos": [
         {
           "id": "implement-visible-jasper-research-handoff",
-          "content": "Implement the approved visible top-level Jasper to Research to Jasper lifecycle: Research owns authorized autonomous in-depth research and canonical report authorship/provenance; Jasper assigns or reopens it, preserves the session relationship, introduces/receives its result, may synthesize or present saved Research reports, and may create evidence-grounded visual concept maps from saved report/evidence references without rereading the web or claiming Research work as Jasper work. Retain only the typed bounded task, selected model/workspace, thread/user identities, saved evidence/report references, and required AI/tool message pair. Evaluate Open Deep Research for both selective adaptation and potential core internal architecture after license/version/compatibility, security, governance, and integration review; do not claim adoption, install, or copy it. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Install the official Open Deep Research implementation unchanged as a visible top-level agent named The Librarian, expose direct human selection and clarification, and then implement the approved Jasper to The Librarian to Jasper lifecycle: Jasper assigns or reopens it, the human may converse directly with The Librarian for clarification, and bounded user-visible Librarian messages, research results, citations, and final reports return to Jasper without exposing private reasoning or raw tool traces. Preserve the existing LangGraph Store/session evidence boundary and Research provenance requirements. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "in_progress",
           "agent": "research",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Implementation uses the existing top-level research node and Command.PARENT handoff pattern established for Coding. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "On 2026-08-06, installed upstream Open Deep Research 0.0.16 pinned to commit 20aaa0d422bd290c83f93574810ef1244e8d5955, added The Librarian as a directly selectable top-level graph node, and added the UI dropdown smoke path. Upstream source remains unchanged, and the local mount does not alter its prompts, tools, models, state, reports, or emitted messages; it passes every new upstream message through. MCP remains optional and unconfigured; a transitive mcp<2 compatibility constraint is required only because upstream imports its optional MCP client eagerly. Focused backend tests passed 17/17, changed-file Ruff and TypeScript passed, the production frontend build passed with pre-existing warnings, the focused Chromium dropdown smoke passed, and the rebuilt durable Agent Server is healthy and imports the upstream graph. Corrected the core launcher readiness window from 30 to 180 seconds because a clean dependency/image build can exceed 30 seconds; the exact start.command restart-core path then passed with healthy LangGraph, sidecar, and UI endpoints. Jasper handoff/conversation, model/provider mapping, durable report/evidence integration, and authorized live-provider research remain unfinished. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "persist-bounded-session-research-evidence",
@@ -2511,12 +2511,6 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": "Focused backend tests passed 81/81; changed-file Ruff, TypeScript, targeted ESLint, production build, and focused Chromium passed. Live Coding backend OpenSpec 1.7.0 passed. The existing research-agent-promotion scaffold is correctly incomplete and strict validation reports missing delta specs. Full backend reached 208 passed with one failure in the pre-existing uncommitted Research tool-surface test fixture; that work remains preserved. Governance reference: GOVERNANCE_FRAMEWORK.md."
-        }
-      ]
-    }
-  ]
-}
-tion scaffold is correctly incomplete and strict validation reports missing delta specs. Full backend reached 208 passed with one failure in the pre-existing uncommitted Research tool-surface test fixture; that work remains preserved. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

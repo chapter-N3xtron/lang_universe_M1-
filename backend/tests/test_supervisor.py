@@ -48,6 +48,7 @@ def _clear_src_modules():
         "src.chat_ui",
         "src.jasper_agent",
         "src.research_agent",
+        "src.librarian_agent",
         "src.magic_coder_graph",
         "src.llm",
     ):
@@ -77,6 +78,26 @@ def test_compiled_graph_declares_visible_jasper_research_handoff_routes():
     assert ("jasper", "research") in edges
     assert ("research", "jasper") in edges
     assert ("jasper", "record_session") in edges
+
+
+def test_compiled_graph_declares_visible_librarian_route():
+    _clear_src_modules()
+    from src.chat_ui import create_chat_ui, supervisor_node
+
+    graph = _compile(create_chat_ui()).get_graph()
+    edges = {(edge.source, edge.target) for edge in graph.edges}
+
+    assert ("supervisor", "librarian") in edges
+    assert ("librarian", "record_session") in edges
+
+    command = supervisor_node(
+        {
+            "messages": [{"role": "user", "content": "Ask The Librarian."}],
+            "target_agent": "librarian",
+        }
+    )
+    assert command.goto == "librarian"
+    assert command.update["active_agent"] == "librarian"
 
 
 def test_new_session_opening_is_canonical_and_model_free():

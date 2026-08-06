@@ -98,10 +98,11 @@ test.describe("UI controls render and respond", () => {
     await expect(dropdown.getByText("Jasper")).toBeVisible();
     await expect(dropdown.getByText("Deep Agent")).toBeVisible();
     await expect(dropdown.getByText("Research")).toBeVisible();
+    await expect(dropdown.getByText("The Librarian")).toBeVisible();
     await expect(dropdown.getByText("Magic Coder")).toBeVisible();
 
-    await dropdown.getByText("Jasper").click();
-    await expect(trigger).toHaveText("Jasper");
+    await dropdown.getByText("The Librarian").click();
+    await expect(trigger).toHaveText("The Librarian");
   });
 
   test("model dropdown renders with options", async ({ page }) => {

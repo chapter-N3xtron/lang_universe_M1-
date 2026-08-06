@@ -14,6 +14,7 @@ from langgraph.types import Command, interrupt
 from src.agent_utils import get_conversation_history, get_user_query
 from src.coding_agent import create_coding_agent_graph
 from src.jasper_agent import STANDARD_SESSION_GREETING, call_jasper
+from src.librarian_agent import librarian_agent
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
 from src.research_agent import research_agent
@@ -81,6 +82,7 @@ AGENT_ROUTING = {
     "deep-agent": "coding",
     "deepagents": "coding",
     "research": "research",
+    "librarian": "librarian",
     "jasper": "jasper",
     "magic-coder": "magic-coder",
     "magic_coder": "magic-coder",
@@ -111,7 +113,13 @@ def supervisor_node(
 ) -> (
     Command[
         Literal[
-            "session_opening", "approval", "jasper", "coding", "research", "magic-coder"
+            "session_opening",
+            "approval",
+            "jasper",
+            "coding",
+            "research",
+            "librarian",
+            "magic-coder",
         ]
     ]
     | dict
@@ -222,7 +230,9 @@ def _is_approved(resume_value) -> bool:
 
 def approval_node(
     state: State,
-) -> Command[Literal["jasper", "coding", "research", "magic-coder"]] | dict:
+) -> (
+    Command[Literal["jasper", "coding", "research", "librarian", "magic-coder"]] | dict
+):
     agent = state.get("pending_agent", "")
     approved = interrupt(
         {
@@ -432,6 +442,10 @@ def create_chat_ui():
             return Command(goto="jasper", update=update)
         return update
 
+    async def run_librarian(state, config: RunnableConfig) -> dict:
+        result = await librarian_agent(state, config)
+        return {"messages": _base_messages_to_dicts(result.get("messages", []))}
+
     async def run_magic_coder_node(state):
         input_count = len(state["messages"])
         result = await magic_coder_app.ainvoke(
@@ -459,13 +473,14 @@ def create_chat_ui():
     graph.add_node("jasper", run_jasper)
     graph.add_node("coding", run_coding)
     graph.add_node("research", run_research)
+    graph.add_node("librarian", run_librarian)
     graph.add_node("magic-coder", run_magic_coder_node)
     graph.add_node("record_session", record_session)
 
     graph.add_edge(START, "supervisor")
     graph.add_edge("session_opening", "record_session")
 
-    for specialist in ["research", "magic-coder"]:
+    for specialist in ["research", "librarian", "magic-coder"]:
         graph.add_edge(specialist, "record_session")
     graph.add_edge("record_session", END)
 

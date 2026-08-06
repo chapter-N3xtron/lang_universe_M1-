@@ -48,6 +48,7 @@ const AGENT_OPTIONS = [
   { value: "jasper", label: "Jasper" },
   { value: "coding", label: "Deep Agent" },
   { value: "research", label: "Research" },
+  { value: "librarian", label: "The Librarian" },
   { value: "magic-coder", label: "Magic Coder" },
 ] as const;
 

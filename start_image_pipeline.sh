@@ -255,7 +255,7 @@ start_langgraph() {
   echo $! > "$PIDDIR/langgraph.pid"
   disown
 
-  if _wait_for_port "$LANGGRAPH_PORT" 30; then
+  if _wait_for_port "$LANGGRAPH_PORT" 180; then
     echo "  LangGraph ready on http://127.0.0.1:$LANGGRAPH_PORT"
   else
     echo "  LangGraph failed to start — check $LOGDIR/langgraph.log"

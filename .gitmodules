@@ -1,0 +1,4 @@
+[submodule "backend/vendor/open_deep_research"]
+	path = backend/vendor/open_deep_research
+	url = git@github.com:chapter-N3xtron/open_deep_research.git
+	branch = main

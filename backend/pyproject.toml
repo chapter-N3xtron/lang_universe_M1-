@@ -76,7 +76,7 @@ indent-style = "space"
 constraint-dependencies = ["mcp>=1.9.4,<2"]
 
 [tool.uv.sources]
-open-deep-research = { git = "https://github.com/langchain-ai/open_deep_research.git", rev = "20aaa0d422bd290c83f93574810ef1244e8d5955" }
+open-deep-research = { path = "vendor/open_deep_research" }
 
 [dependency-groups]
 dev = [

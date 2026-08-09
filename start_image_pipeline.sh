@@ -76,6 +76,24 @@ _wait_for_port() {
   return 1
 }
 
+_wait_for_backend_ready() {
+  local max="${1:-60}"
+  for _ in $(seq 1 "$max"); do
+    if curl -fsS --connect-timeout 2 --max-time 10 \
+        "http://127.0.0.1:$BACKEND_PORT/health" >/dev/null && \
+      curl -fsS --connect-timeout 2 --max-time 30 \
+        "http://127.0.0.1:$BACKEND_PORT/api/models" | \
+        grep -Eq '"models"[[:space:]]*:[[:space:]]*\[[[:space:]]*\{' && \
+      curl -fsS --connect-timeout 2 --max-time 30 \
+        "http://127.0.0.1:$BACKEND_PORT/api/tts/voices" | \
+        grep -Eq '"voices"[[:space:]]*:[[:space:]]*\[[[:space:]]*"'; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 _ensure_switchaudio() {
   if ! command -v SwitchAudioSource >/dev/null 2>&1; then
     echo "  Installing SwitchAudioSource..."
@@ -255,7 +273,7 @@ start_langgraph() {
   echo $! > "$PIDDIR/langgraph.pid"
   disown
 
-  if _wait_for_port "$LANGGRAPH_PORT" 180; then
+  if _wait_for_port "$LANGGRAPH_PORT" 300; then
     echo "  LangGraph ready on http://127.0.0.1:$LANGGRAPH_PORT"
   else
     echo "  LangGraph failed to start — check $LOGDIR/langgraph.log"
@@ -322,21 +340,20 @@ status_langgraph() {
 start_backend() {
   if _port_listening "$BACKEND_PORT"; then
     echo "  Backend already running on :$BACKEND_PORT"
-    return 0
+  else
+    _ensure_dirs
+    echo "  Starting backend..."
+    cd "$ROOT/backend"
+    source ./.venv/bin/activate
+    nohup python -m src.web_server >> "$LOGDIR/backend.log" 2>&1 &
+    echo $! > "$PIDDIR/backend.pid"
+    disown
   fi
 
-  _ensure_dirs
-  echo "  Starting backend..."
-  cd "$ROOT/backend"
-  source ./.venv/bin/activate
-  nohup python -m src.web_server >> "$LOGDIR/backend.log" 2>&1 &
-  echo $! > "$PIDDIR/backend.pid"
-  disown
-
-  if _wait_for_port "$BACKEND_PORT" 15; then
+  if _wait_for_backend_ready 60; then
     echo "  Backend ready on http://127.0.0.1:$BACKEND_PORT"
   else
-    echo "  Backend failed to start — check $LOGDIR/backend.log"
+    echo "  Backend failed readiness checks — check $LOGDIR/backend.log"
     return 1
   fi
 }
@@ -415,7 +432,7 @@ start_frontend() {
   echo $! > "$PIDDIR/frontend.pid"
   disown
 
-  if _wait_for_port "$FRONTEND_PORT" 20; then
+  if _wait_for_port "$FRONTEND_PORT" 60; then
     echo "  Frontend ready on http://localhost:$FRONTEND_PORT"
   else
     echo "  Frontend failed to start — check $LOGDIR/frontend.log"

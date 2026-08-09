@@ -496,8 +496,8 @@ test.describe("UI controls render and respond", () => {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
-          voices: ["alba", "pavo", "tango", "whispering"],
-          total: 4,
+          voices: ["eve", "alba", "pavo", "tango", "whispering"],
+          total: 5,
         }),
       });
     });
@@ -506,7 +506,7 @@ test.describe("UI controls render and respond", () => {
 
     const trigger = page.locator('button[aria-label="Select voice"]');
     await expect(trigger).toBeVisible({ timeout: 10000 });
-    await expect(trigger).toHaveText("Auto");
+    await expect(trigger).toHaveText("Eve");
 
     await trigger.click();
     const dropdown = page.locator('[data-slot="select-content"]');

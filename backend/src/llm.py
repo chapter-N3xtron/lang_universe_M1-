@@ -8,7 +8,7 @@ load_dotenv()
 BASE_URL = os.getenv("LLM_BASE_URL", "https://ollama.com")
 API_KEY = os.getenv("LLM_API_KEY", "")
 CHAT_UI_MODEL = os.getenv("CHAT_UI_MODEL", "glm-5.2")
-CODING_MODEL = os.getenv("CODING_MODEL", "openai/gpt-5.6-terra")
+CODING_MODEL = os.getenv("CODING_MODEL", "openai/gpt-5.6-luna")
 CODING_MODEL_PROVIDER = os.getenv("CODING_MODEL_PROVIDER", "openai")
 CODING_OLLAMA_BASE_URL = os.getenv("CODING_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 CODING_OLLAMA_CLOUD_BASE_URL = os.getenv(

@@ -168,6 +168,37 @@ export async function fetchSessionDetail(
   return checkedJson(response);
 }
 
+export async function renameSessionArtifact(
+  apiUrl: string,
+  sessionId: string,
+  artifactId: string,
+  title: string,
+  authScheme?: string,
+) {
+  const response = await fetch(
+    `${apiUrl}/session-catalog/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifactId)}`,
+    {
+      method: "PUT",
+      headers: headers(authScheme),
+      body: JSON.stringify({ owner_id: LOCAL_OWNER_ID, title }),
+    },
+  );
+  return checkedJson<{ artifact_id: string; title: string }>(response);
+}
+
+export async function deleteSessionArtifact(
+  apiUrl: string,
+  sessionId: string,
+  artifactId: string,
+  authScheme?: string,
+) {
+  const response = await fetch(
+    `${apiUrl}/session-catalog/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifactId)}?owner_id=${encodeURIComponent(LOCAL_OWNER_ID)}`,
+    { method: "DELETE", headers: headers(authScheme) },
+  );
+  return checkedJson<{ deleted: boolean }>(response);
+}
+
 export async function fetchSessionArtifacts(
   apiUrl: string,
   sessionId: string,

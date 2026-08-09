@@ -62,7 +62,7 @@ _pid_alive() {
 }
 
 _port_listening() {
-  lsof -ti:"$1" >/dev/null 2>&1
+  lsof -nP -tiTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
 
 _wait_for_port() {

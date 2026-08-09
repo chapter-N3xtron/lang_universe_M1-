@@ -1,7 +1,13 @@
 "use client";
 
 import { ReactNode } from "react";
-import { Columns2, MessageSquare, Rows2, Sparkles } from "lucide-react";
+import {
+  Eye,
+  MessageSquare,
+  PanelsTopLeft,
+  Sparkles,
+  Square,
+} from "lucide-react";
 import {
   Group,
   Panel,
@@ -22,7 +28,8 @@ type WorkspaceShellProps = {
   threadId: string | null;
   chat: ReactNode;
   visual: ReactNode;
-  composer: ReactNode;
+  composer: (workspaceControls: ReactNode) => ReactNode;
+  topBar: ReactNode;
   visualAvailable: boolean;
   suggestion?: LayoutSuggestion | null;
 };
@@ -36,7 +43,9 @@ const MODE_LAYOUTS: Record<WorkspaceMode, { chat: number; visual: number }> = {
 
 const browserLayoutStorage: LayoutStorage = {
   getItem(key) {
-    return typeof window === "undefined" ? null : window.localStorage.getItem(key);
+    return typeof window === "undefined"
+      ? null
+      : window.localStorage.getItem(key);
   },
   setItem(key, value) {
     if (typeof window !== "undefined") {
@@ -50,6 +59,7 @@ export function WorkspaceShell({
   chat,
   visual,
   composer,
+  topBar,
   visualAvailable,
   suggestion,
 }: WorkspaceShellProps) {
@@ -117,42 +127,54 @@ export function WorkspaceShell({
     </Panel>,
   ];
 
+  const workspaceControls = (
+    <div
+      className="flex items-center gap-1"
+      aria-label="Workspace view controls"
+    >
+      <Button
+        size="icon"
+        aria-label="Focus chat"
+        title="Focus chat"
+        variant={effectiveMode === "chat" ? "secondary" : "ghost"}
+        onClick={() => setMode("chat")}
+      >
+        <MessageSquare className="size-4" />
+      </Button>
+      <Button
+        size="icon"
+        aria-label="Split chat and visual"
+        title="Split chat and visual"
+        variant={effectiveMode === "split" ? "secondary" : "ghost"}
+        onClick={() => setMode("split")}
+      >
+        <PanelsTopLeft className="size-4" />
+      </Button>
+      <Button
+        size="icon"
+        aria-label="Focus visual"
+        title="Focus visual"
+        variant={effectiveMode === "visual" ? "secondary" : "ghost"}
+        onClick={() => setMode("visual")}
+      >
+        <span
+          className="relative block size-4"
+          aria-hidden="true"
+        >
+          <Square className="absolute inset-0 size-4" />
+          <Eye className="absolute inset-0 m-auto size-2.5" />
+        </span>
+      </Button>
+    </div>
+  );
+
   return (
     <div
       className="flex h-full min-w-0 flex-1 flex-col"
       data-workspace-mode={effectiveMode}
     >
+      {topBar}
       <div className="relative min-h-0 min-w-0 flex-1">
-        <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 absolute top-2 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-lg border p-1 shadow-sm backdrop-blur">
-          <Button
-            size="sm"
-            aria-label="Focus chat"
-            variant={effectiveMode === "chat" ? "secondary" : "ghost"}
-            onClick={() => setMode("chat")}
-          >
-            <MessageSquare className="size-4" />
-            Chat
-          </Button>
-          <Button
-            size="sm"
-            aria-label="Split chat and visual"
-            variant={effectiveMode === "split" ? "secondary" : "ghost"}
-            onClick={() => setMode("split")}
-          >
-            <Columns2 className="size-4" />
-            Split
-          </Button>
-          <Button
-            size="sm"
-            aria-label="Focus visual"
-            variant={effectiveMode === "visual" ? "secondary" : "ghost"}
-            onClick={() => setMode("visual")}
-          >
-            <Rows2 className="size-4 rotate-90" />
-            Visual
-          </Button>
-        </div>
-
         {visualAvailable && suggestion && suggestedMode !== effectiveMode && (
           <div
             role="status"
@@ -215,7 +237,7 @@ export function WorkspaceShell({
         className="bg-background shrink-0 border-t"
         data-workspace-composer
       >
-        {composer}
+        {composer(workspaceControls)}
       </div>
     </div>
   );

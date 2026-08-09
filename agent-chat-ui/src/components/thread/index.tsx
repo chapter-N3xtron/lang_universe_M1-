@@ -9,20 +9,9 @@ import {
 } from "react";
 import { cn } from "@/lib/utils";
 import { useStreamContext, type StreamContextType } from "@/providers/Stream";
-import { LangGraphLogoSVG } from "../icons/langgraph";
-import { TooltipIconButton } from "./tooltip-icon-button";
-import { List, ListX, SquarePen } from "lucide-react";
 import { useQueryState, parseAsBoolean, parseAsStringLiteral } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { toast } from "sonner";
-import { GitHubSVG } from "../icons/github";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -35,6 +24,7 @@ import { ChatInput } from "./chat-input";
 import dynamic from "next/dynamic";
 import { openSession } from "@/lib/session-catalog";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
+import { SessionWorkspaceTopBar } from "@/components/workspace/session-workspace-top-bar";
 import type { JasperResponse } from "@/lib/visual/jasper-response.generated";
 
 const TodoList = dynamic(() => import("./todos").then((m) => m.TodoList), {
@@ -69,30 +59,6 @@ function StickyToBottomContent(props: {
         </div>
       </div>
     </div>
-  );
-}
-
-function OpenGitHubRepo() {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <a
-            href="https://github.com/langchain-ai/agent-chat-ui"
-            target="_blank"
-            className="flex items-center justify-center"
-          >
-            <GitHubSVG
-              width="24"
-              height="24"
-            />
-          </a>
-        </TooltipTrigger>
-        <TooltipContent side="left">
-          <p>Open GitHub repo</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   );
 }
 
@@ -263,6 +229,18 @@ function ThreadImpl() {
         threadId={threadId}
         visualAvailable={visualAvailable}
         suggestion={validatedJasperResponse?.layout_suggestion ?? null}
+        topBar={
+          <SessionWorkspaceTopBar
+            apiUrl={apiUrl}
+            authScheme={authScheme || undefined}
+            threadId={threadId}
+            todosOpen={todosOpen}
+            isOpeningSession={isOpeningSession}
+            onToggleTodos={() => setTodosOpen((open) => !open)}
+            onOpenSession={handleOpenSession}
+            onSelectThread={setThreadId}
+          />
+        }
         chat={
           <div
             className={cn(
@@ -270,94 +248,8 @@ function ThreadImpl() {
               !chatStarted && "grid-rows-[1fr]",
             )}
           >
-            {!chatStarted && (
-              <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-                <TooltipIconButton
-                  size="lg"
-                  tooltip="Open new session"
-                  variant="ghost"
-                  disabled={isOpeningSession}
-                  onClick={handleOpenSession}
-                >
-                  <SquarePen className="size-5" />
-                </TooltipIconButton>
-                <div className="absolute top-2 right-4 flex items-center">
-                  <TooltipIconButton
-                    size="lg"
-                    className="p-4"
-                    tooltip={todosOpen ? "Close todos" : "Show todos"}
-                    variant="ghost"
-                    onClick={() => setTodosOpen((p) => !p)}
-                  >
-                    {todosOpen ? (
-                      <ListX className="size-5" />
-                    ) : (
-                      <List className="size-5" />
-                    )}
-                  </TooltipIconButton>
-                  <ThemeToggle />
-                  <OpenGitHubRepo />
-                </div>
-              </div>
-            )}
-            {chatStarted && (
-              <div className="relative z-10 flex items-center justify-between gap-3 p-2">
-                <div className="relative flex items-center justify-start gap-2">
-                  <button
-                    className="flex cursor-pointer items-center gap-2"
-                    onClick={() => setThreadId(null)}
-                  >
-                    <LangGraphLogoSVG
-                      width={32}
-                      height={32}
-                    />
-                    <span className="text-xl font-semibold tracking-tight">
-                      Agent Chat
-                    </span>
-                  </button>
-                </div>
 
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center">
-                    {stream.values?.coding_status && (
-                      <span className="mr-2 flex items-center gap-1.5 rounded-full bg-blue-900/30 px-2.5 py-0.5 text-xs text-blue-300">
-                        <span
-                          className={`inline-block size-1.5 rounded-full bg-blue-400 ${stream.values.coding_status === "running" ? "animate-pulse" : ""}`}
-                        />
-                        Coding: {stream.values.coding_status}
-                      </span>
-                    )}
-                    <TooltipIconButton
-                      size="lg"
-                      className="p-4"
-                      tooltip={todosOpen ? "Close todos" : "Show todos"}
-                      variant="ghost"
-                      onClick={() => setTodosOpen((p) => !p)}
-                    >
-                      {todosOpen ? (
-                        <ListX className="size-5" />
-                      ) : (
-                        <List className="size-5" />
-                      )}
-                    </TooltipIconButton>
-                    <ThemeToggle />
-                    <OpenGitHubRepo />
-                  </div>
-                  <TooltipIconButton
-                    size="lg"
-                    className="p-4"
-                    tooltip="New thread"
-                    variant="ghost"
-                    disabled={isOpeningSession}
-                    onClick={handleOpenSession}
-                  >
-                    <SquarePen className="size-5" />
-                  </TooltipIconButton>
-                </div>
 
-                <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
-              </div>
-            )}
 
             <StickToBottom className="relative flex-1 overflow-hidden">
               <StickyToBottomContent
@@ -392,7 +284,7 @@ function ThreadImpl() {
             onSelectThread={(selectedThreadId) => setThreadId(selectedThreadId)}
           />
         }
-        composer={
+        composer={(workspaceControls) => (
           <ChatInput
             isLoading={isLoading}
             selectedVoice={selectedVoice}
@@ -409,8 +301,9 @@ function ThreadImpl() {
             onStartSubmit={handleSubmit}
             apiUrl={apiUrl}
             authScheme={authScheme || undefined}
+            workspaceControls={workspaceControls}
           />
-        }
+        )}
       />
     </div>
   );

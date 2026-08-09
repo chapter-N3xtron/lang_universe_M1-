@@ -3,18 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
-import { BookOpen, GitFork, Library, LogOut, Workflow } from "lucide-react";
+import { Trash2, Workflow } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ConceptMapArtifact } from "@/lib/visual/jasper-response.generated";
 import { validateJasperResponse } from "@/lib/visual/validate";
 import {
-  closeSession,
+  deleteSessionArtifact,
   fetchSessionArtifacts,
   fetchSessionDetail,
   forkSession,
+  renameSessionArtifact,
 } from "@/lib/session-catalog";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogClose,
@@ -23,7 +24,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { ConceptMapRenderer } from "./concept-map-renderer";
 import { SessionLibrary } from "./session-library";
@@ -63,10 +63,13 @@ export function SessionVisualPane({
   const queryClient = useQueryClient();
   const [view, setView] = useQueryState("sessionView", viewParser);
   const [selectedArtifactId, setSelectedArtifactId] = useQueryState("visualId");
-  const [closeOpen, setCloseOpen] = useState(false);
-  const [reviewSummary, setReviewSummary] = useState("");
-  const [reviewTentPoles, setReviewTentPoles] = useState("");
+
   const [reminderDismissed, setReminderDismissed] = useState(false);
+  const [editingArtifactId, setEditingArtifactId] = useState<string | null>(
+    null,
+  );
+  const [artifactTitle, setArtifactTitle] = useState("");
+  const [deleteArtifactId, setDeleteArtifactId] = useState<string | null>(null);
   const effectiveView = view ?? (threadId ? "session" : "library");
   const artifactsQuery = useQuery({
     queryKey: ["session-artifacts", apiUrl, threadId],
@@ -78,28 +81,6 @@ export function SessionVisualPane({
     queryFn: () => fetchSessionDetail(apiUrl, threadId!, authScheme),
     enabled: Boolean(apiUrl && threadId && effectiveView === "session"),
   });
-  const closeMutation = useMutation({
-    mutationFn: () =>
-      closeSession(
-        apiUrl,
-        threadId!,
-        reviewSummary.trim(),
-        reviewTentPoles
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-        authScheme,
-      ),
-    onSuccess: async () => {
-      setCloseOpen(false);
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["session-detail", apiUrl, threadId],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["session-catalog"] }),
-      ]);
-    },
-  });
   const forkMutation = useMutation({
     mutationFn: () => forkSession(apiUrl, threadId!, authScheme),
     onSuccess: async (result) => {
@@ -107,6 +88,33 @@ export function SessionVisualPane({
       setWorkspaceModeForThread(result.thread_id, "visual");
       onSelectThread(result.thread_id);
       void setSelectedArtifactId(null);
+    },
+  });
+  const renameArtifactMutation = useMutation({
+    mutationFn: ({
+      artifactId,
+      title,
+    }: {
+      artifactId: string;
+      title: string;
+    }) =>
+      renameSessionArtifact(apiUrl, threadId!, artifactId, title, authScheme),
+    onSuccess: async () => {
+      setEditingArtifactId(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["session-artifacts", apiUrl, threadId],
+      });
+    },
+  });
+  const deleteArtifactMutation = useMutation({
+    mutationFn: (artifactId: string) =>
+      deleteSessionArtifact(apiUrl, threadId!, artifactId, authScheme),
+    onSuccess: async (_result, artifactId) => {
+      setDeleteArtifactId(null);
+      if (selectedArtifactId === artifactId) void setSelectedArtifactId(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["session-artifacts", apiUrl, threadId],
+      });
     },
   });
   const artifacts = useMemo(() => {
@@ -158,12 +166,6 @@ export function SessionVisualPane({
     );
   }, [threadId]);
 
-  function beginCloseReview() {
-    setReviewSummary(detailQuery.data?.long_description ?? "");
-    setReviewTentPoles((detailQuery.data?.tent_poles ?? []).join("\n"));
-    setCloseOpen(true);
-  }
-
   if (effectiveView === "library") {
     return (
       <div className="bg-background h-full min-w-0 overflow-hidden border-l">
@@ -183,98 +185,11 @@ export function SessionVisualPane({
 
   return (
     <section className="bg-background flex h-full min-w-0 flex-col overflow-hidden border-l">
-      <header className="flex min-h-14 items-center gap-3 border-b px-4 pr-40">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setView("library")}
-        >
-          <Library className="size-4" /> All sessions
-        </Button>
-        <Button
-          size="sm"
-          variant={effectiveView === "sources" ? "secondary" : "outline"}
-          disabled={!threadId}
-          onClick={() =>
-            setView(effectiveView === "sources" ? "session" : "sources")
-          }
-        >
-          <BookOpen className="size-4" />{" "}
-          {effectiveView === "sources" ? "Visuals" : "Sources"}
-        </Button>
+      <div className="flex min-h-10 items-center border-b px-4">
         <h2 className="truncate text-sm font-semibold">
           {selectedArtifact?.title ?? legacyTitle ?? "Session visuals"}
         </h2>
-        <div className="ml-auto flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!threadId || forkMutation.isPending}
-            onClick={() => forkMutation.mutate()}
-          >
-            <GitFork className="size-4" /> Fork as new session
-          </Button>
-          <Dialog
-            open={closeOpen}
-            onOpenChange={setCloseOpen}
-          >
-            <DialogTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!threadId || detailQuery.data?.status === "closed"}
-                onClick={beginCloseReview}
-              >
-                <LogOut className="size-4" /> Close session
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Review this session before closing</DialogTitle>
-                <DialogDescription>
-                  This records your reviewed summary and tent poles. It does not
-                  commit or push repository changes.
-                </DialogDescription>
-              </DialogHeader>
-              <label className="space-y-2 text-sm font-medium">
-                Session summary
-                <Textarea
-                  value={reviewSummary}
-                  onChange={(event) => setReviewSummary(event.target.value)}
-                  rows={7}
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium">
-                Tent poles, one per line
-                <Textarea
-                  value={reviewTentPoles}
-                  onChange={(event) => setReviewTentPoles(event.target.value)}
-                  rows={6}
-                />
-              </label>
-              {closeMutation.error && (
-                <p
-                  role="alert"
-                  className="text-destructive text-sm"
-                >
-                  {closeMutation.error.message}
-                </p>
-              )}
-              <DialogFooter>
-                <DialogClose asChild>
-                  <Button variant="outline">Keep open</Button>
-                </DialogClose>
-                <Button
-                  disabled={closeMutation.isPending}
-                  onClick={() => closeMutation.mutate()}
-                >
-                  Save review and close
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </header>
+      </div>
       {detailQuery.data?.status === "open" &&
         detailQuery.data.active_minutes >= SESSION_REMINDER_MINUTES &&
         !reminderDismissed && (
@@ -292,13 +207,6 @@ export function SessionVisualPane({
               onClick={() => setReminderDismissed(true)}
             >
               Break
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={beginCloseReview}
-            >
-              Close
             </Button>
             <Button
               size="sm"
@@ -348,29 +256,76 @@ export function SessionVisualPane({
               <p className="text-muted-foreground px-2 py-1 text-xs font-medium uppercase">
                 Visual timeline
               </p>
-              {artifacts.map((entry, index) => (
-                <Button
-                  key={entry.artifact.artifact_id}
-                  variant={
-                    entry.artifact.artifact_id === selectedArtifact?.artifact_id
-                      ? "secondary"
-                      : "ghost"
-                  }
-                  className="mb-1 h-auto w-full justify-start py-2 text-left whitespace-normal"
-                  onClick={() =>
-                    setSelectedArtifactId(entry.artifact.artifact_id ?? null)
-                  }
-                >
-                  <span>
-                    <span className="block text-xs">
-                      {index + 1}. {entry.artifact.title}
-                    </span>
-                    <span className="text-muted-foreground block text-[10px]">
-                      {entry.relationship.replace("_", " ")}
-                    </span>
-                  </span>
-                </Button>
-              ))}
+              {artifacts.map((entry, index) => {
+                const artifactId = entry.artifact.artifact_id;
+                if (!artifactId) return null;
+                const selected = artifactId === selectedArtifact?.artifact_id;
+                return (
+                  <div
+                    key={artifactId}
+                    className={`mb-1 rounded-md border p-1 ${selected ? "bg-secondary" : ""}`}
+                  >
+                    {editingArtifactId === artifactId ? (
+                      <Input
+                        autoFocus
+                        aria-label="Board title"
+                        value={artifactTitle}
+                        onChange={(event) =>
+                          setArtifactTitle(event.target.value)
+                        }
+                        onBlur={() => setEditingArtifactId(null)}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                          if (event.key === "Escape")
+                            setEditingArtifactId(null);
+                          if (
+                            event.key === "Enter" &&
+                            artifactTitle.trim() &&
+                            threadId
+                          )
+                            renameArtifactMutation.mutate({
+                              artifactId,
+                              title: artifactTitle.trim(),
+                            });
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="w-full py-1 text-left whitespace-normal"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void setSelectedArtifactId(artifactId);
+                          setEditingArtifactId(artifactId);
+                          setArtifactTitle(entry.artifact.title);
+                        }}
+                        aria-label={`Edit board title ${entry.artifact.title}`}
+                      >
+                        <span className="block text-xs">
+                          {index + 1}. {entry.artifact.title}
+                        </span>
+                        <span className="text-muted-foreground block text-[10px]">
+                          {entry.relationship.replace("_", " ")}
+                        </span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive ml-auto block p-1"
+                      aria-label={`Delete visualization board ${entry.artifact.title}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setDeleteArtifactId(artifactId);
+                      }}
+                    >
+                      <Trash2
+                        className="size-4"
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </div>
+                );
+              })}
             </nav>
           )}
           <div className="relative min-w-0 flex-1">
@@ -398,6 +353,40 @@ export function SessionVisualPane({
           </div>
         </div>
       )}
+      <Dialog
+        open={Boolean(deleteArtifactId)}
+        onOpenChange={(open) => !open && setDeleteArtifactId(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete visualization board?</DialogTitle>
+            <DialogDescription>
+              Deleting “
+              {artifacts.find(
+                (entry) => entry.artifact.artifact_id === deleteArtifactId,
+              )?.artifact.title ?? "this board"}
+              ” is permanent. This removes only the visualization board, not the
+              session, chat, sources, shared evidence, or reports.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Keep board</Button>
+            </DialogClose>
+            <Button
+              variant="destructive"
+              disabled={deleteArtifactMutation.isPending || !deleteArtifactId}
+              onClick={() =>
+                deleteArtifactId &&
+                deleteArtifactMutation.mutate(deleteArtifactId)
+              }
+            >
+              Delete permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      ;
     </section>
   );
 }

@@ -270,7 +270,7 @@ def fs_pick_folder(starting_path: str | None = None) -> FSPickResponse:
 @app.get("/api/models")
 def list_models() -> dict:
     """List configured Deep Agents models plus discovered local Ollama models."""
-    default = os.getenv("CODING_MODEL", "openai/gpt-5.6-terra")
+    default = os.getenv("CODING_MODEL", "openai/gpt-5.6-luna")
     configured = list(
         dict.fromkeys(
             [

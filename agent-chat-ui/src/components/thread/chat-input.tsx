@@ -7,6 +7,7 @@ import {
   memo,
   useEffect,
   useRef,
+  type ReactNode,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "../ui/button";
@@ -31,8 +32,16 @@ import {
   TooltipTrigger,
 } from "../ui/tooltip";
 import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
-import { Plus, Mic, LoaderCircle, Folder } from "lucide-react";
+import {
+  Folder,
+  LoaderCircle,
+  Mic,
+  Phone,
+  Plus,
+  Send,
+  Square,
+  Wrench,
+} from "lucide-react";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { toast } from "sonner";
@@ -91,6 +100,7 @@ interface ChatInputProps {
   onStartSubmit: () => void;
   apiUrl: string;
   authScheme?: string;
+  workspaceControls: ReactNode;
 }
 
 function isCloudModel(
@@ -121,6 +131,7 @@ function ChatInputImpl({
   onStartSubmit,
   apiUrl,
   authScheme,
+  workspaceControls,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -262,13 +273,13 @@ function ChatInputImpl({
   );
 
   return (
-    <div className="bg-background flex shrink-0 flex-col items-center px-4 pt-2">
+    <div className="bg-background flex shrink-0 flex-col items-center px-4 pt-2 lg:pb-6">
       {!chatStarted && null}
 
       <div
         ref={dropRef}
         className={cn(
-          "bg-muted relative z-10 mx-auto mb-4 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
+          "bg-muted relative z-10 mx-auto mb-4 h-72 w-full max-w-6xl overflow-hidden rounded-2xl shadow-xs transition-all lg:h-48",
           dragOver
             ? "border-primary border-2 border-dotted"
             : "border border-solid",
@@ -276,157 +287,115 @@ function ChatInputImpl({
       >
         <form
           onSubmit={handleSubmit}
-          className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2"
+          className="mx-auto grid h-full w-full max-w-6xl gap-2 lg:grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(190px,240px)] lg:grid-rows-[auto_minmax(0,1fr)]"
         >
-          <ContentBlocksPreview
-            blocks={contentBlocks}
-            onRemove={removeBlock}
-          />
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onPaste={handlePaste}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.metaKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                const el = e.target as HTMLElement | undefined;
-                const form = el?.closest("form");
-                form?.requestSubmit();
-              }
-            }}
-            placeholder="Type your message..."
-            className="field-sizing-content max-h-40 resize-none overflow-y-auto border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
-          />
-
-          <div className="flex items-start justify-between gap-1.5 p-1.5 pt-3">
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center space-x-1.5">
-                <Switch
-                  id="render-tool-calls"
-                  checked={hideToolCalls ?? false}
-                  onCheckedChange={setHideToolCalls}
-                />
-                <Label
-                  htmlFor="render-tool-calls"
-                  className="text-xs text-gray-600"
-                >
-                  Hide Tool Calls
-                </Label>
-              </div>
-              <Label
-                htmlFor="file-input"
-                className="flex cursor-pointer items-center gap-1.5"
-              >
-                <Plus className="size-4 text-gray-600" />
-                <span className="text-xs text-gray-600">Upload file</span>
-              </Label>
-              <input
-                id="file-input"
-                type="file"
-                onChange={handleFileUpload}
-                multiple
-                accept={`image/jpeg,image/png,image/gif,image/webp,${DOCUMENT_ACCEPT}`}
-                className="hidden"
-              />
-              <button
+          <div className="lg:col-span-3">
+            <ContentBlocksPreview
+              blocks={contentBlocks}
+              onRemove={removeBlock}
+            />
+          </div>
+          <div
+            className="flex min-h-0 min-w-0 items-end gap-1.5 lg:col-start-2 lg:row-start-2 lg:flex-col lg:items-center lg:justify-end lg:gap-2"
+            data-composer-column="center"
+          >
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onPaste={handlePaste}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.metaKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault();
+                  const el = e.target as HTMLElement | undefined;
+                  const form = el?.closest("form");
+                  form?.requestSubmit();
+                }
+              }}
+              placeholder="Type your message..."
+              className="focus-visible:ring-ring/50 h-24 min-h-24 min-w-0 flex-1 resize-none overflow-y-auto rounded-md border border-white/30 bg-transparent p-3.5 shadow-none outline-none focus-visible:border-white/60 focus-visible:ring-2 lg:col-start-2 lg:row-start-2 lg:w-full lg:flex-none"
+            />
+            <div className="mt-0.5 flex shrink-0 items-center justify-center gap-1.5 lg:mt-0">
+              <Button
                 type="button"
-                aria-label="Select repository folder"
-                disabled={isPickingWorkspace}
-                onClick={async () => {
-                  setIsPickingWorkspace(true);
-                  try {
-                    const res = await fetch(
-                      "http://127.0.0.1:8000/api/fs/pick-folder",
+                size="icon"
+                variant={isRecording ? "destructive" : "brand"}
+                className="size-9 rounded-md text-white shadow-md transition-all"
+                aria-label={
+                  isRecording
+                    ? "Recording... release to transcribe"
+                    : isProcessing
+                      ? "Transcribing..."
+                      : "Hold to record"
+                }
+                title={
+                  isRecording
+                    ? "Recording... release to transcribe"
+                    : "Hold to record"
+                }
+                onMouseDown={() => startRecording()}
+                onMouseUp={() =>
+                  stopRecording(
+                    (text) => setInput((prev) => prev + text),
+                    (err) => console.error(err),
+                  )
+                }
+                onMouseLeave={() => {
+                  if (isRecording) {
+                    stopRecording(
+                      (text) => setInput((prev) => prev + text),
+                      (err) => console.error(err),
                     );
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    if (!data.cancelled && data.path) {
-                      setSelectedWorkspace(data.path);
-                    }
-                  } catch (error) {
-                    console.error("[Repo picker] failed:", error);
-                    toast.error("Could not open folder picker", {
-                      description:
-                        "Check that the sidecar is running and macOS allows Finder access.",
-                    });
-                  } finally {
-                    setIsPickingWorkspace(false);
                   }
                 }}
-                className="flex cursor-pointer items-center gap-1.5 disabled:cursor-wait disabled:opacity-60"
               >
-                {isPickingWorkspace ? (
-                  <LoaderCircle className="size-4 animate-spin text-gray-600" />
+                {isProcessing ? (
+                  <LoaderCircle className="size-4 animate-spin" />
                 ) : (
-                  <Folder className="size-4 text-gray-600" />
+                  <Mic className="size-4" />
                 )}
-                <span className="text-xs text-gray-600">
-                  {isPickingWorkspace
-                    ? "Opening…"
-                    : selectedWorkspace
-                      ? selectedWorkspace
-                          .replace(/\/+$/, "")
-                          .split("/")
-                          .pop() || selectedWorkspace
-                      : "Repo selector"}
-                </span>
-              </button>
+              </Button>
+              {isLoading ? (
+                <Button
+                  key="stop"
+                  type="button"
+                  size="icon"
+                  variant="destructive"
+                  aria-label="Cancel response"
+                  title="Cancel response"
+                  onClick={streamActions.stop}
+                  className="size-9 rounded-md text-white shadow-md transition-all"
+                >
+                  <Square className="size-4 fill-current" />
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  size="icon"
+                  variant="brand"
+                  className="size-9 rounded-md text-white shadow-md transition-all"
+                  aria-label="Send message"
+                  title="Send message"
+                  disabled={
+                    isLoading || (!input.trim() && contentBlocks.length === 0)
+                  }
+                >
+                  <Send className="size-4" />
+                </Button>
+              )}
             </div>
-            <div className="flex flex-col items-end gap-1.5">
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-gray-600">Agent</span>
-                <Select
-                  value={selectedAgent}
-                  onValueChange={(value) =>
-                    setAgentSelection({ source: targetAgent, value })
-                  }
-                >
-                  <SelectTrigger
-                    className="h-7 w-[112px] text-xs"
-                    aria-label="Select agent"
-                  >
-                    <SelectValue placeholder="Auto" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AGENT_OPTIONS.map((opt) => (
-                      <SelectItem
-                        key={opt.value || "auto"}
-                        value={opt.value}
-                      >
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-gray-600">Access</span>
-                <Select
-                  value={executionMode}
-                  onValueChange={(value) =>
-                    setExecutionMode(value as "read_only" | "approval")
-                  }
-                >
-                  <SelectTrigger
-                    className="h-7 w-[112px] text-xs"
-                    aria-label="Select coding access"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="read_only">Read only</SelectItem>
-                    <SelectItem value="approval">
-                      Full repo (review)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+          </div>
+
+          <div className="flex items-start justify-between gap-1.5 p-1.5 pt-3 lg:contents">
+            <div
+              className="flex flex-col gap-1.5 lg:col-start-1 lg:row-start-2 lg:items-start"
+              data-composer-column="left"
+            >
               <div className="flex items-center gap-1">
                 <span className="text-xs text-gray-600">Model</span>
                 <TooltipProvider>
@@ -437,8 +406,14 @@ function ChatInputImpl({
                           value={effectiveSelectedModel}
                           onValueChange={(value) => {
                             setSelectedModel(value);
-                            void saveModelPreference(apiUrl, value, authScheme).catch(
-                              () => toast.error("The model preference could not be saved."),
+                            void saveModelPreference(
+                              apiUrl,
+                              value,
+                              authScheme,
+                            ).catch(() =>
+                              toast.error(
+                                "The model preference could not be saved.",
+                              ),
                             );
                           }}
                           disabled={modelsLoadError}
@@ -495,7 +470,142 @@ function ChatInputImpl({
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              <div className="flex items-center gap-1">
+              {workspaceControls}
+              <div className="flex items-center space-x-1.5 lg:order-4">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant={hideToolCalls ? "secondary" : "ghost"}
+                        role="switch"
+                        aria-checked={hideToolCalls}
+                        aria-label={
+                          hideToolCalls ? "Show tool calls" : "Hide tool calls"
+                        }
+                        onClick={() => setHideToolCalls(!hideToolCalls)}
+                      >
+                        <Wrench className="size-4" />
+                        <Phone className="mt-2 -ml-2 size-2.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {hideToolCalls ? "Show tool calls" : "Hide tool calls"}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Label
+                htmlFor="file-input"
+                className="flex cursor-pointer items-center gap-1.5 lg:order-3"
+              >
+                <Plus className="size-4 text-gray-600" />
+                <span className="text-xs text-gray-600">Upload file</span>
+              </Label>
+              <input
+                id="file-input"
+                type="file"
+                onChange={handleFileUpload}
+                multiple
+                accept={`image/jpeg,image/png,image/gif,image/webp,${DOCUMENT_ACCEPT}`}
+                className="hidden"
+              />
+            </div>
+            <div
+              className="flex flex-col items-end gap-1.5 lg:col-start-3 lg:row-start-2 lg:gap-1.5"
+              data-composer-column="right"
+            >
+              <div className="flex items-center gap-1 lg:order-1">
+                <span className="text-xs text-gray-600">Agent</span>
+                <Select
+                  value={selectedAgent}
+                  onValueChange={(value) =>
+                    setAgentSelection({ source: targetAgent, value })
+                  }
+                >
+                  <SelectTrigger
+                    className="h-7 w-[112px] text-xs"
+                    aria-label="Select agent"
+                  >
+                    <SelectValue placeholder="Auto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AGENT_OPTIONS.map((opt) => (
+                      <SelectItem
+                        key={opt.value || "auto"}
+                        value={opt.value}
+                      >
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <button
+                type="button"
+                aria-label="Select repository folder"
+                disabled={isPickingWorkspace}
+                onClick={async () => {
+                  setIsPickingWorkspace(true);
+                  try {
+                    const res = await fetch(
+                      "http://127.0.0.1:8000/api/fs/pick-folder",
+                    );
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    if (!data.cancelled && data.path) {
+                      setSelectedWorkspace(data.path);
+                    }
+                  } catch (error) {
+                    console.error("[Repo picker] failed:", error);
+                    toast.error("Could not open folder picker", {
+                      description:
+                        "Check that the sidecar is running and macOS allows Finder access.",
+                    });
+                  } finally {
+                    setIsPickingWorkspace(false);
+                  }
+                }}
+                className="flex cursor-pointer items-center gap-1.5 disabled:cursor-wait disabled:opacity-60 lg:order-3"
+              >
+                {isPickingWorkspace ? (
+                  <LoaderCircle className="size-4 animate-spin text-gray-600" />
+                ) : (
+                  <Folder className="size-4 text-gray-600" />
+                )}
+                <span className="text-xs text-gray-600">
+                  {isPickingWorkspace
+                    ? "Opening…"
+                    : selectedWorkspace
+                      ? selectedWorkspace
+                          .replace(/\/+$/, "")
+                          .split("/")
+                          .pop() || selectedWorkspace
+                      : "Repo selector"}
+                </span>
+              </button>
+              <div className="flex items-center gap-1 lg:order-4">
+                <span className="text-xs text-gray-600">Access</span>
+                <Select
+                  value={executionMode}
+                  onValueChange={(value) =>
+                    setExecutionMode(value as "read_only" | "approval")
+                  }
+                >
+                  <SelectTrigger
+                    className="h-7 w-[112px] text-xs"
+                    aria-label="Select coding access"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="read_only">Read only</SelectItem>
+                    <SelectItem value="approval">Full repo (review)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-1 lg:order-2">
                 <span className="text-xs text-gray-600">Voice</span>
                 <TooltipProvider>
                   <Tooltip>
@@ -534,65 +644,6 @@ function ChatInputImpl({
                     )}
                   </Tooltip>
                 </TooltipProvider>
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onMouseDown={() => startRecording()}
-                  onMouseUp={() =>
-                    stopRecording(
-                      (text) => setInput((prev) => prev + text),
-                      (err) => console.error(err),
-                    )
-                  }
-                  onMouseLeave={() => {
-                    if (isRecording) {
-                      stopRecording(
-                        (text) => setInput((prev) => prev + text),
-                        (err) => console.error(err),
-                      );
-                    }
-                  }}
-                  className={`flex cursor-pointer items-center gap-1 ${isRecording ? "text-red-500" : "text-gray-600"}`}
-                  title={
-                    isRecording
-                      ? "Recording... release to transcribe"
-                      : "Hold to record"
-                  }
-                >
-                  {isProcessing ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <Mic className="size-4" />
-                  )}
-                  <span className="text-xs">
-                    {isRecording
-                      ? "Recording..."
-                      : isProcessing
-                        ? "Transcribing..."
-                        : "Voice"}
-                  </span>
-                </button>
-                {isLoading ? (
-                  <Button
-                    key="stop"
-                    onClick={streamActions.stop}
-                    className="h-7 text-xs"
-                  >
-                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    Cancel
-                  </Button>
-                ) : (
-                  <Button
-                    type="submit"
-                    className="h-7 text-xs shadow-md transition-all"
-                    disabled={
-                      isLoading || (!input.trim() && contentBlocks.length === 0)
-                    }
-                  >
-                    Send
-                  </Button>
-                )}
               </div>
             </div>
           </div>

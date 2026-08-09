@@ -21,7 +21,7 @@ export function useModelAndVoices() {
     { id: string; name: string }[]
   >([]);
   const [voicesLoadError, setVoicesLoadError] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useState<string>("");
+  const [selectedVoice, setSelectedVoice] = useState<string>("eve");
 
   useEffect(() => {
     fetch("http://127.0.0.1:8000/api/models")

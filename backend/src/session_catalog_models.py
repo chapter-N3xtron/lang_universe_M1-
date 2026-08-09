@@ -145,3 +145,8 @@ class ModelPreferenceInput(StrictModel):
 class SessionForkInput(StrictModel):
     owner_id: str = Field(min_length=1, max_length=128)
     checkpoint_id: str | None = Field(default=None, max_length=128)
+
+
+class SessionArtifactTitleInput(StrictModel):
+    owner_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=160)

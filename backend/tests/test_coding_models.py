@@ -27,10 +27,10 @@ def test_coding_model_prefixes_select_expected_providers():
 def test_default_coding_model_is_gpt_5_6(monkeypatch):
     from src import llm
 
-    monkeypatch.setattr(llm, "CODING_MODEL", "openai/gpt-5.6-terra")
+    monkeypatch.setattr(llm, "CODING_MODEL", "openai/gpt-5.6-luna")
     monkeypatch.setattr(llm, "CODING_MODEL_PROVIDER", "openai")
 
-    assert llm._coding_provider_and_model(None) == ("openai", "gpt-5.6-terra")
+    assert llm._coding_provider_and_model(None) == ("openai", "gpt-5.6-luna")
 
 
 def test_openai_model_uses_official_langchain_integration(monkeypatch):

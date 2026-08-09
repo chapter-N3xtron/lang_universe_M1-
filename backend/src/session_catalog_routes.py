@@ -14,6 +14,7 @@ from src.session_catalog import SCHEMA, ensure_catalog_schema, query_sessions
 from src.session_catalog_models import (
     ModelPreferenceInput,
     SavedViewInput,
+    SessionArtifactTitleInput,
     SessionCloseInput,
     SessionForkInput,
     SessionOpenInput,
@@ -161,6 +162,63 @@ async def session_artifacts(
             for row in rows
         ]
     }
+
+
+@router.put("/{session_id}/artifacts/{artifact_id}")
+async def rename_session_artifact(
+    session_id: str, artifact_id: str, body: SessionArtifactTitleInput
+) -> dict[str, Any]:
+    """Rename one board without changing its identity, payload provenance, or sources."""
+    if body.title.strip() != body.title or not body.title.strip():
+        raise HTTPException(422, "Board title must not be empty.")
+    client = _agent_server_client()
+    item = await client.store.get_item((body.owner_id, "session-artifacts", session_id), artifact_id)
+    if not item:
+        raise HTTPException(404, "Visualization board not found.")
+    value = dict(item.get("value", {}))
+    value["title"] = body.title
+    await client.store.put_item(
+        (body.owner_id, "session-artifacts", session_id), artifact_id, value, index=False
+    )
+    await ensure_catalog_schema()
+    async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                f"""UPDATE {SCHEMA}.artifacts a SET title = %s,
+                    artifact_payload = jsonb_set(a.artifact_payload, '{{title}}', to_jsonb(%s::text), true)
+                    FROM {SCHEMA}.session_artifact_links sal
+                    WHERE sal.session_id = %s AND sal.artifact_id = a.artifact_id
+                      AND sal.owner_id = %s AND a.owner_id = %s AND a.artifact_id = %s""",
+                (body.title, body.title, session_id, body.owner_id, body.owner_id, artifact_id),
+            )
+    return {"artifact_id": artifact_id, "title": body.title}
+
+
+@router.delete("/{session_id}/artifacts/{artifact_id}")
+async def delete_session_artifact(
+    session_id: str, artifact_id: str, owner_id: str = Query(min_length=1, max_length=128)
+) -> dict[str, bool]:
+    """Delete only this session's board reference and unshared board artifact."""
+    client = _agent_server_client()
+    item = await client.store.get_item((owner_id, "session-artifacts", session_id), artifact_id)
+    if not item:
+        raise HTTPException(404, "Visualization board not found.")
+    await client.store.delete_item((owner_id, "session-artifacts", session_id), artifact_id)
+    await ensure_catalog_schema()
+    async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                f"DELETE FROM {SCHEMA}.session_artifact_links WHERE session_id = %s AND artifact_id = %s AND owner_id = %s",
+                (session_id, artifact_id, owner_id),
+            )
+            await cursor.execute(
+                f"""DELETE FROM {SCHEMA}.artifacts a
+                    WHERE a.artifact_id = %s AND a.owner_id = %s
+                      AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.session_artifact_links sal
+                                      WHERE sal.artifact_id = a.artifact_id)""",
+                (artifact_id, owner_id),
+            )
+    return {"deleted": True}
 
 
 @router.post("/{session_id}/close")

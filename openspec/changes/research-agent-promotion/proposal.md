@@ -57,3 +57,12 @@ Research is already partially present as a top-level specialist, but its autonom
 - Existing implementation authority remains in the four current `todos.json` items: `implement-visible-jasper-research-handoff`, `persist-bounded-session-research-evidence`, `add-session-sources-view-and-renaming`, and `verify-top-level-research-and-session-sources`. OpenSpec tasks sequence and clarify those items without replacing their truthful statuses.
 - The renderer/service has no authority to access secrets, raw authentication material, unsupported local paths, protected workspace material, or the web; it cannot introduce attribution laundering. Research retains report authorship and provenance.
 - No runtime, UI, PDF/rendering, dependency, or application-code implementation is authorized by this planning revision. OCR remains pending and separate.
+
+## Terminology boundary
+
+In this change, selected-workspace research means a safe read within the selected
+repository path/root. It does not imply a visual workspace or repository ownership
+of evidence. Existing `workspace_id` fields remain durable repository binding IDs;
+a session may have none, and artifacts remain owned by their producing
+thread/session. Visual workspace is reserved for presentation/layout state. See
+`openspec/TERMINOLOGY.md`.

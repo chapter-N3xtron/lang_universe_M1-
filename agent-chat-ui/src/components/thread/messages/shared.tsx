@@ -128,6 +128,7 @@ export function CommandBar({
   isLoading,
   onSpeak,
   isSpeaking,
+  orientation = "horizontal",
 }: {
   content: string;
   isHumanMessage?: boolean;
@@ -139,6 +140,7 @@ export function CommandBar({
   isLoading: boolean;
   onSpeak?: () => void;
   isSpeaking?: boolean;
+  orientation?: "horizontal" | "vertical";
 }) {
   if (isHumanMessage && isAiMessage) {
     throw new Error(
@@ -195,7 +197,13 @@ export function CommandBar({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div
+      className={
+        orientation === "vertical"
+          ? "flex flex-col items-center gap-1"
+          : "flex items-center gap-2"
+      }
+    >
       <ContentCopyable
         content={content}
         disabled={isLoading}

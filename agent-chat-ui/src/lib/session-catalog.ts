@@ -5,6 +5,7 @@ import { getApiKey } from "@/lib/api-key";
 export const LOCAL_OWNER_ID = "local-owner-v1";
 
 export type WorkspaceSummary = {
+  /** Durable repository-path binding ID; retained as workspace_id for wire/storage compatibility. */
   workspace_id: string;
   name: string;
   repository_binding_state: "bound" | "unbound" | "unavailable";

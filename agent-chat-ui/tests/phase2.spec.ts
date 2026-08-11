@@ -123,6 +123,87 @@ test.beforeEach(async ({ page }) => installLangGraphMock(page));
 test("basic chat smoke test", async ({ page }) => {
   await submitToJasper(page, "Hello, who are you?");
   await expect(page.getByRole("button", { name: "Read aloud" })).toBeVisible();
+  const answerShell = page.locator("[data-answer-shell]").last();
+  await expect(answerShell).toBeVisible();
+  await expect(answerShell.locator("[data-answer-anchor-top]")).toHaveCount(1);
+  await expect(answerShell.locator("[data-answer-anchor-bottom]")).toHaveCount(
+    1,
+  );
+});
+
+test("newly created threads top-anchor the submitted user turn once", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    const target = window as typeof window & {
+      __conversationScrolls?: Array<{
+        top: number;
+        behavior?: ScrollBehavior;
+      }>;
+    };
+    target.__conversationScrolls = [];
+    HTMLElement.prototype.scrollTo = function (
+      options?: ScrollToOptions | number,
+      y?: number,
+    ) {
+      if (
+        this.matches("[data-conversation-viewport]") &&
+        options !== undefined
+      ) {
+        const value =
+          typeof options === "number"
+            ? { top: y ?? options }
+            : {
+                top: options.top ?? this.scrollTop,
+                behavior: options.behavior,
+              };
+        target.__conversationScrolls?.push(value);
+      }
+      return (originalScrollTo as (...args: unknown[]) => void).call(
+        this,
+        options,
+        y,
+      );
+    };
+  });
+
+  await submitToJasper(page, "Anchor this new turn");
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                __conversationScrolls?: Array<{ behavior?: string }>;
+              }
+            ).__conversationScrolls?.length ?? 0,
+        ),
+      { timeout: 5000 },
+    )
+    .toBeGreaterThan(0);
+  const placement = await page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>(
+      "[data-conversation-viewport]",
+    );
+    const anchor = document.querySelector<HTMLElement>(
+      '[data-conversation-arrival-anchor-top^="assistant:"]',
+    );
+    if (!viewport || !anchor) throw new Error("conversation anchor missing");
+    return {
+      scrolls: (window as typeof window & { __conversationScrolls?: unknown[] })
+        .__conversationScrolls,
+      hasArrivalAnchor: Boolean(anchor),
+      viewportHeight: viewport.clientHeight,
+    };
+  });
+
+  expect(placement.scrolls).toEqual(
+    expect.arrayContaining([expect.objectContaining({ behavior: "auto" })]),
+  );
+  expect(placement.hasArrivalAnchor).toBe(true);
+  expect(placement.viewportHeight).toBeGreaterThan(0);
 });
 
 test("thread persistence", async ({ page }) => {

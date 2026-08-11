@@ -55,7 +55,7 @@ A Jasper-initiated handoff SHALL preserve only the explicit research task, selec
 
 ### Requirement: Read-only Research authority
 
-Research SHALL be limited to approved web and scholarly/reference-library research, explicitly selected page reads, saved-evidence/report reopening, analysis of supported user-provided extracted uploads, and discovery/reads of safe files in the selected workspace. Research SHALL NOT modify files, execute commands, crawl sites, access host files outside the selected workspace, or read secrets, credentials, environment files, private keys, authentication headers, or Git internals. It SHALL NOT receive a generic unrestricted tool surface.
+Research SHALL be limited to approved web and scholarly/reference-library research, explicitly selected page reads, saved-evidence/report reopening, analysis of supported user-provided extracted uploads, and discovery/reads of safe files in the selected repository path. Research SHALL NOT modify files, execute commands, crawl sites, access host files outside the selected workspace, or read secrets, credentials, environment files, private keys, authentication headers, or Git internals. It SHALL NOT receive a generic unrestricted tool surface.
 
 #### Scenario: Research reads approved evidence
 
@@ -84,4 +84,4 @@ Jasper SHALL preserve Research provenance while introducing and receiving Resear
 #### Scenario: Delegated answer includes citations and narration
 
 - **WHEN** Jasper synthesizes a completed Research result
-- **THEN** the visible answer and visual references SHALL preserve usable Research provenance while audio omits raw URLs
+- **THEN** the visible answer and visual references SHALL preserve usable Research provenance while audio omits raw URLsRLs

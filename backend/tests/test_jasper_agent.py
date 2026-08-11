@@ -570,6 +570,32 @@ def test_jasper_handoff_targets_top_level_coding_with_required_context(tmp_path)
     assert command.update["messages"][1].tool_call_id == "coding-handoff-1"
 
 
+def test_jasper_autonomous_handoff_targets_top_level_coding(tmp_path):
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    runtime = MagicMock(
+        tool_call_id="coding-handoff-autonomous",
+        state={
+            "messages": [AIMessage(content="", tool_calls=[])],
+            "workspace": str(tmp_path),
+            "model": "ollama/test-model",
+            "execution_mode": "autonomous",
+            "thread_identity": "autonomous-coding-test",
+        },
+    )
+
+    command = module.transfer_to_coding.func(
+        task="Implement OpenSpec change example", runtime=runtime
+    )
+
+    assert command.graph == command.PARENT
+    assert command.goto == "coding"
+    assert command.update["coding_task"] == "Implement OpenSpec change example"
+    assert command.update["pending_agent"] == ""
+    assert command.update["pending_approval"] is False
+    assert command.update["execution_mode"] == "autonomous"
+
+
 def test_jasper_handoff_requires_explicit_execution_mode(tmp_path):
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
@@ -581,7 +607,7 @@ def test_jasper_handoff_requires_explicit_execution_mode(tmp_path):
         },
     )
 
-    with pytest.raises(ValueError, match="Select read_only or approval"):
+    with pytest.raises(ValueError, match="Select read_only, approval, or autonomous"):
         module.transfer_to_coding.func(task="Inspect", runtime=runtime)
 
 
@@ -597,8 +623,7 @@ def test_jasper_handoff_targets_top_level_research_with_bounded_context(tmp_path
             "thread_identity": "research-thread",
             "user_identity": "test-user",
             "session_evidence": [{"id": "source-one"}],
-            "coding_events": [{"secret": "must-not-transfer"}],
-        },
+                    },
     )
 
     command = module.transfer_to_research.func(task="Research SIFT", runtime=runtime)
@@ -607,7 +632,6 @@ def test_jasper_handoff_targets_top_level_research_with_bounded_context(tmp_path
     assert command.goto == "research"
     assert command.update["research_task"] == "Research SIFT"
     assert command.update["session_evidence"] == [{"id": "source-one"}]
-    assert "coding_events" not in command.update
     assert len(command.update["messages"]) == 2
 
 

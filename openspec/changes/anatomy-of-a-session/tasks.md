@@ -16,3 +16,8 @@
 - [ ] 3.2 Add deterministic coverage for artifact association, recognized research-output forms, Perspective authorship separation, revisitation, revision, and unchanged-Perspective behavior.
 - [ ] 3.3 Add interaction and accessibility coverage confirming that learning, scientific inquiry, decision-tool outputs, social or political perspective formation, and voting considerations support user deliberation without inferring or prescribing a political conclusion. Governance reference: `GOVERNANCE_FRAMEWORK.md`.
 - [ ] 3.4 Run OpenSpec strict validation and the focused implementation, accessibility, and regression checks selected by the eventual affected areas; report any unapproved governance dependency as a blocker.
+
+## 4. Saved-session revisitation contract
+
+- [ ] 4.1 Reconcile session revisitation with the conversation-scroll-anchoring change: after a non-empty hydrated message window mounts, place the viewport at the bottom once; distinguish this from new-arrival top anchoring and removed bottom-lock/stream-following behavior. Governance reference: `GOVERNANCE_FRAMEWORK.md`.
+- [ ] 4.2 Document empty, loading/error, forked/reopened, and reduced-motion outcomes, and keep any future durable per-thread viewport position as a separately approved override rather than a feature of this change. Governance reference: `GOVERNANCE_FRAMEWORK.md`.

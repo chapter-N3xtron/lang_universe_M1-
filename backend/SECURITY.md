@@ -1,13 +1,19 @@
 # Coding-agent security boundary
 
+Terminology: the selected **repository path/root** is the filesystem boundary for a
+run. The persisted `workspace_id` field, where present, identifies its durable
+repository binding and must not be read as a visual UI workspace ID. A session can
+be created without a repository binding; visual workspace layout/preferences are a
+separate browser-local presentation concern.
+
 The Deep Agents coding backend defaults to `read_only`. A request must set
 `execution_mode` to the exact value `approval` before file mutation or shell
 execution is available. Legacy values such as `live` and `async` remain read-only.
 
 ## Read-only mode
 
-- The selected workspace must be an existing absolute directory.
-- `FilesystemBackend` runs in virtual-root mode at that directory.
+- The selected repository path/root must be an existing absolute directory.
+- `FilesystemBackend` runs in virtual-root mode at that repository root.
 - Built-in writes are denied.
 - Reads of `.env`, `.git`, and private-key formats are denied.
 - No shell execution tool is exposed.

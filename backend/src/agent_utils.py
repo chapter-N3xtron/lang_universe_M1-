@@ -23,7 +23,6 @@ class AgentState(TypedDict, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: str
-    coding_events: list[dict]
 
 
 def _msg_role(m: Any) -> str | None:

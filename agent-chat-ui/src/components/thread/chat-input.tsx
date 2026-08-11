@@ -7,6 +7,7 @@ import {
   memo,
   useEffect,
   useRef,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
@@ -165,9 +166,10 @@ function ChatInputImpl({
       ?.label ?? effectiveSelectedModel;
   const selectedModelLocation =
     modelProviders[effectiveSelectedModel] === "ollama" ? "Local" : "Cloud";
-  const [executionMode, setExecutionMode] = useState<"read_only" | "approval">(
-    "approval",
-  );
+  const [executionMode, setExecutionMode] = useState<
+    "read_only" | "approval" | "autonomous"
+  >("approval");
+
   const localModels = sortModelOptions(
     modelOptions.filter((option) => modelProviders[option.value] === "ollama"),
   );
@@ -199,7 +201,36 @@ function ChatInputImpl({
     handlePaste,
   } = useFileUpload();
 
-  const { startRecording, stopRecording, isRecording, isProcessing } = useSTT();
+  const {
+    startRecording,
+    stopRecording,
+    isRecording,
+    isProcessing,
+    isAcquiring,
+  } = useSTT();
+
+  const finishVoiceRecording = useCallback(() => {
+    stopRecording(
+      (text) => setInput((prev) => prev + text),
+      (err) => console.error(err),
+    );
+  }, [stopRecording]);
+
+  const handleVoiceKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key !== " " && event.key !== "Spacebar") return;
+
+      event.preventDefault();
+      if (event.repeat) return;
+
+      if (isRecording || isAcquiring) {
+        finishVoiceRecording();
+      } else {
+        startRecording();
+      }
+    },
+    [finishVoiceRecording, isAcquiring, isRecording, startRecording],
+  );
 
   const handleSubmit = useCallback(
     (e: FormEvent) => {
@@ -233,7 +264,9 @@ function ChatInputImpl({
           streamMode: ["messages"],
           streamSubgraphs: false,
           streamResumable: true,
-          onDisconnect: "cancel",
+          multitaskStrategy: "reject",
+          onDisconnect:
+            executionMode === "autonomous" ? "continue" : "cancel",
           config: isCloudModel(
             effectiveSelectedModel,
             modelProviders,
@@ -324,34 +357,26 @@ function ChatInputImpl({
               <Button
                 type="button"
                 size="icon"
-                variant={isRecording ? "destructive" : "brand"}
+                variant={isRecording || isAcquiring ? "destructive" : "brand"}
                 className="size-9 rounded-md text-white shadow-md transition-all"
                 aria-label={
-                  isRecording
-                    ? "Recording... release to transcribe"
+                  isRecording || isAcquiring
+                    ? "Recording. Press Space again to stop and transcribe, or release the button."
                     : isProcessing
                       ? "Transcribing..."
-                      : "Hold to record"
+                      : "Voice recording. Focus this button and press Space to start, then press Space again to stop. Hold the button to record."
                 }
                 title={
-                  isRecording
-                    ? "Recording... release to transcribe"
-                    : "Hold to record"
+                  isRecording || isAcquiring
+                    ? "Press Space again to stop and transcribe, or release the button"
+                    : "Focus this button and press Space to start recording, then press Space again to stop. Hold to record"
                 }
+                aria-keyshortcuts="Space"
+                onKeyDown={handleVoiceKeyDown}
                 onMouseDown={() => startRecording()}
-                onMouseUp={() =>
-                  stopRecording(
-                    (text) => setInput((prev) => prev + text),
-                    (err) => console.error(err),
-                  )
-                }
+                onMouseUp={finishVoiceRecording}
                 onMouseLeave={() => {
-                  if (isRecording) {
-                    stopRecording(
-                      (text) => setInput((prev) => prev + text),
-                      (err) => console.error(err),
-                    );
-                  }
+                  if (isRecording) finishVoiceRecording();
                 }}
               >
                 {isProcessing ? (
@@ -368,7 +393,12 @@ function ChatInputImpl({
                   variant="destructive"
                   aria-label="Cancel response"
                   title="Cancel response"
-                  onClick={streamActions.stop}
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new Event("conversation:cancel-positioning"),
+                    );
+                    streamActions.stop();
+                  }}
                   className="size-9 rounded-md text-white shadow-md transition-all"
                 >
                   <Square className="size-4 fill-current" />
@@ -590,7 +620,9 @@ function ChatInputImpl({
                 <Select
                   value={executionMode}
                   onValueChange={(value) =>
-                    setExecutionMode(value as "read_only" | "approval")
+                    setExecutionMode(
+                      value as "read_only" | "approval" | "autonomous",
+                    )
                   }
                 >
                   <SelectTrigger
@@ -602,6 +634,9 @@ function ChatInputImpl({
                   <SelectContent>
                     <SelectItem value="read_only">Read only</SelectItem>
                     <SelectItem value="approval">Full repo (review)</SelectItem>
+                    <SelectItem value="autonomous">
+                      Full repo (autonomous)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>

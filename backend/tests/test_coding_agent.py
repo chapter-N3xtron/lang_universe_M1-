@@ -54,17 +54,6 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
         thread_identity="thread-7", workspace=tmp_path
     )
     assert result["coding_status"] == "completed"
-    assert [event["status"] for event in result["coding_events"]] == [
-        "running",
-        "running",
-        "completed",
-        "completed",
-    ]
-    assert all(event["type"] == "coding_event" for event in result["coding_events"])
-    assert result["coding_events"][1]["data"] == {
-        "name": "read_file",
-        "tool_call_id": "call-1",
-    }
 
 
 def test_deep_agents_node_does_not_complete_without_final_assistant_message(
@@ -98,7 +87,6 @@ def test_deep_agents_node_does_not_complete_without_final_assistant_message(
 
     assert result["coding_status"] == "error"
     assert "missing_final_result" in result["messages"][0].content
-    assert result["coding_events"][-1]["data"]["code"] == "missing_final_result"
 
 
 def test_deep_agents_node_rejects_relative_workspace(monkeypatch):
@@ -118,8 +106,6 @@ def test_deep_agents_node_rejects_relative_workspace(monkeypatch):
 
     build.assert_not_called()
     assert result["coding_status"] == "error"
-    assert result["coding_events"][-1]["kind"] == "error"
-    assert result["coding_events"][-1]["data"]["code"] == "invalid_workspace"
     assert "relative/path" not in result["messages"][0].content
 
 
@@ -140,7 +126,6 @@ def test_deep_agents_node_classifies_missing_workspace(monkeypatch, tmp_path):
 
     build.assert_not_called()
     assert result["coding_status"] == "error"
-    assert result["coding_events"][-1]["data"]["code"] == "invalid_workspace"
 
 
 def test_deep_agents_node_sanitizes_agent_failure(monkeypatch, tmp_path):
@@ -168,7 +153,6 @@ def test_deep_agents_node_sanitizes_agent_failure(monkeypatch, tmp_path):
     )
 
     assert result["coding_status"] == "error"
-    assert result["coding_events"][-1]["data"]["code"] == "agent_failure"
     assert "sensitive-provider-detail" not in result["messages"][0].content
 
 
@@ -290,6 +274,15 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
     }
     assert captured["agent"]["permissions"] is None
     assert captured["agent"]["skills"] == ["/.agents/skills/"]
+
+    coding_agent._build_deep_agent(
+        tmp_path.resolve(),
+        "ollama/qwen3.5:27b",
+        execution_mode="autonomous",
+    )
+
+    assert captured["agent"]["permissions"] is None
+    assert captured["agent"]["interrupt_on"] is None
 
 
 def test_coding_graph_uses_deep_agents_node():

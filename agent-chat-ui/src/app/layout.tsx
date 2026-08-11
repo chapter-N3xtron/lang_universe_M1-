@@ -5,6 +5,7 @@ import React from "react";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "next-themes";
 import { AppQueryClientProvider } from "@/providers/query-client";
+import { ManualScrollObservationActivation } from "@/components/manual-scroll-observation-activation";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -37,6 +38,7 @@ export default function RootLayout({
               disableTransitionOnChange
             >
               {children}
+              <ManualScrollObservationActivation />
             </ThemeProvider>
           </AppQueryClientProvider>
         </NuqsAdapter>

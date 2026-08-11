@@ -32,7 +32,6 @@ class State(TypedDict):
     user_identity: str
     coding_session_id: str
     coding_status: str
-    coding_events: list[dict]
     coding_task: str
     jasper_structured_response: dict
     visual_artifacts: list[dict]
@@ -66,11 +65,25 @@ def _load_todos() -> list[dict]:
         return []
 
 
-def session_opening_node(_state: State) -> dict:
-    """Return the canonical opening without invoking a model."""
+def session_opening_node(state: State) -> dict:
+    """Return the canonical opening without invoking a model.
 
+    The opening is a durable state transition, so make the node idempotent as
+    well as guarding it in the supervisor. This matters if two open/reopen
+    requests race before ``session_opened`` is visible in a checkpoint.
+    """
+
+    existing_messages = state.get("messages", [])
+    already_greeted = any(
+        message.get("role") == "assistant"
+        and message.get("content") == STANDARD_SESSION_GREETING
+        for message in existing_messages
+        if isinstance(message, dict)
+    )
     return {
-        "messages": [{"role": "assistant", "content": STANDARD_SESSION_GREETING}],
+        "messages": []
+        if already_greeted
+        else [{"role": "assistant", "content": STANDARD_SESSION_GREETING}],
         "active_agent": "jasper",
         "session_opened": True,
         "session_opening_version": "2026-08-03.1",
@@ -199,6 +212,27 @@ def supervisor_node(
         decision = "jasper"
         node_name = "jasper"
 
+    if state.get("execution_mode") == "autonomous":
+        return Command(
+            goto=node_name,
+            update={
+                "active_agent": decision,
+                "pending_agent": "",
+                "pending_approval": False,
+                "handoff_history": [
+                    {
+                        "from": "supervisor",
+                        "to": decision,
+                        "reason": "Autonomous execution mode",
+                    }
+                ],
+                "decision_log": [
+                    {"decision": f"route_to_{decision}", "reason": reason}
+                ],
+                "todos": todos_data,
+            },
+        )
+
     return Command(
         goto="approval",
         update={
@@ -239,8 +273,19 @@ def approval_node(
             "action_requests": [
                 {
                     "name": f"route_to_{agent}",
-                    "args": {"agent": agent},
-                    "description": f"Route this conversation to the {agent} agent?",
+                    "args": {
+                        "agent": agent,
+                        **(
+                            {"task": state.get("coding_task", "")}
+                            if agent == "coding"
+                            else {}
+                        ),
+                    },
+                    "description": (
+                        f"Allow Coding to begin: {state.get('coding_task', '')}"
+                        if agent == "coding"
+                        else f"Route this conversation to the {agent} agent?"
+                    ),
                 }
             ],
             "review_configs": [
@@ -252,7 +297,11 @@ def approval_node(
         }
     )
     if not _is_approved(approved):
-        return {"pending_approval": False, "pending_agent": ""}
+        return {
+            "pending_approval": False,
+            "pending_agent": "",
+            "coding_task": "" if agent == "coding" else state.get("coding_task", ""),
+        }
     node_name = AGENT_ROUTING.get(agent, "jasper")
     return Command(
         goto=node_name,
@@ -341,7 +390,11 @@ def create_chat_ui():
         handed_off_task = (state.get("coding_task") or "").strip()
         task = handed_off_task or get_user_query(state.get("messages", []))
         execution_mode = state.get("execution_mode") or state.get("mode")
-        if handed_off_task and execution_mode not in {"read_only", "approval"}:
+        if handed_off_task and execution_mode not in {
+            "read_only",
+            "approval",
+            "autonomous",
+        }:
             result = {
                 "messages": [
                     {
@@ -353,7 +406,6 @@ def create_chat_ui():
                     }
                 ],
                 "coding_status": "error",
-                "coding_events": [],
             }
         else:
             task_messages = [HumanMessage(content=task)]
@@ -407,7 +459,6 @@ def create_chat_ui():
             "coding_task": "",
             "coding_session_id": result.get("coding_session_id", ""),
             "coding_status": coding_status,
-            "coding_events": result.get("coding_events", []),
         }
         return Command(goto="jasper", update=update)
 

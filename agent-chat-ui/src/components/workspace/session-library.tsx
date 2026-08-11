@@ -43,7 +43,8 @@ import { createClient } from "@/providers/client";
 const SESSION_FIELDS: Field[] = [
   { name: "created_at", label: "Created", inputType: "datetime-local" },
   { name: "last_activity_at", label: "Last activity", inputType: "datetime-local" },
-  { name: "workspace", label: "Workspace" },
+  // Wire field remains `workspace`; the UI label describes its repository binding.
+  { name: "workspace", label: "Repository" },
   { name: "agent", label: "Agent" },
   {
     name: "status",

@@ -32,3 +32,11 @@ This change updates the desktop/laptop UI implementation and focused tests in ad
 ## Open decisions
 
 Before Jasper board editing is implemented, design must decide the exact edit request/tool schema; the durable representation of nodes, edges, layout, provenance, and revisions; revision numbering plus stale-update/conflict handling; the allowed node/edge mutation scope; the authorization boundary between user-directed edits and Jasper authority; whether edits mutate in place or create revision history; and the board-selection/session identity requirements, including behavior when identity is missing, stale, or ambiguous. These remain unresolved decisions, not current implementation requirements.
+
+## Terminology boundary
+
+This change uses **visual workspace** only for the Chat/Split/Visual presentation
+surfaces and browser-local layout preferences. Repository selection is a separate
+repository-path binding concern. Existing `workspace_id` fields and persisted keys
+remain unchanged and mean the durable repository binding ID, not a visual workspace
+ID. See `openspec/TERMINOLOGY.md`.

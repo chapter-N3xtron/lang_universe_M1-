@@ -131,6 +131,7 @@ export default function useInterruptedActions({
               decisions: [decision],
             },
           },
+          multitaskStrategy: "reject",
         },
       );
 
@@ -187,6 +188,7 @@ export default function useInterruptedActions({
           command: {
             goto: END,
           },
+          multitaskStrategy: "reject",
         },
       );
 

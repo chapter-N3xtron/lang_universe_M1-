@@ -84,6 +84,8 @@ class SessionQuery(StrictModel):
 
 
 class WorkspaceSummary(StrictModel):
+    # Compatibility field: this is the durable repository-path binding ID, not a
+    # visual UI workspace identifier. Do not rename the wire/storage field here.
     workspace_id: str
     name: str
     repository_binding_state: Literal["bound", "unbound", "unavailable"]

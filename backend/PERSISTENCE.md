@@ -1,5 +1,12 @@
 # Deep Agents persistence
 
+Terminology: `workspace_id` is the durable repository-path binding ID used by
+existing Store/database/API records; it is not a visual UI workspace ID. A session
+may exist without a repository binding. Artifacts remain associated with their
+producing thread/session, not with a repository binding. LangGraph runtime,
+checkpoints, and Store are persistence infrastructure, not a workspace entity. See
+`openspec/TERMINOLOGY.md` for the compatibility rule.
+
 The LangGraph Agent Server checkpoint for each Jasper thread is the source of truth
 for that thread's transcript, graph position, tool results, and resumable execution.
 Coder runs as a native nested LangGraph subgraph and inherits that checkpoint context,
@@ -21,8 +28,8 @@ checkpoint execution state.
 Forks import sanitized checkpoint values into a new Agent Server thread. A fork is
 blocked while the source has pending work and never inherits pending approval or
 unfinished specialist execution. Completed transcript values, artifact and evidence
-references, and workspace links are inherited through existing Agent Server and Store
-APIs.
+references, and repository-binding links are inherited through existing Agent Server
+and Store APIs. Artifact ownership remains with the producing thread/session.
 
 The former nested Coder checkpoint database is legacy read-only data. Its opaque
 SHA-256 session ID remains available only for scoped export compatibility through:

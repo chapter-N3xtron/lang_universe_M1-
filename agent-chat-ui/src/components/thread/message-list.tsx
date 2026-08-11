@@ -1,27 +1,31 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { Message, Checkpoint } from "@langchain/langgraph-sdk";
 import { useStreamContext } from "@/providers/Stream";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import { useTTS } from "@/hooks/useTTS";
 import type { ConceptMapArtifact } from "@/lib/visual/jasper-response.generated";
+import { getContentString } from "./utils";
 
 interface MessageListProps {
   isLoading: boolean;
-  firstTokenReceived: boolean;
+  threadId: string | null;
   selectedVoice: string;
   onRegenerateStart: () => void;
+  viewportRef: RefObject<HTMLDivElement | null>;
 }
 
 const MESSAGE_WINDOW_SIZE = 80;
 
 function MessageListImpl({
   isLoading,
-  firstTokenReceived,
+  threadId,
   selectedVoice,
   onRegenerateStart,
+  viewportRef,
 }: MessageListProps) {
   useEffect(() => {
     const target = window as typeof window & { __messageListRenders?: number };
@@ -49,13 +53,32 @@ function MessageListImpl({
       checkpoint: Checkpoint | null | undefined,
       values: Record<string, unknown> | undefined,
     ) => {
+      const executionMode = values?.execution_mode;
       streamRef.current.submit(
-        { messages: [newMessage] },
+        {
+          messages: [newMessage],
+          ...(values?.context && typeof values.context === "object"
+            ? { context: values.context as Record<string, unknown> }
+            : {}),
+          ...(typeof values?.target_agent === "string"
+            ? { target_agent: values.target_agent }
+            : {}),
+          ...(typeof values?.workspace === "string"
+            ? { workspace: values.workspace }
+            : {}),
+          ...(typeof values?.model === "string" ? { model: values.model } : {}),
+          ...(executionMode === "read_only" ||
+          executionMode === "approval" ||
+          executionMode === "autonomous"
+            ? { execution_mode: executionMode }
+            : {}),
+        },
         {
           checkpoint,
           streamMode: ["messages"],
           streamSubgraphs: false,
           streamResumable: true,
+          multitaskStrategy: "reject",
           onDisconnect: "cancel",
           optimisticValues: (previous) => {
             if (!values) return previous;
@@ -85,6 +108,7 @@ function MessageListImpl({
         streamMode: ["messages"],
         streamSubgraphs: false,
         streamResumable: true,
+        multitaskStrategy: "reject",
         onDisconnect: "cancel",
       });
     },
@@ -195,6 +219,224 @@ function MessageListImpl({
   }
   const visibleMessages = renderableMessages.slice(windowStart);
 
+  const lastMessage = messages.at(-1);
+  const lastHuman = [...messages]
+    .reverse()
+    .find((message) => message.type === "human");
+  const arrivalAnchorKey = lastMessage
+    ? `${lastMessage.type}:${String(lastMessage.id ?? messages.length - 1)}`
+    : undefined;
+  const assistantAnchorKey = String(
+    lastHuman?.id ?? lastMessage?.id ?? messages.length - 1,
+  );
+  // Each newly inserted turn gets one placement after layout settles. The
+  // key is tied to the arriving message so assistant growth does not create
+  // another scroll owner.
+  const positioningKey =
+    lastMessage && getContentString(lastMessage.content).trim()
+      ? lastMessage.type === "ai"
+        ? `assistant:${assistantAnchorKey}`
+        : arrivalAnchorKey
+      : undefined;
+  const positioningCancelledRef = useRef(false);
+  const programmaticScrollUntilRef = useRef(0);
+  const previousThreadIdRef = useRef(threadId);
+  const reopenPlacementThreadRef = useRef<string | null>(null);
+  const reopenPlacementPendingRef = useRef(false);
+  const hydratedThreadRef = useRef<string | null>(null);
+  const createdThreadCandidateRef = useRef(false);
+
+  useEffect(() => {
+    // Hydrated history is top-anchored once, but a later user turn starts a
+    // new arrival cycle and must allow exactly one assistant placement.
+    if (
+      lastMessage?.type === "human" &&
+      hydratedThreadRef.current === threadId
+    ) {
+      hydratedThreadRef.current = null;
+    }
+  }, [lastMessage?.type, threadId]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const cancel = () => {
+      if (performance.now() < programmaticScrollUntilRef.current) return;
+      positioningCancelledRef.current = true;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        [
+          "ArrowUp",
+          "ArrowDown",
+          "PageUp",
+          "PageDown",
+          "Home",
+          "End",
+          " ",
+        ].includes(event.key)
+      ) {
+        cancel();
+      }
+    };
+    const onCancel = () => cancel();
+    viewport.addEventListener("wheel", cancel, { passive: true });
+    viewport.addEventListener("touchstart", cancel, { passive: true });
+    window.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("selectionchange", cancel, { passive: true });
+    window.addEventListener("conversation:cancel-positioning", onCancel);
+    return () => {
+      viewport.removeEventListener("wheel", cancel);
+      viewport.removeEventListener("touchstart", cancel);
+      window.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("selectionchange", cancel);
+      window.removeEventListener("conversation:cancel-positioning", onCancel);
+    };
+  }, [viewportRef]);
+
+  useEffect(() => {
+    const previousThreadId = previousThreadIdRef.current;
+    const hasThreadIdInUrl =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("threadId");
+    if (!threadId && !hasThreadIdInUrl) {
+      createdThreadCandidateRef.current = true;
+    }
+    const isReopenedCreatedThread =
+      createdThreadCandidateRef.current &&
+      previousThreadId === null &&
+      threadId !== null &&
+      messages.length > 0;
+    if (!threadId || messages.length === 0) {
+      previousThreadIdRef.current = threadId;
+      return;
+    }
+
+    if (isReopenedCreatedThread) {
+      // A newly created thread receives its server id alongside the optimistic
+      // message. It is an arrival, not hydrated history.
+      reopenPlacementThreadRef.current = threadId;
+      reopenPlacementPendingRef.current = false;
+      previousThreadIdRef.current = threadId;
+      return;
+    }
+
+    if (reopenPlacementThreadRef.current === threadId) {
+      previousThreadIdRef.current = threadId;
+      return;
+    }
+
+    reopenPlacementThreadRef.current = threadId;
+    hydratedThreadRef.current = threadId;
+    reopenPlacementPendingRef.current = true;
+    previousThreadIdRef.current = threadId;
+    let cancelled = false;
+    let frame = 0;
+    let stableFrames = 0;
+    let previousHeight = -1;
+    const placeLatestAtTop = () => {
+      const latestMessages =
+        viewportRef.current?.querySelectorAll<HTMLElement>("[data-message-id]");
+      if (cancelled) return;
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      if (!latestMessages?.length) {
+        window.requestAnimationFrame(placeLatestAtTop);
+        return;
+      }
+      const height = viewport.scrollHeight;
+      stableFrames = height === previousHeight ? stableFrames + 1 : 0;
+      previousHeight = height;
+      if (stableFrames >= 2 || frame >= 12) {
+        programmaticScrollUntilRef.current = performance.now() + 100;
+        viewport.scrollTo({
+          top: Math.max(
+            0,
+            viewport.scrollTop +
+              latestMessages[latestMessages.length - 1].getBoundingClientRect()
+                .top -
+              viewport.getBoundingClientRect().top -
+              32,
+          ),
+          behavior: "auto",
+        });
+        reopenPlacementPendingRef.current = false;
+        return;
+      }
+      frame += 1;
+      window.requestAnimationFrame(placeLatestAtTop);
+    };
+    const frameId = window.requestAnimationFrame(placeLatestAtTop);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [messages.length, threadId, viewportRef]);
+
+  useEffect(() => {
+    if (
+      !positioningKey ||
+      reopenPlacementPendingRef.current ||
+      hydratedThreadRef.current === threadId
+    )
+      return;
+    positioningCancelledRef.current = false;
+    let cancelled = false;
+    let frame = 0;
+    let stableFrames = 0;
+    let previousRect: DOMRect | undefined;
+    let rafId: number | undefined;
+
+    const positionOnce = () => {
+      if (cancelled || positioningCancelledRef.current) return;
+      const viewport = viewportRef.current;
+      const topAnchor = viewport?.querySelector<HTMLElement>(
+        `[data-conversation-arrival-anchor-top="${CSS.escape(positioningKey)}"]`,
+      );
+      if (!viewport || !topAnchor) return;
+      const top = Math.max(
+        0,
+        viewport.scrollTop +
+          topAnchor.getBoundingClientRect().top -
+          viewport.getBoundingClientRect().top -
+          32,
+      );
+      // Use one immediate placement so later answer growth and stream updates
+      // never create a competing scroll owner.
+      // Immediate placement is also the reduced-motion-safe behavior.
+      programmaticScrollUntilRef.current = performance.now() + 100;
+      viewport.scrollTo({ top, behavior: "auto" });
+    };
+
+    const settle = () => {
+      if (cancelled || positioningCancelledRef.current) return;
+      const viewport = viewportRef.current;
+      const topAnchor = viewport?.querySelector<HTMLElement>(
+        `[data-conversation-arrival-anchor-top="${CSS.escape(positioningKey)}"]`,
+      );
+      if (!viewport || !topAnchor) return;
+      const rect = topAnchor.getBoundingClientRect();
+      const stable =
+        previousRect &&
+        Math.abs(rect.top - previousRect.top) < 0.5 &&
+        Math.abs(rect.height - previousRect.height) < 0.5;
+      stableFrames = stable ? stableFrames + 1 : 0;
+      previousRect = rect;
+      if (stableFrames >= 2 || frame >= 12) {
+        positionOnce();
+        return;
+      }
+      frame += 1;
+      rafId = window.requestAnimationFrame(settle);
+    };
+
+    rafId = window.requestAnimationFrame(settle);
+    return () => {
+      cancelled = true;
+      if (rafId !== undefined) window.cancelAnimationFrame(rafId);
+    };
+  }, [positioningKey, threadId, viewportRef]);
+
   return (
     <>
       {windowStart > 0 && (
@@ -226,10 +468,21 @@ function MessageListImpl({
             branchOptions={metadata?.branchOptions}
             onSelectBranch={selectBranch}
             onSubmitEdit={submitEdit}
+            arrivalAnchorKey={
+              absoluteIndex === renderableMessages.length - 1
+                ? arrivalAnchorKey
+                : undefined
+            }
           />
         ) : (
           <AssistantMessage
-            key={`${message.id || message.type}-${absoluteIndex}`}
+            key={String(
+              [...renderableMessages.slice(0, absoluteIndex)]
+                .reverse()
+                .find((item) => item.type === "human")?.id ??
+                message.id ??
+                `assistant-${absoluteIndex}`,
+            )}
             message={message}
             isLoading={rowIsLoading}
             handleRegenerate={handleRegenerate}
@@ -245,6 +498,18 @@ function MessageListImpl({
             hasCustomComponent={
               !!message.id && customComponentMessageIds.has(message.id)
             }
+            arrivalAnchorKey={
+              absoluteIndex === renderableMessages.length - 1
+                ? assistantAnchorKey
+                : undefined
+            }
+            anchorKey={String(
+              [...renderableMessages.slice(0, absoluteIndex)]
+                .reverse()
+                .find((item) => item.type === "human")?.id ??
+                message.id ??
+                `assistant-${absoluteIndex}`,
+            )}
           />
         );
       })}
@@ -262,9 +527,24 @@ function MessageListImpl({
           onSelectBranch={selectBranch}
           threadInterrupt={stream.interrupt}
           hasCustomComponent={false}
+          anchorKey="interrupt"
         />
       )}
-      {isLoading && !firstTokenReceived && <AssistantMessageLoading />}
+      {isLoading && lastMessage?.type !== "ai" && (
+        <AssistantMessageLoading
+          anchorKey={String(
+            [...renderableMessages]
+              .reverse()
+              .find((item) => item.type === "human")?.id ?? "pending",
+          )}
+        />
+      )}
+      {renderableMessages.length > 0 && (
+        <div
+          aria-hidden="true"
+          style={{ height: "100vh", flexShrink: 0 }}
+        />
+      )}
     </>
   );
 }

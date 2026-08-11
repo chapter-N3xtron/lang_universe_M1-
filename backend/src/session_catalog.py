@@ -247,6 +247,11 @@ def _owner_and_thread(
 
 
 def _workspace_record(workspace: str | None, owner_id: str) -> dict[str, Any] | None:
+    """Build the compatibility-shaped record for one repository-path binding.
+
+    ``workspace_id`` below is a durable repository binding ID, not a visual UI
+    workspace ID. A missing path intentionally produces no binding record.
+    """
     if not workspace:
         return None
     normalized = str(Path(workspace).expanduser().resolve(strict=False))

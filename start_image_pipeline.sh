@@ -267,7 +267,7 @@ start_langgraph() {
   _ensure_dirs
   echo "  Starting LangGraph (graph server)..."
   cd "$ROOT/backend"
-  nohup ./.venv/bin/langgraph up --port "$LANGGRAPH_PORT" --wait \
+  nohup ./.venv/bin/langgraph up --image "jasper-langgraph:current" --port "$LANGGRAPH_PORT" --wait \
     --docker-compose "$ROOT/backend/docker-compose.override.yml" \
     >> "$LOGDIR/langgraph.log" 2>&1 &
   echo $! > "$PIDDIR/langgraph.pid"
@@ -392,12 +392,12 @@ start_frontend() {
   _ensure_dirs
   cd "$ROOT/agent-chat-ui"
 
-  # Auto-rebuild: rebuild the production bundle if .next/BUILD_ID is missing
-  # or any UI source/config file is newer than the last build. This lets the
-  # user (or their coding agent) edit UI code and have the next launch pick up
-  # the changes automatically — no manual `pnpm build` step required.
+  # Auto-rebuild: rebuild the production bundle if required build artifacts
+  # are missing or any UI source/config file is newer than the last build. This
+  # lets the user (or their coding agent) edit UI code and have the next launch
+  # pick up the changes automatically — no manual `pnpm build` step required.
   local needs_build=0
-  if [ ! -f ".next/BUILD_ID" ]; then
+  if [ ! -f ".next/BUILD_ID" ] || [ ! -f ".next/prerender-manifest.json" ]; then
     needs_build=1
   else
     local build_mtime newest_src input_mtime

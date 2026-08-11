@@ -48,7 +48,7 @@ The system SHALL save each completed or bounded-partial in-depth report as an au
 
 ### Requirement: Rendered representation integrity and renderer boundary
 
-Any rendered representation of a canonical report SHALL preserve its content, citations, limitations, immutable evidence references/IDs, retrieval status, provenance, and source metadata. Presentation style SHALL NOT alter substance. An eventual Research-owned renderer/service SHALL consume saved canonical report/evidence references only; SHALL retain Research authorship/provenance; SHALL NOT access secrets, raw authentication material, unsupported local paths, protected workspace material, or the web; and SHALL NOT introduce attribution laundering. Renderer implementation, templates, output formats, printable/exportable PDF, dependencies, visual identity, branding, artifact-storage lifecycle, and export/open/download authorization are open decisions.
+Any rendered representation of a canonical report SHALL preserve its content, citations, limitations, immutable evidence references/IDs, retrieval status, provenance, and source metadata. Presentation style SHALL NOT alter substance. An eventual Research-owned renderer/service SHALL consume saved canonical report/evidence references only; SHALL retain Research authorship/provenance; SHALL NOT access secrets, raw authentication material, unsupported local paths, protected repository material, or the web; and SHALL NOT introduce attribution laundering. Renderer implementation, templates, output formats, printable/exportable PDF, dependencies, visual identity, branding, artifact-storage lifecycle, and export/open/download authorization are open decisions.
 
 #### Scenario: A representation is requested
 
@@ -57,7 +57,7 @@ Any rendered representation of a canonical report SHALL preserve its content, ci
 
 #### Scenario: A renderer requests prohibited input or access
 
-- **WHEN** the renderer/service is asked to access a secret, raw auth material, unsupported path, protected workspace material, or the web
+- **WHEN** the renderer/service is asked to access a secret, raw auth material, unsupported path, protected repository material, or the web
 - **THEN** the system SHALL deny the request without incorporating protected content into the representation, logs, or durable artifacts
 
 ### Requirement: Deduplication, version preservation, reuse, and forks

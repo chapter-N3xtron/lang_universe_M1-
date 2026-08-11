@@ -93,7 +93,6 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: str
-    coding_events: list[dict]
     coding_task: str
     research_task: str
     session_evidence: list[dict]
@@ -106,14 +105,16 @@ def _specialists(_model) -> list[CompiledSubAgent]:
 
 
 @tool
-def transfer_to_coding(task: str, runtime: ToolRuntime) -> Command[Literal["coding"]]:
+def transfer_to_coding(
+    task: str, runtime: ToolRuntime
+) -> Command[Literal["coding"]]:
     """Hand a repository task to the top-level Coding specialist."""
 
     state = runtime.state
     execution_mode = state.get("execution_mode")
-    if execution_mode not in {"read_only", "approval"}:
+    if execution_mode not in {"read_only", "approval", "autonomous"}:
         raise ValueError(
-            "Select read_only or approval mode before handing work to Coding."
+            "Select read_only, approval, or autonomous before handing work to Coding."
         )
     last_ai_message = next(
         message
@@ -132,6 +133,8 @@ def transfer_to_coding(task: str, runtime: ToolRuntime) -> Command[Literal["codi
             "model": state.get("model"),
             "execution_mode": execution_mode,
             "thread_identity": state.get("thread_identity", ""),
+            "pending_agent": "",
+            "pending_approval": False,
             "messages": [last_ai_message, transfer_message],
         },
         graph=Command.PARENT,

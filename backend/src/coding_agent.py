@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import operator
 import os
 from collections import OrderedDict
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.config import get_stream_writer
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 
-from src.coding_events import CodingEventEmitter
 from src.coding_persistence import coding_session_id, export_coding_session
 from src.llm import get_coding_llm
 
@@ -29,7 +28,6 @@ class CodingAgentState(TypedDict, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: str
-    coding_events: list[dict[str, Any]]
 
 
 class InvalidWorkspaceError(ValueError):
@@ -50,6 +48,8 @@ _SENSITIVE_VIRTUAL_PATHS = [
     "/**/*.p12",
     "/**/*.pfx",
 ]
+logger = logging.getLogger(__name__)
+
 _SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str], Any] = OrderedDict()
 _SESSION_AGENT_CACHE_SIZE = 8
 _CODING_TOOL_PATHS = ("/opt/coding-tools/node/bin", "/opt/coding-tools/pnpm")
@@ -89,13 +89,6 @@ def _validated_workspace(raw_workspace: str | None) -> Path:
     return resolved
 
 
-def _event_writer():
-    try:
-        return get_stream_writer()
-    except RuntimeError:
-        return lambda _event: None
-
-
 def _message_type(message: Any) -> str:
     if isinstance(message, dict):
         return str(message.get("role") or message.get("type") or "")
@@ -110,42 +103,6 @@ def _tool_calls(message: Any) -> list[dict[str, Any]]:
     return calls if isinstance(calls, list) else []
 
 
-def _coding_events(messages: list[Any]) -> list[dict[str, Any]]:
-    """Create bounded, provider-neutral event summaries from agent messages."""
-    events: list[dict[str, Any]] = []
-    for message in messages:
-        for call in _tool_calls(message):
-            events.append(
-                {
-                    "type": "tool_call",
-                    "name": str(call.get("name", "unknown")),
-                    "id": str(call.get("id", "")),
-                }
-            )
-        if isinstance(message, ToolMessage) or _message_type(message) == "tool":
-            tool_call_id = (
-                message.get("tool_call_id", "")
-                if isinstance(message, dict)
-                else getattr(message, "tool_call_id", "")
-            )
-            events.append({"type": "tool_result", "id": str(tool_call_id)})
-    return events
-
-
-def _export_message(message: Any) -> dict[str, Any]:
-    if isinstance(message, dict):
-        return {
-            "type": message.get("type") or message.get("role") or "unknown",
-            "content": message.get("content", ""),
-            "tool_calls": message.get("tool_calls", []),
-        }
-    return {
-        "type": getattr(message, "type", type(message).__name__),
-        "content": getattr(message, "content", ""),
-        "tool_calls": getattr(message, "tool_calls", []),
-    }
-
-
 def _deep_agent_components():
     # Lazy imports let the rollback backend and unit tests start without loading
     # the comparatively large Deep Agents dependency tree.
@@ -156,7 +113,9 @@ def _deep_agent_components():
 
 
 def _execution_mode(raw_mode: str | None) -> str:
-    return "approval" if raw_mode == "approval" else "read_only"
+    if raw_mode in {"approval", "autonomous"}:
+        return raw_mode
+    return "read_only"
 
 
 def _build_deep_agent(
@@ -171,22 +130,28 @@ def _build_deep_agent(
         local_shell_backend_type,
         create_deep_agent,
     ) = _deep_agent_components()
-    approval_mode = _execution_mode(execution_mode) == "approval"
+    mode = _execution_mode(execution_mode)
+    approval_mode = mode == "approval"
+    autonomous_mode = mode == "autonomous"
     permissions = [
         permission_type(
             operations=["read", "write"],
             paths=_SENSITIVE_VIRTUAL_PATHS,
             mode="deny",
         ),
-        permission_type(operations=["read"], paths=["/**"], mode="allow"),
-        permission_type(
-            operations=["write"],
-            paths=["/**"],
-            mode="allow" if approval_mode else "deny",
-        ),
     ]
-    backend = (
-        local_shell_backend_type(
+    permissions.extend(
+        [
+            permission_type(operations=["read"], paths=["/**"], mode="allow"),
+            permission_type(
+                operations=["write"],
+                paths=["/**"],
+                mode="allow" if approval_mode or autonomous_mode else "deny",
+            ),
+        ]
+    )
+    if approval_mode or autonomous_mode:
+        backend = local_shell_backend_type(
             root_dir=workspace,
             virtual_mode=True,
             timeout=120,
@@ -200,19 +165,26 @@ def _build_deep_agent(
             },
             inherit_env=True,
         )
-        if approval_mode
-        else filesystem_backend_type(root_dir=workspace, virtual_mode=True)
-    )
+    else:
+        backend = filesystem_backend_type(root_dir=workspace, virtual_mode=True)
     interrupt_on = _LOCAL_APPROVAL_INTERRUPT_ON if approval_mode else None
-    mutation_prompt = (
-        "Use the built-in repository file tools and execute tool for coding work. "
-        "Every write, edit, deletion, or shell command pauses for human review. "
-        "Commands start in the selected repository. Never read or modify secrets "
-        "or edit .git files directly. Use normal Git commands for repository "
-        "management; never force-push or delete remote history."
-        if approval_mode
-        else "This deployment is read-only: never write, edit, delete, or execute files."
-    )
+    if approval_mode:
+        mutation_prompt = (
+            "Use the built-in repository file tools and execute tool for coding work. "
+            "Every write, edit, deletion, or shell command pauses for human review. "
+            "Commands start in the selected repository. Never read or modify secrets "
+            "or edit .git files directly. Use normal Git commands for repository "
+            "management; never force-push or delete remote history."
+        )
+    elif autonomous_mode:
+        mutation_prompt = (
+            "Work autonomously in the selected repository using the native Deep Agents "
+            "filesystem and shell tools. Follow repository instructions and validate "
+            "your work with the available project commands. Never read or modify secrets "
+            "or edit .git files directly."
+        )
+    else:
+        mutation_prompt = "This deployment is read-only: never write, edit, delete, or execute files."
     memory = ["/AGENTS.md"] if (workspace / "AGENTS.md").is_file() else None
     skills = (
         ["/.agents/skills/"] if (workspace / ".agents" / "skills").is_dir() else None
@@ -229,13 +201,17 @@ def _build_deep_agent(
         memory=memory,
         skills=skills,
         backend=backend,
-        permissions=None if approval_mode else permissions,
+        permissions=None if approval_mode or autonomous_mode else permissions,
         interrupt_on=interrupt_on,
         checkpointer=checkpointer,
     )
 
 
-async def _session_agent(workspace: Path, model_name: str | None, execution_mode: str):
+async def _session_agent(
+    workspace: Path,
+    model_name: str | None,
+    execution_mode: str,
+):
     mode = _execution_mode(execution_mode)
     key = (str(workspace), model_name or "", mode)
     if key in _SESSION_AGENT_CACHE:
@@ -308,41 +284,30 @@ async def _invoke_session(
     app: Any,
     input_messages: list[Any],
     config: RunnableConfig,
-    *,
-    emitter: CodingEventEmitter,
 ) -> dict[str, Any]:
-    return await _stream_session(
-        app, {"messages": input_messages}, config, emitter
-    )
+    return await _stream_session(app, {"messages": input_messages}, config)
 
 
 async def _stream_session(
     app: Any,
     payload: Any,
     config: RunnableConfig,
-    emitter: CodingEventEmitter,
 ) -> dict[str, Any]:
-    """Stream the native nested graph and let its interrupts propagate."""
+    """Stream standard LangGraph values and let interrupts propagate."""
     if not hasattr(app, "astream"):
         return await app.ainvoke(payload, config=config)
 
-    async for event in app.astream(
-        payload,
-        config=config,
-        stream_mode=["messages", "updates", "values"],
-        subgraphs=True,
-    ):
-        emitter.consume(event)
-    return dict(emitter.latest_values)
+    latest_values: dict[str, Any] = {}
+    async for values in app.astream(payload, config=config, stream_mode="values"):
+        if isinstance(values, dict):
+            latest_values = values
+    return latest_values
 
 
 async def deep_agents_coding_node(
     state: CodingAgentState, config: RunnableConfig = None
 ) -> dict[str, Any]:
-    writer = _event_writer()
     session_id = ""
-    error_type = None
-    emitter = CodingEventEmitter(writer, session_id)
     try:
         workspace = _validated_workspace(state.get("workspace"))
         execution_mode = _execution_mode(state.get("execution_mode"))
@@ -355,28 +320,17 @@ async def deep_agents_coding_node(
             workspace=workspace,
             user_identity=str(state.get("user_identity") or "anonymous"),
         )
-        emitter = CodingEventEmitter(writer, session_id)
-        emitter.emit("status", "running")
-        app = await _session_agent(workspace, state.get("model"), execution_mode)
-        invocation = _invoke_session(
-            app,
-            input_messages,
-            config or {},
-            emitter=emitter,
+        app = await _session_agent(
+            workspace,
+            state.get("model"),
+            execution_mode,
         )
-        timeout_seconds = int(os.getenv("CODING_AGENT_TIMEOUT_SECONDS", "240"))
+        invocation = _invoke_session(app, input_messages, config or {})
+        timeout_seconds = int(os.getenv("CODING_AGENT_TIMEOUT_SECONDS", "900"))
         result = await asyncio.wait_for(invocation, timeout=timeout_seconds)
         all_messages = result.get("messages", [])
         new_messages = _current_turn_output(all_messages)
-        emitter.flush_text()
-        for event in _coding_events(new_messages):
-            emitter.tool(
-                event.get("name", "tool"),
-                event.get("id", ""),
-                "completed" if event["type"] == "tool_result" else "running",
-            )
         if not _has_final_assistant_message(new_messages):
-            emitter.emit("error", "error", code="missing_final_result")
             return {
                 "messages": [
                     AIMessage(
@@ -388,36 +342,41 @@ async def deep_agents_coding_node(
                 ],
                 "coding_session_id": session_id,
                 "coding_status": "error",
-                "coding_events": emitter.events,
             }
-        emitter.emit("status", "completed")
         return {
             "messages": new_messages,
             "coding_session_id": session_id,
             "coding_status": "completed",
-            "coding_events": emitter.events,
         }
     except asyncio.CancelledError:
-        emitter.flush_text()
-        emitter.emit("status", "cancelled")
         raise
     except GraphBubbleUp:
         raise
     except InvalidWorkspaceError:
         error_code = "invalid_workspace"
+        logger.exception(
+            "Coding agent failed",
+            extra={"coding_error_code": error_code, "coding_session_id": session_id},
+        )
     except ImportError:
         error_code = "dependency_unavailable"
+        logger.exception(
+            "Coding agent failed",
+            extra={"coding_error_code": error_code, "coding_session_id": session_id},
+        )
     except TimeoutError:
         error_code = "agent_timeout"
-    except Exception as exc:
+        logger.exception(
+            "Coding agent failed",
+            extra={"coding_error_code": error_code, "coding_session_id": session_id},
+        )
+    except Exception:
         error_code = "agent_failure"
-        error_type = type(exc).__name__
+        logger.exception(
+            "Coding agent failed",
+            extra={"coding_error_code": error_code, "coding_session_id": session_id},
+        )
 
-    emitter.flush_text()
-    error_data = {"code": error_code}
-    if error_type:
-        error_data["exception_type"] = error_type
-    emitter.emit("error", "error", **error_data)
     return {
         "messages": [
             AIMessage(
@@ -428,7 +387,6 @@ async def deep_agents_coding_node(
         ],
         "coding_session_id": session_id,
         "coding_status": "error",
-        "coding_events": emitter.events,
     }
 
 

@@ -200,4 +200,27 @@
   .shadow-inner-left {
     box-shadow: inset 9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
+
+  @keyframes answer-reveal {
+    from {
+      opacity: 0.72;
+      filter: blur(2px);
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+    }
+  }
+
+  .answer-reveal-active {
+    animation: answer-reveal 900ms ease-in-out both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .answer-reveal-active {
+      animation: none;
+      opacity: 1;
+      filter: none;
+    }
+  }
 }

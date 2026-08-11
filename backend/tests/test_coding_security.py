@@ -609,5 +609,3 @@ def test_coding_node_returns_sanitized_timeout(monkeypatch, tmp_path):
     )
 
     assert result["coding_status"] == "error"
-    assert result["coding_events"][-1]["kind"] == "error"
-    assert result["coding_events"][-1]["data"]["code"] == "agent_timeout"

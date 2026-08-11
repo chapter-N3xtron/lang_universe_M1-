@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
+import { LoaderCircle } from "lucide-react";
 import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -115,6 +116,8 @@ function AssistantMessageImpl({
   onSelectBranch,
   threadInterrupt,
   hasCustomComponent,
+  arrivalAnchorKey,
+  anchorKey,
 }: {
   message: Message | undefined;
   isLoading: boolean;
@@ -129,6 +132,8 @@ function AssistantMessageImpl({
   onSelectBranch: (branch: string) => void;
   threadInterrupt: unknown;
   hasCustomComponent: boolean;
+  arrivalAnchorKey?: string;
+  anchorKey: string;
 }) {
   useEffect(() => {
     if (!message?.id) return;
@@ -142,6 +147,9 @@ function AssistantMessageImpl({
   });
   const content = message?.content ?? [];
   const contentString = getContentString(content);
+  const isPendingAnswer = isLoading && isLastMessage && message?.type === "ai";
+  const conversationArrivalAnchorKey = arrivalAnchorKey ?? anchorKey;
+  const showBottomControls = contentString.length >= 800;
   const additionalKwargs = (
     message as
       | (Message & {
@@ -209,8 +217,23 @@ function AssistantMessageImpl({
     <div
       className="group mr-auto flex w-full items-start gap-2"
       data-message-id={message?.id}
+      data-answer-shell={isToolResult ? undefined : anchorKey}
+      data-answer-anchor={isToolResult ? undefined : anchorKey}
+      data-conversation-arrival-anchor-top={
+        isToolResult ? undefined : `assistant:${conversationArrivalAnchorKey}`
+      }
     >
-      <div className="flex w-full flex-col gap-2">
+      <div
+        className="border-border/60 relative flex w-full flex-col gap-2 border-y py-2 pl-10"
+        data-answer-anchor-bottom={isToolResult ? undefined : anchorKey}
+      >
+        {!isToolResult && (
+          <span
+            aria-hidden="true"
+            data-answer-anchor-top={anchorKey}
+            data-conversation-arrival-anchor-top={`assistant:${conversationArrivalAnchorKey}`}
+          />
+        )}
         {isToolResult ? (
           <>
             <ToolResult message={message} />
@@ -222,11 +245,34 @@ function AssistantMessageImpl({
           </>
         ) : (
           <>
-            {contentString.length > 0 && (
-              <div className="py-1">
-                <MarkdownText streaming={isLoading && isLastMessage}>
-                  {contentString}
-                </MarkdownText>
+            {!isPendingAnswer && (
+              <div className="flex items-center gap-2">
+                <BranchSwitcher
+                  branch={branch}
+                  branchOptions={branchOptions}
+                  onSelect={onSelectBranch}
+                  isLoading={isLoading}
+                />
+                <div className="absolute top-0 left-0">
+                  <CommandBar
+                    content={contentString}
+                    isLoading={isLoading}
+                    isAiMessage={true}
+                    handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+                    onSpeak={
+                      onSpeakMessage
+                        ? () => onSpeakMessage(message?.id, contentString)
+                        : undefined
+                    }
+                    isSpeaking={isSpeaking}
+                    orientation="vertical"
+                  />
+                </div>
+              </div>
+            )}
+            {!isPendingAnswer && contentString.length > 0 && (
+              <div className={cn("answer-reveal answer-reveal-active py-1")}>
+                <MarkdownText streaming={false}>{contentString}</MarkdownText>
               </div>
             )}
             {confidenceScore !== null && (
@@ -262,31 +308,37 @@ function AssistantMessageImpl({
               isLastMessage={isLastMessage}
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
             />
-            <div
-              className={cn(
-                "mr-auto flex items-center gap-2 transition-opacity",
-                "opacity-100 group-focus-within:opacity-100 group-hover:opacity-100",
-              )}
-            >
-              <BranchSwitcher
-                branch={branch}
-                branchOptions={branchOptions}
-                onSelect={onSelectBranch}
-                isLoading={isLoading}
-              />
-              <CommandBar
-                content={contentString}
-                isLoading={isLoading}
-                isAiMessage={true}
-                handleRegenerate={() => handleRegenerate(parentCheckpoint)}
-                onSpeak={
-                  onSpeakMessage
-                    ? () => onSpeakMessage(message?.id, contentString)
-                    : undefined
-                }
-                isSpeaking={isSpeaking}
-              />
-            </div>
+            {showBottomControls && (
+              <div
+                className={cn(
+                  "border-border/60 mr-auto flex items-center gap-2 border-b py-1 transition-opacity",
+                  "opacity-100 group-focus-within:opacity-100 group-hover:opacity-100",
+                  isPendingAnswer && "hidden",
+                )}
+              >
+                <BranchSwitcher
+                  branch={branch}
+                  branchOptions={branchOptions}
+                  onSelect={onSelectBranch}
+                  isLoading={isLoading}
+                />
+                <div className="absolute bottom-0 left-0">
+                  <CommandBar
+                    content={contentString}
+                    isLoading={isLoading}
+                    isAiMessage={true}
+                    handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+                    onSpeak={
+                      onSpeakMessage
+                        ? () => onSpeakMessage(message?.id, contentString)
+                        : undefined
+                    }
+                    isSpeaking={isSpeaking}
+                    orientation="vertical"
+                  />
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -296,13 +348,26 @@ function AssistantMessageImpl({
 
 export const AssistantMessage = memo(AssistantMessageImpl);
 
-export function AssistantMessageLoading() {
+export function AssistantMessageLoading({ anchorKey }: { anchorKey: string }) {
   return (
-    <div className="mr-auto flex items-start gap-2">
-      <div className="bg-muted flex h-8 items-center gap-1 rounded-2xl px-4 py-2">
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_infinite] rounded-full"></div>
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_0.5s_infinite] rounded-full"></div>
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_1s_infinite] rounded-full"></div>
+    <div
+      className="mr-auto flex items-start gap-2"
+      data-answer-shell={anchorKey}
+      data-answer-anchor={anchorKey}
+    >
+      <div
+        data-answer-anchor-top={anchorKey}
+        data-conversation-arrival-anchor-top={`assistant:${anchorKey}`}
+        aria-hidden="true"
+      />
+      <div
+        className="text-muted-foreground flex h-8 items-center rounded-2xl px-3 py-2"
+        role="status"
+        aria-label="Response in progress"
+        data-answer-anchor-bottom={anchorKey}
+      >
+        <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
+        <span className="sr-only">Response in progress</span>
       </div>
     </div>
   );

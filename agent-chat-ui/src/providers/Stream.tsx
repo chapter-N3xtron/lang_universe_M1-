@@ -39,15 +39,13 @@ export type StateType = {
   handoff_history?: Record<string, unknown>[];
   decision_log?: Record<string, unknown>[];
   target_agent?: string;
+  /** Selected repository path/root; retained as `workspace` in the graph state contract. */
   workspace?: string;
   model?: string;
   mode?: string;
-  execution_mode?: "read_only" | "approval";
+  execution_mode?: "read_only" | "approval" | "autonomous";
   todos?: TodoSection[];
   coding_status?: string;
-  coding_events?: CodingEvent[];
-  coding_text_preview?: string;
-  coding_event_sequence?: number;
   coding_session_id?: string;
   jasper_structured_response?: JasperResponse;
   visual_artifacts?: ConceptMapArtifact[];
@@ -55,30 +53,6 @@ export type StateType = {
   jasper_strategy?: "native" | "tool" | "two_pass" | "text";
   jasper_diagnostic?: ResponseDiagnostic | null;
 };
-
-export type CodingEvent = {
-  type: "coding_event";
-  version: 1;
-  session_id: string;
-  sequence: number;
-  kind:
-    | "status"
-    | "text"
-    | "tool"
-    | "file"
-    | "plan"
-    | "subagent"
-    | "approval"
-    | "error";
-  status: string;
-  data: Record<string, unknown>;
-};
-
-function isCodingEvent(event: unknown): event is CodingEvent {
-  if (!event || typeof event !== "object") return false;
-  const candidate = event as Partial<CodingEvent>;
-  return candidate.type === "coding_event" && candidate.version === 1;
-}
 
 const useTypedStream = useStream<
   StateType,
@@ -94,10 +68,9 @@ const useTypedStream = useStream<
       workspace?: string;
       model?: string;
       mode?: string;
-      execution_mode?: "read_only" | "approval";
+      execution_mode?: "read_only" | "approval" | "autonomous";
       todos?: TodoSection[];
       coding_status?: string;
-      coding_events?: CodingEvent[];
       coding_session_id?: string;
       jasper_structured_response?: JasperResponse;
       visual_artifacts?: ConceptMapArtifact[];
@@ -105,7 +78,7 @@ const useTypedStream = useStream<
       jasper_strategy?: "native" | "tool" | "two_pass" | "text";
       jasper_diagnostic?: ResponseDiagnostic | null;
     };
-    CustomEventType: UIMessage | RemoveUIMessage | CodingEvent;
+    CustomEventType: UIMessage | RemoveUIMessage;
   }
 >;
 
@@ -203,8 +176,8 @@ const DurableRuntimeBoundary = ({
           <h1 className="text-lg font-semibold">Session storage unavailable</h1>
           <p className="text-muted-foreground mt-2">{status.reason}</p>
           <p className="text-muted-foreground mt-2 text-sm">
-            Start the canonical Docker-backed Agent Server, then refresh this page.
-            No development runtime has been connected.
+            Start the canonical Docker-backed Agent Server, then refresh this
+            page. No development runtime has been connected.
           </p>
         </div>
       </div>
@@ -245,41 +218,6 @@ const StreamSession = ({
         options.mutate((prev) => {
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
-        });
-      } else if (isCodingEvent(event)) {
-        options.mutate((prev) => {
-          const startsRun =
-            event.kind === "status" && event.status === "running";
-          const sameSession = prev.coding_session_id === event.session_id;
-          if (
-            !startsRun &&
-            sameSession &&
-            event.sequence <= (prev.coding_event_sequence ?? -1)
-          )
-            return prev;
-          const terminal =
-            event.kind === "status" &&
-            ["completed", "cancelled"].includes(event.status);
-          const text =
-            event.kind === "text" && typeof event.data.content === "string"
-              ? event.data.content
-              : "";
-          return {
-            ...prev,
-            coding_session_id: event.session_id,
-            coding_event_sequence: event.sequence,
-            coding_status: event.kind === "error" ? "error" : event.status,
-            coding_events: [
-              ...(startsRun ? [] : (prev.coding_events ?? [])),
-              event,
-            ].slice(-32),
-            coding_text_preview:
-              terminal || event.kind === "error"
-                ? ""
-                : `${startsRun ? "" : (prev.coding_text_preview ?? "")}${text}`.slice(
-                    -16384,
-                  ),
-          };
         });
       }
     },

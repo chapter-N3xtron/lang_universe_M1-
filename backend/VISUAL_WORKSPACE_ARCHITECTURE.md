@@ -1,5 +1,12 @@
 # LangChain Visual Workspace Architecture
 
+Terminology boundary: **visual workspace** means the Chat, Split, and Visual
+presentation/layout surfaces plus their browser-local preferences. A repository
+path/root and its durable binding are separate concerns; existing `workspace_id`
+wire/storage fields retain their compatibility meaning as repository binding IDs,
+not visual workspace IDs. LangGraph runtime, checkpoints, and Store provide
+infrastructure and are not workspace entities.
+
 Status: accepted for implementation (2026-07-30)
 
 ## Product invariant

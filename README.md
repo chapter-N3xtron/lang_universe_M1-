@@ -1,7 +1,10 @@
 # LangGraph Agent Chat UI + Deep Agents
 
 A local multi-agent chat application with a Next.js UI, a LangGraph supervisor,
-and a workspace-confined Deep Agents coding specialist.
+and a repository-path-confined Deep Agents coding specialist. In persisted
+contracts, `workspace_id` means a durable repository binding ID, not a visual UI
+workspace; Chat/Split/Visual presentation state is separate. See
+`openspec/TERMINOLOGY.md` for the compatibility terminology rules.
 
 ## Components
 

@@ -7,12 +7,10 @@ runtime and rollback adapter have been removed after the parity gate passed.
 
 - The UI sends `target_agent: "coding"`, an absolute `workspace`, a provider-
   prefixed `model`, and `execution_mode` (`read_only` or `approval`).
-- The coding graph returns standard LangGraph messages plus bounded version-1
-  `coding_event` custom events.
-- Final LangGraph messages are canonical. Custom text is transient, batched at
-  512 characters, capped at 16 KiB, and cleared at completion.
-- The backend retains no more than 128 coding events per run; the frontend
-  retains 32.
+- The coding graph returns standard LangGraph messages, state updates, tool
+  events, and interrupts.
+- Final LangGraph messages and state are canonical; the UI does not maintain a
+  second coding transcript or custom event protocol.
 - Tool events never include arguments, outputs, prompts, file contents, or raw
   exceptions.
 - Durable nested sessions are scoped by user, UI thread, and resolved workspace.

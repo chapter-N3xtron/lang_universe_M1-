@@ -187,6 +187,7 @@ export function ThreadActionsView({
           command: {
             resume: { decisions: allDecisions },
           },
+          multitaskStrategy: "reject",
         },
       );
 
@@ -242,6 +243,7 @@ export function ThreadActionsView({
           command: {
             resume: { decisions: allDecisions },
           },
+          multitaskStrategy: "reject",
         },
       );
 

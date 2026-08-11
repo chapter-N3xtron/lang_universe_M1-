@@ -37,6 +37,18 @@ The system SHALL provide a durable Perspective associated with a session that re
 - **WHEN** a session contains a generated summary, report, poll result, visualization, or decision-tool output that the user has not authored as Perspective
 - **THEN** the system SHALL retain the material without labeling or presenting it as the user’s Perspective
 
+### Requirement: Reopened session history is initially latest-oriented
+
+When a previously saved session/thread is reopened for revisitation, its hydrated non-empty message history SHALL initially place the conversation at the bottom once, after the hydrated message window is mounted, so the most recently said content is visible. This is initial restore placement only: it SHALL NOT bottom-follow new processing or assistant-answer reveal, repeatedly reclaim the viewport, or override subsequent user scrolling. Empty sessions have no placement target; loading or history errors wait for successful hydration; forked/reopened threads use the same default; reduced motion uses instant/no animation. A future explicit durable per-thread viewport position may override this default only if separately introduced, and this change does not define that feature.
+
+#### Scenario: User reopens an inquiry thread
+- **WHEN** a user revisits a saved session with hydrated messages
+- **THEN** the conversation initially shows the latest saved content at the bottom once, while the user retains normal scroll control afterward
+
+#### Scenario: Session revisitation has no usable history
+- **WHEN** the session is empty, still loading, or history hydration errors
+- **THEN** it does not perform a misleading placement and presents the applicable empty, loading, or error state
+
 ### Requirement: Perspective revisitation and revision
 The system SHALL allow the user to revisit and update their durable Perspective as the inquiry develops. An updated Perspective SHALL represent the user’s then-current understanding, conclusion, decision, or stance and SHALL NOT be treated as evidence that the earlier Perspective was erroneous, that the user must maintain the update, or that the inquiry has reached a final answer.
 

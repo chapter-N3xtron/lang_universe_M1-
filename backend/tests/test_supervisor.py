@@ -118,6 +118,12 @@ def test_new_session_opening_is_canonical_and_model_free():
     assert opening["session_opened"] is True
     assert opening["active_agent"] == "jasper"
 
+    duplicate = chat_ui.session_opening_node(
+        {"messages": [{"role": "assistant", "content": STANDARD_SESSION_GREETING}]}
+    )
+    assert duplicate["messages"] == []
+    assert duplicate["session_opened"] is True
+
 
 def test_supervisor_routes_to_research():
     mock_llm = _create_mock_llm(
@@ -504,8 +510,7 @@ def test_coding_receives_explicit_task_and_returns_named_result_directly(tmp_pat
                 ],
                 "coding_session_id": "coding-session-1",
                 "coding_status": "completed",
-                "coding_events": [],
-            }
+                            }
 
     async def fake_call_jasper(state):
         jasper_inputs.append(state)
@@ -570,8 +575,7 @@ def test_direct_coding_uses_latest_user_task_and_fails_closed_without_result(
             return {
                 "messages": list(state["messages"]),
                 "coding_status": "completed",
-                "coding_events": [],
-            }
+                            }
 
     async def fake_call_jasper(state):
         jasper_inputs.append(state)
@@ -621,8 +625,7 @@ def test_direct_coding_defaults_to_approval_when_mode_is_omitted(tmp_path):
                     AIMessage(content="OpenSpec is ready for approval-mode work."),
                 ],
                 "coding_status": "completed",
-                "coding_events": [],
-            }
+                            }
 
     async def fake_call_jasper(state):
         return {

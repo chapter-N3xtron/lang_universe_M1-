@@ -42,11 +42,9 @@ function HumanMessageImpl({
   branchOptions,
   onSelectBranch,
   onSubmitEdit,
-  arrivalAnchorKey,
 }: {
   message: Message;
   isLoading: boolean;
-  arrivalAnchorKey?: string;
   parentCheckpoint: Checkpoint | null | undefined;
   firstSeenValues: Record<string, unknown> | undefined;
   branch: string | undefined;
@@ -82,7 +80,6 @@ function HumanMessageImpl({
   return (
     <div
       data-message-id={message.id}
-      data-conversation-arrival-anchor-top={arrivalAnchorKey}
       className={cn(
         "group ml-auto flex items-center gap-2",
         isEditing && "w-full max-w-xl",

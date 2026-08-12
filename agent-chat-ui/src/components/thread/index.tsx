@@ -1,7 +1,16 @@
-import { useEffect, useRef, useState, useCallback, memo, useMemo } from "react";
+import {
+  ReactNode,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  memo,
+  useMemo,
+} from "react";
 import { cn } from "@/lib/utils";
 import { useStreamContext, type StreamContextType } from "@/providers/Stream";
 import { useQueryState, parseAsBoolean, parseAsStringLiteral } from "nuqs";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { toast } from "sonner";
 import {
   useArtifactOpen,
@@ -28,6 +37,32 @@ const SessionVisualPane = dynamic(
     ),
   { ssr: false },
 );
+
+function StickyToBottomContent(props: {
+  content: ReactNode;
+  className?: string;
+  scrollClassName?: string;
+  contentClassName?: string;
+}) {
+  const context = useStickToBottomContext();
+  return (
+    <div className={props.className}>
+      <div
+        ref={context.scrollRef}
+        className={props.scrollClassName}
+        data-conversation-viewport
+      >
+        <div
+          ref={context.contentRef}
+          className={props.contentClassName}
+          data-conversation-content-shell
+        >
+          {props.content}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ThreadImpl() {
   const [, setArtifactContext] = useArtifactContext();
@@ -60,6 +95,7 @@ function ThreadImpl() {
     setSelectedVoice,
   } = useModelAndVoices();
 
+  const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const [isOpeningSession, setIsOpeningSession] = useState(false);
   const stream = useStreamContext();
   const streamRef = useRef(stream);
@@ -76,7 +112,6 @@ function ThreadImpl() {
   );
   const messages = stream.messages;
   const isLoading = stream.isLoading;
-  const conversationViewportRef = useRef<HTMLDivElement>(null);
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -128,9 +163,26 @@ function ThreadImpl() {
     }
   }, [stream.error]);
 
-  const handleSubmit = useCallback(() => {}, []);
+  const prevMessageLength = useRef(0);
+  useEffect(() => {
+    if (
+      messages.length !== prevMessageLength.current &&
+      messages?.length &&
+      messages[messages.length - 1].type === "ai"
+    ) {
+      setFirstTokenReceived(true);
+    }
+    prevMessageLength.current = messages.length;
+  }, [messages]);
 
-  const handleRegenerate = useCallback(() => {}, []);
+  const handleSubmit = useCallback(() => {
+    setFirstTokenReceived(false);
+  }, []);
+
+  const handleRegenerate = useCallback(() => {
+    prevMessageLength.current = prevMessageLength.current - 1;
+    setFirstTokenReceived(false);
+  }, []);
 
   const chatStarted = !!threadId || !!messages.length;
   const structuredCandidate = stream.values?.jasper_structured_response;
@@ -198,30 +250,27 @@ function ThreadImpl() {
               !chatStarted && "grid-rows-[1fr]",
             )}
           >
-            <div className="relative min-h-0 flex-1 overflow-hidden">
-              <div
-                className="absolute inset-0 min-h-0 overflow-y-auto [overscroll-behavior-y:contain] px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent"
-                ref={conversationViewportRef}
-                data-conversation-viewport
-                tabIndex={0}
-                aria-label="Conversation"
-              >
-                <div
-                  className={cn(
-                    "mx-auto w-full max-w-3xl pt-8 pb-8",
-                    !chatStarted && "flex min-h-full flex-col justify-end",
-                  )}
-                >
+
+
+
+            <StickToBottom className="relative flex-1 overflow-hidden">
+              <StickyToBottomContent
+                className="absolute inset-0 flex min-h-0 flex-col overflow-hidden"
+                scrollClassName="min-h-0 flex-1 overflow-y-auto px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent"
+                contentClassName={cn(
+                  "mx-auto flex w-full max-w-3xl flex-col gap-4 pt-8 pb-8",
+                  !chatStarted && "min-h-full justify-end",
+                )}
+                content={
                   <MessageList
                     isLoading={isLoading}
-                    threadId={threadId}
+                    firstTokenReceived={firstTokenReceived}
                     selectedVoice={selectedVoice}
                     onRegenerateStart={handleRegenerate}
-                    viewportRef={conversationViewportRef}
                   />
-                </div>
-              </div>
-            </div>
+                }
+              />
+            </StickToBottom>
           </div>
         }
         visual={

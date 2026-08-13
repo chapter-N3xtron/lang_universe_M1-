@@ -112,8 +112,8 @@ export function SessionSources({
         <div>
           <h3 className="font-semibold">Session sources</h3>
           <p className="text-muted-foreground text-sm">
-            Research evidence saved for this session, including sources not used
-            in a visual.
+            Librarian evidence saved for this session, including sources not
+            used in a visual.
           </p>
         </div>
         <Button
@@ -127,7 +127,7 @@ export function SessionSources({
       </div>
       {!sources.length ? (
         <div className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
-          No Research sources have been saved in this session.
+          No Librarian sources have been saved in this session.
         </div>
       ) : (
         <ul

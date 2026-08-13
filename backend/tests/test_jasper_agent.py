@@ -94,7 +94,7 @@ def test_jasper_prompt_contains_versioned_interaction_governance():
     assert "Hello. This system is called Jasper" in prompt
     assert "approximately 120 words" in prompt
     assert "no more than two short paragraphs" in prompt
-    assert "authorize Research" in prompt
+    assert "authorize The Librarian" in prompt
     assert "Do not invent a standard or propose speculative coding" in prompt
     assert "model estimate, not an empirically calibrated probability" in prompt
 
@@ -244,10 +244,18 @@ async def test_text_strategy_does_not_bind_tools_for_incompatible_models():
         async def ainvoke(self, _state):
             return {"messages": [AIMessage(content="A safe text-only answer.")]}
 
-    def build_agent(_model, response_format=None, *, tools=None, workspace=None):
+    def build_agent(
+        _model,
+        response_format=None,
+        *,
+        tools=None,
+        workspace=None,
+        execution_mode=None,
+    ):
         captured["response_format"] = response_format
         captured["tools"] = tools
         captured["workspace"] = workspace
+        captured["execution_mode"] = execution_mode
         return TextAgent()
 
     _clear_src_modules()
@@ -259,6 +267,40 @@ async def test_text_strategy_does_not_bind_tools_for_incompatible_models():
 
     assert result.voice_text == "A safe text-only answer."
     assert captured["tools"] == []
+
+
+@pytest.mark.asyncio
+async def test_two_pass_openai_uses_sanitized_native_schema():
+    model = MagicMock(profile={"tool_calling": True})
+    model.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value={"voice_text": "The useful plain answer."}
+    )
+
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    with (
+        patch.object(module, "_is_openai_model", return_value=True),
+        patch.object(
+            module,
+            "_invoke_plain",
+            new=AsyncMock(
+                return_value=(
+                    [AIMessage(content="The useful plain answer.")],
+                    "The useful plain answer.",
+                )
+            ),
+        ),
+    ):
+        result = await module._invoke_two_pass(
+            model, [{"role": "user", "content": "Explain this"}]
+        )
+
+    assert result.voice_text == "The useful plain answer."
+    schema = model.with_structured_output.call_args.args[0]
+    kwargs = model.with_structured_output.call_args.kwargs
+    assert kwargs == {"method": "json_schema", "strict": True}
+    assert "oneOf" not in json.dumps(schema)
+    assert "discriminator" not in json.dumps(schema)
 
 
 @pytest.mark.asyncio
@@ -495,7 +537,7 @@ def test_exact_verified_model_override_is_used(monkeypatch):
     )
 
 
-def test_jasper_delegates_web_access_to_research_without_direct_web_tools():
+def test_jasper_delegates_web_access_to_librarian_without_direct_web_tools():
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
     specialists = module._specialists(MagicMock())
@@ -506,7 +548,7 @@ def test_jasper_delegates_web_access_to_research_without_direct_web_tools():
         "read_repository_file",
         "draw_concept_map",
         "transfer_to_coding",
-        "transfer_to_research",
+        "transfer_to_librarian",
     ]
 
 
@@ -527,8 +569,60 @@ def test_jasper_deep_agent_exposes_documented_tools_and_task(tmp_path):
         "read_repository_file",
         "task",
         "transfer_to_coding",
-        "transfer_to_research",
+        "transfer_to_librarian",
     }
+    assert tool_names.isdisjoint(
+        {"web_search", "read_url", "ingest_uploaded_sources"}
+    )
+
+
+@pytest.mark.parametrize("execution_mode", [None, "read_only", "autonomous"])
+def test_jasper_mutation_tools_are_hidden_outside_approval_mode(
+    tmp_path, execution_mode
+):
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    agent = module._build_agent(
+        _plain_model(AIMessage(content="done")),
+        workspace=str(tmp_path),
+        execution_mode=execution_mode,
+    )
+    tool_names = set(agent.nodes["tools"].bound.tools_by_name)
+
+    assert tool_names.isdisjoint(
+        {"approved_write_file", "approved_edit_file", "run_workspace_command"}
+    )
+
+
+def test_jasper_mutation_tools_are_exposed_in_approval_mode(tmp_path):
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    agent = module._build_agent(
+        _plain_model(AIMessage(content="done")),
+        workspace=str(tmp_path),
+        execution_mode="approval",
+    )
+    tool_names = set(agent.nodes["tools"].bound.tools_by_name)
+
+    assert {
+        "approved_write_file",
+        "approved_edit_file",
+        "run_workspace_command",
+    } <= tool_names
+
+
+def test_jasper_approval_mode_uses_human_review_interrupts(tmp_path):
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+
+    with patch.object(module, "create_deep_agent") as create_agent:
+        module._build_agent(
+            _plain_model(AIMessage(content="done")),
+            workspace=str(tmp_path),
+            execution_mode="approval",
+        )
+
+    assert create_agent.call_args.kwargs["interrupt_on"] == module.APPROVAL_INTERRUPT_ON
 
 
 def test_jasper_handoff_targets_top_level_coding_with_required_context(tmp_path):
@@ -611,26 +705,28 @@ def test_jasper_handoff_requires_explicit_execution_mode(tmp_path):
         module.transfer_to_coding.func(task="Inspect", runtime=runtime)
 
 
-def test_jasper_handoff_targets_top_level_research_with_bounded_context(tmp_path):
+def test_jasper_handoff_targets_top_level_librarian_with_bounded_context(tmp_path):
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
     runtime = MagicMock(
-        tool_call_id="research-handoff-1",
+        tool_call_id="librarian-handoff-1",
         state={
             "messages": [AIMessage(content="", tool_calls=[])],
             "workspace": str(tmp_path),
             "model": "ollama/test-model",
-            "thread_identity": "research-thread",
+            "thread_identity": "librarian-thread",
             "user_identity": "test-user",
             "session_evidence": [{"id": "source-one"}],
-                    },
+        },
     )
 
-    command = module.transfer_to_research.func(task="Research SIFT", runtime=runtime)
+    command = module.transfer_to_librarian.func(
+        task="Research SIFT", runtime=runtime
+    )
 
     assert command.graph == command.PARENT
-    assert command.goto == "research"
-    assert command.update["research_task"] == "Research SIFT"
+    assert command.goto == "librarian"
+    assert command.update["librarian_task"] == "Research SIFT"
     assert command.update["session_evidence"] == [{"id": "source-one"}]
     assert len(command.update["messages"]) == 2
 

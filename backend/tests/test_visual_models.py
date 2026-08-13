@@ -12,6 +12,7 @@ from src.visual_models import (
     EvidenceSource,
     JasperResponse,
     jasper_response_json_schema,
+    openai_jasper_response_json_schema,
     safe_text_response,
 )
 
@@ -215,6 +216,29 @@ def test_schema_is_json_serializable_and_discriminated():
     serialized = json.dumps(schema)
     assert "react_flow" in serialized
     assert "discriminator" in serialized
+
+
+def test_openai_schema_uses_supported_strict_shape():
+    schema = openai_jasper_response_json_schema()
+    serialized = json.dumps(schema)
+    assert "oneOf" not in serialized
+    assert "discriminator" not in serialized
+    assert '"const"' not in serialized
+    assert "version" in schema["required"]
+    assert set(schema["required"]) == set(schema["properties"])
+
+    def assert_objects_are_strict(value):
+        if isinstance(value, list):
+            for item in value:
+                assert_objects_are_strict(item)
+        elif isinstance(value, dict):
+            if value.get("type") == "object":
+                assert value["additionalProperties"] is False
+                assert set(value["required"]) == set(value["properties"])
+            for item in value.values():
+                assert_objects_are_strict(item)
+
+    assert_objects_are_strict(schema)
 
 
 def test_committed_frontend_schema_is_current():

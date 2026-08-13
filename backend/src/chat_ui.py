@@ -17,7 +17,6 @@ from src.jasper_agent import STANDARD_SESSION_GREETING, call_jasper
 from src.librarian_agent import librarian_agent
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
-from src.research_agent import research_agent
 from src.session_catalog import record_session_projection
 
 
@@ -47,7 +46,7 @@ class State(TypedDict):
     session_event: str
     session_opened: bool
     session_opening_version: str
-    research_task: str
+    librarian_task: str
     session_evidence: Annotated[list[dict], operator.add]
 
 
@@ -94,7 +93,7 @@ AGENT_ROUTING = {
     "coding": "coding",
     "deep-agent": "coding",
     "deepagents": "coding",
-    "research": "research",
+    "research": "librarian",
     "librarian": "librarian",
     "jasper": "jasper",
     "magic-coder": "magic-coder",
@@ -107,18 +106,18 @@ SUPERVISOR_PROMPT = """You are a supervisor agent managing a team of specialists
 Available specialists:
 - jasper: general daily assistant, ticketing, record keeping, friendly conversation
 - coding: repository analysis and coding work through Deep Agents
-- research: web research, essay analysis, structured Q&A, document breakdown
+- librarian: web research, essay analysis, structured Q&A, document breakdown
 - magic-coder: image generation, ComfyUI workflows, creative work, character creation
 
 Rules:
 1. If the user explicitly asks for a specific agent, route to that agent.
 2. If the user's request involves coding or repositories, route to coding.
-3. If the user's request involves research, web search, or document analysis, route to research.
+3. If the user's request involves research, web search, or document analysis, route to librarian.
 4. If the user's request involves image generation, ComfyUI, or creative work, route to magic-coder.
 5. For general conversation, questions, or assistance, route to jasper.
 6. If the task appears complete and no further specialist work is needed, reply with "done".
 
-Reply with ONLY the specialist name (jasper, coding, research, magic-coder) or "done". No other text."""
+Reply with ONLY the specialist name (jasper, coding, librarian, magic-coder) or "done". No other text."""
 
 
 def supervisor_node(
@@ -130,7 +129,6 @@ def supervisor_node(
             "approval",
             "jasper",
             "coding",
-            "research",
             "librarian",
             "magic-coder",
         ]
@@ -164,17 +162,17 @@ def supervisor_node(
         return Command(
             goto=node_name,
             update={
-                "active_agent": target,
+                "active_agent": node_name,
                 "handoff_history": [
                     {
                         "from": "supervisor",
-                        "to": target,
+                        "to": node_name,
                         "reason": f"User requested {target}",
                     }
                 ],
                 "decision_log": [
                     {
-                        "decision": f"route_to_{target}",
+                        "decision": f"route_to_{node_name}",
                         "reason": f"User set target_agent={target}",
                     }
                 ],
@@ -209,8 +207,8 @@ def supervisor_node(
 
     node_name = AGENT_ROUTING.get(decision)
     if node_name is None:
-        decision = "jasper"
         node_name = "jasper"
+    decision = node_name
 
     if state.get("execution_mode") == "autonomous":
         return Command(
@@ -265,7 +263,7 @@ def _is_approved(resume_value) -> bool:
 def approval_node(
     state: State,
 ) -> (
-    Command[Literal["jasper", "coding", "research", "librarian", "magic-coder"]] | dict
+    Command[Literal["jasper", "coding", "librarian", "magic-coder"]] | dict
 ):
     agent = state.get("pending_agent", "")
     approved = interrupt(
@@ -306,12 +304,12 @@ def approval_node(
     return Command(
         goto=node_name,
         update={
-            "active_agent": agent,
+            "active_agent": node_name,
             "handoff_history": [
                 {
                     "from": "supervisor",
-                    "to": agent,
-                    "reason": f"Supervisor routed to {agent} (approved)",
+                    "to": node_name,
+                    "reason": f"Supervisor routed to {node_name} (approved)",
                 }
             ],
             "pending_approval": False,
@@ -350,7 +348,7 @@ def create_chat_ui():
 
     async def run_jasper(
         state, config: RunnableConfig
-    ) -> Command[Literal["coding", "research", "record_session"]]:
+    ) -> Command[Literal["coding", "librarian", "record_session"]]:
         latest = state.get("messages", [])[-1:] or [{}]
         latest = latest[0]
         latest_role = (
@@ -462,40 +460,18 @@ def create_chat_ui():
         }
         return Command(goto="jasper", update=update)
 
-    async def run_research(
-        state, config: RunnableConfig, runtime: Runtime
-    ) -> Command[Literal["jasper"]] | dict:
-        configurable = config.get("configurable", {})
-        messages = (
-            state["messages"][-2:] if state.get("research_task") else state["messages"]
-        )
-        result = await research_agent(
-            {
-                "messages": messages,
-                "model": state.get("model", ""),
-                "workspace": state.get("workspace") or os.getcwd(),
-                "thread_identity": state.get("thread_identity")
-                or configurable.get("thread_id", ""),
-                "user_identity": state.get("user_identity")
-                or configurable.get("user_id")
-                or configurable.get("owner_id")
-                or "anonymous",
-                "session_evidence": state.get("session_evidence", []),
-            },
-            runtime,
-        )
-        update = {
-            "messages": _base_messages_to_dicts(result.get("messages", [])[-1:]),
-            "research_task": "",
-            "session_evidence": result.get("session_evidence", []),
-        }
-        if state.get("research_task"):
-            return Command(goto="jasper", update=update)
-        return update
-
-    async def run_librarian(state, config: RunnableConfig) -> dict:
+    async def run_librarian(
+        state, config: RunnableConfig
+    ) -> Command[Literal["jasper", "record_session"]]:
+        handed_off_task = bool((state.get("librarian_task") or "").strip())
         result = await librarian_agent(state, config)
-        return {"messages": _base_messages_to_dicts(result.get("messages", []))}
+        return Command(
+            goto="jasper" if handed_off_task else "record_session",
+            update={
+                "messages": _base_messages_to_dicts(result.get("messages", [])),
+                "librarian_task": "",
+            },
+        )
 
     async def run_magic_coder_node(state):
         input_count = len(state["messages"])
@@ -523,7 +499,6 @@ def create_chat_ui():
     graph.add_node("approval", approval_node)
     graph.add_node("jasper", run_jasper)
     graph.add_node("coding", run_coding)
-    graph.add_node("research", run_research)
     graph.add_node("librarian", run_librarian)
     graph.add_node("magic-coder", run_magic_coder_node)
     graph.add_node("record_session", record_session)
@@ -531,8 +506,7 @@ def create_chat_ui():
     graph.add_edge(START, "supervisor")
     graph.add_edge("session_opening", "record_session")
 
-    for specialist in ["research", "librarian", "magic-coder"]:
-        graph.add_edge(specialist, "record_session")
+    graph.add_edge("magic-coder", "record_session")
     graph.add_edge("record_session", END)
 
     return graph
@@ -557,7 +531,7 @@ async def chat():
     )
     print(f"{dark_mode['header']}{'=' * 70}{dark_mode['reset']}")
     print(
-        f"{dark_mode['dim']}  Agents: Jasper | Coding | Magic Coder | Research{dark_mode['reset']}"
+        f"{dark_mode['dim']}  Agents: Jasper | Coding | The Librarian | Magic Coder{dark_mode['reset']}"
     )
     print(
         f"{dark_mode['dim']}  Type 'quit' to exit | 'clear' to clear history{dark_mode['reset']}"

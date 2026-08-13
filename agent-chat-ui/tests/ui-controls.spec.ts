@@ -97,7 +97,9 @@ test.describe("UI controls render and respond", () => {
 
     await expect(dropdown.getByText("Jasper")).toBeVisible();
     await expect(dropdown.getByText("Deep Agent")).toBeVisible();
-    await expect(dropdown.getByText("Research")).toBeVisible();
+    await expect(dropdown.getByText("Research", { exact: true })).toHaveCount(
+      0,
+    );
     await expect(dropdown.getByText("The Librarian")).toBeVisible();
     await expect(dropdown.getByText("Magic Coder")).toBeVisible();
 

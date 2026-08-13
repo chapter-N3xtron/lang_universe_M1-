@@ -276,7 +276,12 @@ export function SessionLibrary({
         enableSorting: false,
         cell: (info) =>
           info.getValue().length
-            ? info.getValue().map((agent) => agent.profile_id).join(", ")
+            ? info
+                .getValue()
+                .map((agent) =>
+                  agent.profile_id === "research" ? "librarian" : agent.profile_id,
+                )
+                .join(", ")
             : "None",
       }),
       columnHelper.accessor("visual_count", {

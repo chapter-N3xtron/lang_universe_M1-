@@ -40,10 +40,12 @@ from src.jasper_tools import (
     read_file,
 )
 from src.llm import get_agent_llm
+from src.secure_coding_tools import APPROVAL_INTERRUPT_ON, create_approval_tools
 from src.visual_models import (
     ConceptMapArtifact,
     JasperResponse,
     LayoutSuggestion,
+    openai_jasper_response_json_schema,
     safe_text_response,
 )
 
@@ -63,6 +65,16 @@ class VerifiedModelCapability:
 # Entries are added only after the repository's live combined-capability test
 # passes for that exact provider/model ID. Empty is safer than guessed support.
 VERIFIED_MODEL_CAPABILITIES: dict[str, VerifiedModelCapability] = {}
+
+
+def _is_openai_model(model) -> bool:
+    return type(model).__module__.split(".", 1)[0] == "langchain_openai"
+
+
+def _response_schema_for_model(model):
+    if _is_openai_model(model):
+        return openai_jasper_response_json_schema()
+    return JasperResponse
 
 
 class State(TypedDict, total=False):
@@ -94,7 +106,7 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     coding_session_id: str
     coding_status: str
     coding_task: str
-    research_task: str
+    librarian_task: str
     session_evidence: list[dict]
 
 
@@ -142,10 +154,10 @@ def transfer_to_coding(
 
 
 @tool
-def transfer_to_research(
+def transfer_to_librarian(
     task: str, runtime: ToolRuntime
-) -> Command[Literal["research"]]:
-    """Hand an evidence-gathering task to the top-level Research specialist."""
+) -> Command[Literal["librarian"]]:
+    """Hand an evidence-gathering task to the top-level Librarian specialist."""
 
     state = runtime.state
     last_ai_message = next(
@@ -154,9 +166,9 @@ def transfer_to_research(
         if isinstance(message, AIMessage)
     )
     return Command(
-        goto="research",
+        goto="librarian",
         update={
-            "research_task": task,
+            "librarian_task": task,
             "workspace": state.get("workspace", ""),
             "model": state.get("model"),
             "thread_identity": state.get("thread_identity", ""),
@@ -165,7 +177,7 @@ def transfer_to_research(
             "messages": [
                 last_ai_message,
                 ToolMessage(
-                    content=f"Research task: {task}",
+                    content=f"Librarian task: {task}",
                     tool_call_id=runtime.tool_call_id,
                 ),
             ],
@@ -179,7 +191,7 @@ ACTIVE_TOOLS = [
     read_file,
     draw_concept_map,
     transfer_to_coding,
-    transfer_to_research,
+    transfer_to_librarian,
 ]
 
 
@@ -235,7 +247,7 @@ Ground technical claims, assessments, and plans in repository documentation or
 authoritative external documentation. Clearly distinguish documented facts,
 repository observations, explicit inferences, and proposals. If relevant
 documentation has not been established, say so and ask the human to provide it or
-authorize Research to retrieve it. Do not invent a standard or propose speculative
+authorize The Librarian to retrieve it. Do not invent a standard or propose speculative
 coding. Delegate coding only after the documentation, requested scope, and required
 approval are established.
 
@@ -246,7 +258,7 @@ when a responsible estimate cannot be made. Do not include either field in voice
 
 CAPABILITY TRANSPARENCY AND CONSENT
 When asked about capabilities, provide a structured map of the available agents and
-tools, including Research, Coding, visual planning, and document processing, and
+tools, including The Librarian, Coding, visual planning, and document processing, and
 distinguish synchronous from asynchronous operation. Before a high-agency or
 autonomous task, explain its operational scope, required data access, material risks,
 and whether external services or local resources will be used. Activation remains an
@@ -267,11 +279,12 @@ decorate a simple answer.
 Use Deep Agents filesystem tools ls, glob, grep, and read_file to discover and inspect
 the selected repository. Use read_repository_file for every repository file whose
 contents support a grounded visual so its evidence ID can be cited. Delegate external
-research with transfer_to_research. Delegate repository
+research with transfer_to_librarian. Delegate repository
 analysis and coding work with transfer_to_coding. Do not perform either specialist's
-restricted work directly. Call transfer_to_coding by itself, never in parallel with
-another tool call. Call transfer_to_research by itself, never in parallel with another
-tool call.
+restricted work directly. In approval mode, approved_write_file, approved_edit_file,
+and run_workspace_command are available, and every call pauses for human review.
+They are unavailable in read-only and autonomous modes. Call transfer_to_coding or
+transfer_to_librarian by itself, never in parallel with another tool call.
 
 When an assistant message named coding returns from the top-level Coding node,
 relay its result to the human. Treat a question, blocker, cancellation, or error as
@@ -282,7 +295,7 @@ reasoning or tool transcript.
 Every diagram must be evidence-grounded. Before drawing a repository or code diagram,
 read the relevant repository files and cite the evidence IDs returned by
 read_repository_file on every node and edge. Before drawing a research diagram,
-delegate the evidence search with transfer_to_research, then cite the returned
+delegate the evidence search with transfer_to_librarian, then cite the returned
 web evidence IDs on every
 node and edge. Use grounding_kind="repo" for repository diagrams and "web" for researched
 claims. The user-input evidence may support only claims explicitly stated by the user;
@@ -389,7 +402,14 @@ def _workspace_backend(
     return backend, permissions
 
 
-def _build_agent(model, response_format=None, *, tools=None, workspace=None):
+def _build_agent(
+    model,
+    response_format=None,
+    *,
+    tools=None,
+    workspace=None,
+    execution_mode: str | None = None,
+):
     if tools == []:
         return create_agent(
             model=model,
@@ -401,9 +421,14 @@ def _build_agent(model, response_format=None, *, tools=None, workspace=None):
         )
 
     backend, permissions = _workspace_backend(workspace)
+    root = Path(workspace or Path(__file__).resolve().parents[2]).resolve(strict=True)
+    approval_mode = execution_mode == "approval"
+    active_tools = list(ACTIVE_TOOLS if tools is None else tools)
+    if approval_mode:
+        active_tools.extend(create_approval_tools(root))
     return create_deep_agent(
         model=model,
-        tools=ACTIVE_TOOLS if tools is None else tools,
+        tools=active_tools,
         system_prompt=SYSTEM_PROMPT,
         middleware=[
             FilesystemMiddleware(
@@ -415,6 +440,7 @@ def _build_agent(model, response_format=None, *, tools=None, workspace=None):
         subagents=_specialists(model),
         backend=backend,
         permissions=permissions,
+        interrupt_on=APPROVAL_INTERRUPT_ON if approval_mode else None,
         response_format=response_format,
         state_schema=JasperDeepAgentState,
         name="jasper",
@@ -471,7 +497,10 @@ async def _invoke_combined(
     agent_context: dict | None = None,
 ) -> JasperResponse:
     if strategy == "native":
-        response_format = ProviderStrategy(JasperResponse)
+        response_format = ProviderStrategy(
+            _response_schema_for_model(model),
+            strict=True if _is_openai_model(model) else None,
+        )
     else:
         response_format = ToolStrategy(
             JasperResponse,
@@ -484,6 +513,7 @@ async def _invoke_combined(
         model,
         response_format=response_format,
         workspace=workspace,
+        execution_mode=(agent_context or {}).get("execution_mode"),
     ).ainvoke(_agent_input(messages, workspace, agent_context))
     response = JasperResponse.model_validate(result["structured_response"])
     tool_artifacts = _tool_artifacts(result.get("messages", []))
@@ -509,6 +539,7 @@ async def _invoke_plain(
         model,
         tools=None if tools_enabled else [],
         workspace=workspace,
+        execution_mode=(agent_context or {}).get("execution_mode"),
     ).ainvoke(_agent_input(messages, workspace, agent_context))
     result_messages = result.get("messages", [])
     plain_text = _last_assistant_text(result_messages)
@@ -594,7 +625,14 @@ async def _invoke_two_pass(
         agent_context=agent_context,
     )
     tool_artifacts = _tool_artifacts(evidence_messages)
-    formatter = model.with_structured_output(JasperResponse)
+    if _is_openai_model(model):
+        formatter = model.with_structured_output(
+            openai_jasper_response_json_schema(),
+            method="json_schema",
+            strict=True,
+        )
+    else:
+        formatter = model.with_structured_output(JasperResponse)
     try:
         structured = await formatter.ainvoke(
             [SystemMessage(content=FORMATTER_PROMPT), *evidence_messages]

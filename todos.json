@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-09T23:33:10Z",
+  "updated_at": "2026-08-13T03:55:18Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2264,32 +2264,32 @@
     },
     {
       "id": "top-level-research-and-session-sources",
-      "title": "Promote Research and Add Session Sources",
+      "title": "Promote The Librarian and Add Session Sources",
       "created_at": "2026-08-05T01:59:00Z",
       "planned_by_model": "openai/gpt-5",
       "planned_by_agent": "deep-agent",
       "todos": [
         {
           "id": "implement-visible-jasper-research-handoff",
-          "content": "Maintain the private prompt-focused Open Deep Research fork as a visible top-level agent named The Librarian, expose direct human selection and clarification, and then implement the approved Jasper to The Librarian to Jasper lifecycle: Jasper assigns or reopens it, the human may converse directly with The Librarian for clarification, and bounded user-visible Librarian messages, research results, citations, and final reports return to Jasper without exposing private reasoning or raw tool traces. Preserve the existing LangGraph Store/session evidence boundary and Research provenance requirements. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Maintain the private prompt-focused Open Deep Research fork as a visible top-level agent named The Librarian, expose direct human selection and clarification, and implement the approved Jasper to The Librarian to Jasper lifecycle: Jasper assigns or reopens it, the human may converse directly with The Librarian for clarification, and bounded user-visible Librarian messages, research results, citations, and final reports return to Jasper without exposing private reasoning or raw tool traces. Preserve the existing LangGraph Store/session evidence boundary and legacy Research provenance requirements. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "in_progress",
-          "agent": "research",
+          "agent": "librarian",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "On 2026-08-06, installed Open Deep Research 0.0.16 and added The Librarian as a directly selectable top-level graph node with a UI dropdown smoke path. On 2026-08-08, created the private standalone repository chapter-N3xtron/open_deep_research, retained upstream history, and completed a human-reviewed prompt-only no-self and anti-coercion revision through private commit 41edbe2ad4d91d830f233d001ec06a9eaf1fd71f. The review covered clarification and its schema, research-brief generation and schema, supervisor/delegation/completion/planning tool language, individual researcher behavior, Tavily language, webpage summarization and schema, compression, final-report construction, and bounded status/failure strings. No new pipeline stage or custom runtime logic was added. The main repository now pins the private fork as submodule backend/vendor/open_deep_research and installs it through a local uv source; the rebuilt durable Agent Server is healthy and confirms the private prompts are loaded. Focused backend tests passed 17/17 and lockfile, static prompt/schema, submodule, and container checks passed. The full backend reached 212 passed with the same previously documented unrelated Research MagicMock fixture failure; upstream deprecation warnings remain. MCP remains optional and unconfigured, with a transitive mcp<2 compatibility constraint required by the upstream eager import. The core launcher readiness window remains 180 seconds for clean image builds. Jasper handoff/conversation, model/provider mapping, durable report/evidence integration, visual/voice presentation, authorized live-provider research, and broader release verification remain unfinished. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "On 2026-08-06, installed Open Deep Research 0.0.16 and added The Librarian as a directly selectable top-level graph node with a UI dropdown smoke path. On 2026-08-08, created the private standalone repository chapter-N3xtron/open_deep_research, retained upstream history, and completed a human-reviewed prompt-only no-self and anti-coercion revision through private commit 41edbe2ad4d91d830f233d001ec06a9eaf1fd71f. The review covered clarification and its schema, research-brief generation and schema, supervisor/delegation/completion/planning tool language, individual researcher behavior, Tavily language, webpage summarization and schema, compression, final-report construction, and bounded status/failure strings. No new pipeline stage or custom runtime logic was added. The main repository now pins the private fork as submodule backend/vendor/open_deep_research and installs it through a local uv source; the rebuilt durable Agent Server is healthy and confirms the private prompts are loaded. Focused backend tests passed 17/17 and lockfile, static prompt/schema, submodule, and container checks passed. The full backend reached 212 passed with the same previously documented unrelated Research MagicMock fixture failure; upstream deprecation warnings remain. MCP remains optional and unconfigured, with a transitive mcp<2 compatibility constraint required by the upstream eager import. The core launcher readiness window remains 180 seconds for clean image builds. On 2026-08-13, new activity was normalized to the canonical Librarian route and Jasper's standard LangGraph handoff now targets Librarian. The UI selector and session labels now present only The Librarian. Speculative model rewriting, callback-based evidence capture, compatibility graph nodes, and custom voice-routing helpers were removed; durable evidence integration remains unfinished pending a standard documented LangGraph/Open Deep Research boundary. Destination-worktree tests passed 71/71 and changed-file Ruff and frontend TypeScript checks passed. Docker image rebuild and deployed UI verification remain unfinished. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "persist-bounded-session-research-evidence",
-          "content": "Persist immutable/content-versioned evidence records and structured cited report artifacts in the existing LangGraph Store: evidence retains source/provider identifier or URL, bounded retrieved/extracted content, status, timestamp, hash/version, provenance, and required metadata; reports cite evidence IDs and reopen without web calls. Keep short-lived working context/resumable run state in bounded LangGraph checkpoints and lightweight session references only; support deduplication, changed-content versions, and fork inheritance without copying bodies. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Persist Librarian-owned immutable/content-versioned evidence records and structured cited report artifacts in the existing LangGraph Store: evidence retains source/provider identifier or URL, bounded retrieved/extracted content, status, timestamp, hash/version, provenance, and required metadata; reports cite evidence IDs and reopen without web calls. Keep short-lived working context/resumable run state in bounded LangGraph checkpoints and lightweight session references only; support deduplication, changed-content versions, and fork inheritance without copying bodies. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "in_progress",
-          "agent": "research",
+          "agent": "librarian",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "No application database tables, migrations, custom persistence service, vector index, crawl, command access, write access, or OCR. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "No application database tables, migrations, custom persistence service, vector index, crawl, command access, write access, or OCR. The callback-based Librarian evidence adapter was removed because it was custom orchestration rather than a standard LangGraph implementation. The current Open Deep Research graph boundary does not yet expose source artifacts through the project's existing Store contract; implementation is blocked pending a documented standard integration path. Offline report reopening, fork inheritance, and live-provider evidence remain to be verified. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "add-session-sources-view-and-renaming",
-          "content": "Add the future Research dashboard/visual-workspace contract: show research status, brief/subquestions, progress, sources visited/read, retrieval failures/limitations, report status, durable evidence/report artifacts, and sanitized execution history; never expose chain-of-thought, secrets, raw auth data, or unsafe tool details. Retain accessible Sources review/session-only renaming and compose Jasper visual requests from selected saved evidence and/or report evidence references without rereading the web, with evidence-grounding/citation validation. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Add the future Librarian dashboard/visual-workspace contract: show research status, brief/subquestions, progress, sources visited/read, retrieval failures/limitations, report status, durable evidence/report artifacts, and sanitized execution history; never expose chain-of-thought, secrets, raw auth data, or unsafe tool details. Retain accessible Sources review/session-only renaming and compose Jasper visual requests from selected saved evidence and/or report evidence references without rereading the web, with evidence-grounding/citation validation. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "in_progress",
           "agent": "coding",
           "completed_by_model": null,
@@ -2298,9 +2298,9 @@
         },
         {
           "id": "verify-top-level-research-and-session-sources",
-          "content": "Verify visible Jasper to Research to Jasper routing/reopen and ordinary Jasper isolation; authorized bounded Research workflow and stop behavior; read-only workspace/upload protections; evidence/report checkpoint-Store separation, metadata/status integrity, offline reopen, reuse, versioning and fork inheritance; evidence-grounded visuals; and dashboard accessibility/sanitization. Verify selective Open Deep Research adaptation only after license/version/security review. Run focused tests, markdown/format checks, changed-file lint, frontend build, browser tests, full backend suite, OpenSpec strict validation, and separately reported authorized live-provider evidence. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "content": "Verify visible Jasper to The Librarian to Jasper routing/reopen and ordinary Jasper isolation; authorized bounded Librarian workflow and stop behavior; read-only workspace/upload protections; evidence/report checkpoint-Store separation, metadata/status integrity, offline reopen, reuse, versioning and fork inheritance; evidence-grounded visuals; and dashboard accessibility/sanitization. Verify the Open Deep Research adaptation after license/version/security review. Run focused tests, markdown/format checks, changed-file lint, frontend build, browser tests, full backend suite, OpenSpec strict validation, and separately reported authorized live-provider evidence. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "pending",
-          "agent": "research",
+          "agent": "librarian",
           "completed_by_model": null,
           "completed_at": null,
           "notes": "OCR remains pending and separate. Live provider and browser results must be reported separately from unit or mocked coverage. Governance reference: GOVERNANCE_FRAMEWORK.md."

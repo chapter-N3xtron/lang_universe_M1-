@@ -71,7 +71,7 @@ def test_interrupt_fires_on_handoff():
     # New HITL schema: {action_requests: [{name, args}], review_configs: [...]}
     assert "action_requests" in interrupt_data
     assert len(interrupt_data["action_requests"]) == 1
-    assert interrupt_data["action_requests"][0]["args"]["agent"] == "research"
+    assert interrupt_data["action_requests"][0]["args"]["agent"] == "librarian"
     assert "review_configs" in interrupt_data
     assert "approve" in interrupt_data["review_configs"][0]["allowed_decisions"]
 
@@ -111,7 +111,7 @@ def test_interrupt_approval_proceeds():
         result = asyncio.run(app.ainvoke(Command(resume=True), config=config))
 
     assert len(result.get("handoff_history", [])) >= 1
-    assert result["handoff_history"][0]["to"] == "research"
+    assert result["handoff_history"][0]["to"] == "librarian"
     msgs = result.get("messages", [])
     assert len(msgs) >= 1
 
@@ -158,7 +158,7 @@ def test_interrupt_approval_proceeds_via_decision_dict():
         )
 
     assert len(result.get("handoff_history", [])) >= 1
-    assert result["handoff_history"][0]["to"] == "research"
+    assert result["handoff_history"][0]["to"] == "librarian"
     msgs = result.get("messages", [])
     assert len(msgs) >= 1
 

@@ -68,16 +68,19 @@ def test_compiled_graph_declares_visible_jasper_coding_handoff_routes():
     assert ("record_session", "__end__") in edges
 
 
-def test_compiled_graph_declares_visible_jasper_research_handoff_routes():
+def test_compiled_graph_declares_visible_jasper_librarian_handoff_routes():
     _clear_src_modules()
     from src.chat_ui import create_chat_ui
 
     graph = _compile(create_chat_ui()).get_graph()
     edges = {(edge.source, edge.target) for edge in graph.edges}
 
-    assert ("jasper", "research") in edges
-    assert ("research", "jasper") in edges
+    assert ("jasper", "librarian") in edges
+    assert ("librarian", "jasper") in edges
     assert ("jasper", "record_session") in edges
+    assert ("jasper", "research") not in edges
+    assert ("supervisor", "research") not in edges
+    assert "research" not in graph.nodes
 
 
 def test_compiled_graph_declares_visible_librarian_route():
@@ -125,7 +128,7 @@ def test_new_session_opening_is_canonical_and_model_free():
     assert duplicate["session_opened"] is True
 
 
-def test_supervisor_routes_to_research():
+def test_legacy_research_selection_routes_to_librarian():
     mock_llm = _create_mock_llm(
         [
             _make_llm_response("Here is the research result."),
@@ -155,12 +158,11 @@ def test_supervisor_routes_to_research():
             )
         )
 
-    # target_agent=research routes directly (bypasses approval), produces a response,
-    # then supervisor re-runs and ends the turn (active_agent cleared).
+    # The legacy identifier remains accepted but is normalized before routing.
     assert len(result["handoff_history"]) >= 1
-    assert result["handoff_history"][0]["to"] == "research"
+    assert result["handoff_history"][0]["to"] == "librarian"
     assert len(result["decision_log"]) >= 1
-    assert "research" in result["decision_log"][0]["decision"]
+    assert "librarian" in result["decision_log"][0]["decision"]
     # Specialist should have produced an assistant message
     msgs = result.get("messages", [])
     assert len(msgs) >= 2, "Expected user + assistant messages"
@@ -198,9 +200,9 @@ def test_supervisor_audit_trail():
         )
 
     assert len(result["handoff_history"]) >= 1
-    assert result["handoff_history"][0]["to"] == "research"
+    assert result["handoff_history"][0]["to"] == "librarian"
     assert len(result["decision_log"]) >= 1
-    assert "research" in result["decision_log"][0]["decision"]
+    assert "librarian" in result["decision_log"][0]["decision"]
 
 
 def test_state_accumulation_across_turns():

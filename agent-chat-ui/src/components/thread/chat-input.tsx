@@ -57,7 +57,6 @@ const AGENT_OPTIONS = [
   { value: "", label: "Auto" },
   { value: "jasper", label: "Jasper" },
   { value: "coding", label: "Deep Agent" },
-  { value: "research", label: "Research" },
   { value: "librarian", label: "The Librarian" },
   { value: "magic-coder", label: "Magic Coder" },
 ] as const;
@@ -65,6 +64,7 @@ const AGENT_OPTIONS = [
 const DEFAULT_AGENT = "jasper";
 
 function agentValue(targetAgent: string | undefined): string {
+  if (targetAgent === "research") return "librarian";
   return targetAgent === undefined ? DEFAULT_AGENT : targetAgent;
 }
 
@@ -265,8 +265,7 @@ function ChatInputImpl({
           streamSubgraphs: false,
           streamResumable: true,
           multitaskStrategy: "reject",
-          onDisconnect:
-            executionMode === "autonomous" ? "continue" : "cancel",
+          onDisconnect: executionMode === "autonomous" ? "continue" : "cancel",
           config: isCloudModel(
             effectiveSelectedModel,
             modelProviders,

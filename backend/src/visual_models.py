@@ -256,6 +256,78 @@ def jasper_response_json_schema() -> dict:
     return schema
 
 
+_OPENAI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
+    {
+        "$id",
+        "$schema",
+        "default",
+        "exclusiveMaximum",
+        "exclusiveMinimum",
+        "examples",
+        "format",
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minItems",
+        "minLength",
+        "minimum",
+        "multipleOf",
+        "pattern",
+        "title",
+        "uniqueItems",
+    }
+)
+
+
+def _openai_schema(value):
+    if isinstance(value, list):
+        return [_openai_schema(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    one_of = value.get("oneOf")
+    if isinstance(one_of, list):
+        if len(one_of) == 1:
+            value = {
+                key: item
+                for key, item in value.items()
+                if key not in {"discriminator", "oneOf"}
+            }
+            value.update(one_of[0])
+        else:
+            value = {
+                key: item
+                for key, item in value.items()
+                if key not in {"discriminator", "oneOf"}
+            }
+            value["anyOf"] = one_of
+
+    result = {}
+    for key, item in value.items():
+        if key in _OPENAI_UNSUPPORTED_SCHEMA_KEYS or key == "discriminator":
+            continue
+        if key == "const":
+            result["enum"] = [item]
+        else:
+            result[key] = _openai_schema(item)
+
+    if result.get("type") == "object":
+        properties = result.get("properties", {})
+        result["properties"] = properties
+        result["required"] = list(properties)
+        result["additionalProperties"] = False
+
+    return result
+
+
+def openai_jasper_response_json_schema() -> dict:
+    """Return Jasper's strict Structured Outputs schema for OpenAI models."""
+
+    schema = _openai_schema(JasperResponse.model_json_schema())
+    schema["title"] = "JasperResponse"
+    return schema
+
+
 def safe_text_response(
     text: str,
     *,

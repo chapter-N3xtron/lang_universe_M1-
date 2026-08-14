@@ -78,3 +78,23 @@ cd ../agent-chat-ui
 
 Security, persistence, and migration evidence are documented in
 `backend/SECURITY.md`, `backend/PERSISTENCE.md`, and `backend/PARITY.md`.
+
+## Cinematic workflow experiment (initial scaffold)
+
+The root Python package in `src/film_workflow/` is a deliberately small set of
+configuration and schema contracts for investigating an LLM-driven animated-film
+workflow. The intended architecture is: an LLM plans typed jobs; a documented
+MCP remote bridge can mediate approved control; Blender Python runs scene setup
+and headless renders; and ComfyUI's API/extensions handle image-generation
+stages. Lens and film-look parameters remain explicit job data rather than
+hidden defaults. Blender and ComfyUI are external services/processes and no
+automation, MCP server, or database behavior is implemented yet.
+
+PostgreSQL is optional for the initial experiment. The optional `postgres`
+extra supports a later provenance store for runs, jobs, and asset metadata;
+the scaffold does not connect to it.
+
+Install the experiment with `uv sync --extra dev` (and optionally
+`--extra postgres` or `--extra integration`), then run `pytest` and `ruff check
+.`. The integration extra contains HTTP/MCP client libraries; Blender itself
+should be supplied by the host installation.

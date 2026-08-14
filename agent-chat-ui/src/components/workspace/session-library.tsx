@@ -23,7 +23,14 @@ import {
   type RuleGroupType,
 } from "react-querybuilder";
 import "react-querybuilder/dist/query-builder.css";
-import { ArrowDown, ArrowUp, Filter, Save, Search, Workflow } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Filter,
+  Save,
+  Search,
+  Workflow,
+} from "lucide-react";
 import { QueryBuilderShadcn } from "@/components/query-builder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,7 +49,11 @@ import { createClient } from "@/providers/client";
 
 const SESSION_FIELDS: Field[] = [
   { name: "created_at", label: "Created", inputType: "datetime-local" },
-  { name: "last_activity_at", label: "Last activity", inputType: "datetime-local" },
+  {
+    name: "last_activity_at",
+    label: "Last activity",
+    inputType: "datetime-local",
+  },
   // Wire field remains `workspace`; the UI label describes its repository binding.
   { name: "workspace", label: "Repository" },
   { name: "agent", label: "Agent" },
@@ -61,7 +72,11 @@ const SESSION_FIELDS: Field[] = [
       { name: "false", label: "No" },
     ],
   },
-  { name: "active_minutes", label: "Observed active minutes", inputType: "number" },
+  {
+    name: "active_minutes",
+    label: "Observed active minutes",
+    inputType: "number",
+  },
   { name: "text", label: "Summary text" },
 ];
 
@@ -186,7 +201,13 @@ export function SessionLibrary({
     enabled: Boolean(apiUrl && sessionIds.length),
   });
   const renameSession = useMutation({
-    mutationFn: async ({ sessionId, name }: { sessionId: string; name: string }) => {
+    mutationFn: async ({
+      sessionId,
+      name,
+    }: {
+      sessionId: string;
+      name: string;
+    }) => {
       const item = await storeClient.store.getItem(
         [LOCAL_OWNER_ID, "sessions"],
         sessionId,
@@ -201,7 +222,9 @@ export function SessionLibrary({
     },
     onSuccess: async () => {
       setEditingSessionId(null);
-      await queryClient.invalidateQueries({ queryKey: ["session-store-names"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["session-store-names"],
+      });
     },
   });
 
@@ -215,42 +238,47 @@ export function SessionLibrary({
         header: "Session",
         cell: (info) => {
           const sessionId = info.row.original.session_id;
-          const name =
-            sessionNamesQuery.data?.[sessionId] ?? info.getValue();
+          const name = sessionNamesQuery.data?.[sessionId] ?? info.getValue();
           return (
-          <div className="min-w-64 max-w-xl" onClick={(event) => event.stopPropagation()}>
-            {editingSessionId === sessionId ? (
-              <Input
-                autoFocus
-                aria-label="Session name"
-                value={sessionName}
-                onChange={(event) => setSessionName(event.target.value)}
-                onBlur={() => setEditingSessionId(null)}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                  if (event.key === "Escape") setEditingSessionId(null);
-                  if (event.key === "Enter" && sessionName.trim()) {
-                    renameSession.mutate({ sessionId, name: sessionName.trim() });
-                  }
-                }}
-              />
-            ) : (
-              <button
-                type="button"
-                className="font-medium hover:underline"
-                onClick={() => {
-                  setEditingSessionId(sessionId);
-                  setSessionName(String(name));
-                }}
-                onKeyDown={(event) => event.stopPropagation()}
-              >
-                {String(name)}
-              </button>
-            )}
-            <p className="text-muted-foreground mt-1 line-clamp-3 text-sm leading-5">
-              {info.row.original.long_description}
-            </p>
-          </div>
+            <div
+              className="max-w-xl min-w-64"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {editingSessionId === sessionId ? (
+                <Input
+                  autoFocus
+                  aria-label="Session name"
+                  value={sessionName}
+                  onChange={(event) => setSessionName(event.target.value)}
+                  onBlur={() => setEditingSessionId(null)}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === "Escape") setEditingSessionId(null);
+                    if (event.key === "Enter" && sessionName.trim()) {
+                      renameSession.mutate({
+                        sessionId,
+                        name: sessionName.trim(),
+                      });
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="font-medium hover:underline"
+                  onClick={() => {
+                    setEditingSessionId(sessionId);
+                    setSessionName(String(name));
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  {String(name)}
+                </button>
+              )}
+              <p className="text-muted-foreground mt-1 line-clamp-3 text-sm leading-5">
+                {info.row.original.long_description}
+              </p>
+            </div>
           );
         },
       }),
@@ -268,7 +296,10 @@ export function SessionLibrary({
         enableSorting: false,
         cell: (info) =>
           info.getValue().length
-            ? info.getValue().map((workspace) => workspace.name).join(", ")
+            ? info
+                .getValue()
+                .map((workspace) => workspace.name)
+                .join(", ")
             : "None",
       }),
       columnHelper.accessor("agents", {
@@ -276,14 +307,21 @@ export function SessionLibrary({
         enableSorting: false,
         cell: (info) =>
           info.getValue().length
-            ? info.getValue().map((agent) => agent.profile_id).join(", ")
+            ? info
+                .getValue()
+                .map((agent) => agent.profile_id)
+                .join(", ")
             : "None",
       }),
       columnHelper.accessor("visual_count", {
         header: "Visuals",
         cell: (info) => (
           <span className="inline-flex items-center gap-1">
-            <Workflow className="size-4" aria-hidden /> {info.getValue()}
+            <Workflow
+              className="size-4"
+              aria-hidden
+            />{" "}
+            {info.getValue()}
           </span>
         ),
       }),
@@ -300,12 +338,17 @@ export function SessionLibrary({
     mutationFn: () => {
       const name = viewName.trim();
       if (!name) throw new Error("Enter a name for this view.");
-      const viewId = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const viewId = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
       return saveSessionView(apiUrl, viewId, name, queryInput, authScheme);
     },
     onSuccess: async () => {
       setViewName("");
-      await queryClient.invalidateQueries({ queryKey: ["session-catalog-views", apiUrl] });
+      await queryClient.invalidateQueries({
+        queryKey: ["session-catalog-views", apiUrl],
+      });
     },
   });
 
@@ -322,11 +365,18 @@ export function SessionLibrary({
     if (view.query.visible_columns.length) {
       const nextOrder = [
         ...view.query.visible_columns,
-        ...DEFAULT_ORDER.filter((id) => !view.query.visible_columns.includes(id)),
+        ...DEFAULT_ORDER.filter(
+          (id) => !view.query.visible_columns.includes(id),
+        ),
       ];
       void setColumnOrder(nextOrder);
       setVisibility(
-        Object.fromEntries(DEFAULT_ORDER.map((id) => [id, view.query.visible_columns.includes(id)])),
+        Object.fromEntries(
+          DEFAULT_ORDER.map((id) => [
+            id,
+            view.query.visible_columns.includes(id),
+          ]),
+        ),
       );
     }
     void setCursor(null);
@@ -343,7 +393,8 @@ export function SessionLibrary({
       setCursorHistory([]);
     },
     onColumnOrderChange: (updater) => {
-      const next = typeof updater === "function" ? updater(columnOrder) : updater;
+      const next =
+        typeof updater === "function" ? updater(columnOrder) : updater;
       void setColumnOrder(next);
     },
     onColumnVisibilityChange: setVisibility,
@@ -363,13 +414,22 @@ export function SessionLibrary({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col" aria-labelledby="session-library-title">
+    <section
+      className="flex h-full min-h-0 flex-col"
+      aria-labelledby="session-library-title"
+    >
       <header className="border-b px-4 py-3 pr-40">
         <div className="flex flex-wrap items-center gap-3">
           <div>
-            <h2 id="session-library-title" className="font-semibold">All sessions</h2>
+            <h2
+              id="session-library-title"
+              className="font-semibold"
+            >
+              All sessions
+            </h2>
             <p className="text-muted-foreground text-xs">
-              {sessionQuery.data?.total ?? 0} owner-controlled knowledge-work sessions
+              {sessionQuery.data?.total ?? 0} owner-controlled knowledge-work
+              sessions
             </p>
           </div>
           <label className="relative ml-auto min-w-52 flex-1 sm:max-w-sm">
@@ -410,20 +470,27 @@ export function SessionLibrary({
               />
             </QueryBuilderShadcn>
             <fieldset>
-              <legend className="mb-2 text-sm font-medium">Visible column order</legend>
+              <legend className="mb-2 text-sm font-medium">
+                Visible column order
+              </legend>
               <div className="flex flex-wrap gap-2">
                 {columnOrder.map((id, index) => {
                   const column = table.getColumn(id);
                   if (!column) return null;
                   return (
-                    <span key={id} className="bg-background inline-flex items-center rounded-md border">
+                    <span
+                      key={id}
+                      className="bg-background inline-flex items-center rounded-md border"
+                    >
                       <label className="flex items-center gap-2 px-2 text-xs">
                         <input
                           type="checkbox"
                           checked={column.getIsVisible()}
                           onChange={column.getToggleVisibilityHandler()}
                         />
-                        {typeof column.columnDef.header === "string" ? column.columnDef.header : id}
+                        {typeof column.columnDef.header === "string"
+                          ? column.columnDef.header
+                          : id}
                       </label>
                       <Button
                         size="icon"
@@ -449,20 +516,32 @@ export function SessionLibrary({
               </div>
             </fieldset>
             <div className="flex max-w-2xl flex-wrap gap-2">
-              <label className="sr-only" htmlFor="saved-session-view">Load saved view</label>
+              <label
+                className="sr-only"
+                htmlFor="saved-session-view"
+              >
+                Load saved view
+              </label>
               <select
                 id="saved-session-view"
                 className="bg-background min-w-48 rounded-md border px-3 text-sm"
                 defaultValue=""
                 onChange={(event) => {
-                  const view = savedViewsQuery.data?.find((item) => item.view_id === event.target.value);
+                  const view = savedViewsQuery.data?.find(
+                    (item) => item.view_id === event.target.value,
+                  );
                   if (view) applySavedView(view);
                   event.target.value = "";
                 }}
               >
                 <option value="">Load saved view…</option>
                 {savedViewsQuery.data?.map((view) => (
-                  <option key={view.view_id} value={view.view_id}>{view.name}</option>
+                  <option
+                    key={view.view_id}
+                    value={view.view_id}
+                  >
+                    {view.name}
+                  </option>
                 ))}
               </select>
               <Input
@@ -471,26 +550,47 @@ export function SessionLibrary({
                 placeholder="Name this filter view"
                 aria-label="Saved view name"
               />
-              <Button onClick={() => saveView.mutate()} disabled={saveView.isPending}>
+              <Button
+                onClick={() => saveView.mutate()}
+                disabled={saveView.isPending}
+              >
                 <Save className="size-4" /> Save view
               </Button>
             </div>
             {saveView.error && (
-              <p role="alert" className="text-destructive text-sm">{saveView.error.message}</p>
+              <p
+                role="alert"
+                className="text-destructive text-sm"
+              >
+                {saveView.error.message}
+              </p>
             )}
           </div>
         </details>
 
         {sessionQuery.isLoading ? (
-          <div className="space-y-2" aria-label="Loading sessions">
+          <div
+            className="space-y-2"
+            aria-label="Loading sessions"
+          >
             {Array.from({ length: 8 }).map((_, index) => (
-              <Skeleton key={index} className="h-16 w-full" />
+              <Skeleton
+                key={index}
+                className="h-16 w-full"
+              />
             ))}
           </div>
         ) : sessionQuery.error ? (
-          <div role="alert" className="border-destructive/40 bg-destructive/5 rounded-lg border p-4">
-            <p className="font-medium">The session library could not be loaded.</p>
-            <p className="text-muted-foreground mt-1 text-sm">{sessionQuery.error.message}</p>
+          <div
+            role="alert"
+            className="border-destructive/40 bg-destructive/5 rounded-lg border p-4"
+          >
+            <p className="font-medium">
+              The session library could not be loaded.
+            </p>
+            <p className="text-muted-foreground mt-1 text-sm">
+              {sessionQuery.error.message}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto rounded-lg border">
@@ -499,18 +599,32 @@ export function SessionLibrary({
                 {table.getHeaderGroups().map((headerGroup) => (
                   <tr key={headerGroup.id}>
                     {headerGroup.headers.map((header) => (
-                      <th key={header.id} scope="col" className="border-b px-3 py-2 font-medium">
+                      <th
+                        key={header.id}
+                        scope="col"
+                        className="border-b px-3 py-2 font-medium"
+                      >
                         {header.isPlaceholder ? null : header.column.getCanSort() ? (
                           <button
                             className="inline-flex items-center gap-1 text-left"
                             onClick={header.column.getToggleSortingHandler()}
                             title="Sort; hold Shift to combine sorts"
                           >
-                            {flexRender(header.column.columnDef.header, header.getContext())}
-                            {header.column.getIsSorted() === "asc" ? " ↑" : header.column.getIsSorted() === "desc" ? " ↓" : null}
+                            {flexRender(
+                              header.column.columnDef.header,
+                              header.getContext(),
+                            )}
+                            {header.column.getIsSorted() === "asc"
+                              ? " ↑"
+                              : header.column.getIsSorted() === "desc"
+                                ? " ↓"
+                                : null}
                           </button>
                         ) : (
-                          flexRender(header.column.columnDef.header, header.getContext())
+                          flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )
                         )}
                       </th>
                     ))}
@@ -532,14 +646,27 @@ export function SessionLibrary({
                     }}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-3 py-3 align-top">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      <td
+                        key={cell.id}
+                        className="px-3 py-3 align-top"
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
                       </td>
                     ))}
                   </tr>
                 ))}
                 {!table.getRowModel().rows.length && (
-                  <tr><td colSpan={visibleColumns.length} className="text-muted-foreground p-8 text-center">No sessions match these filters.</td></tr>
+                  <tr>
+                    <td
+                      colSpan={visibleColumns.length}
+                      className="text-muted-foreground p-8 text-center"
+                    >
+                      No sessions match these filters.
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -559,7 +686,9 @@ export function SessionLibrary({
               setCursorHistory([]);
             }}
           >
-            {[10, 25, 50, 100].map((size) => <option key={size}>{size}</option>)}
+            {[10, 25, 50, 100].map((size) => (
+              <option key={size}>{size}</option>
+            ))}
           </select>
         </label>
         <div className="flex gap-2">
@@ -572,7 +701,9 @@ export function SessionLibrary({
               setCursorHistory((history) => history.slice(0, -1));
               void setCursor(previous);
             }}
-          >Previous</Button>
+          >
+            Previous
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -581,7 +712,9 @@ export function SessionLibrary({
               setCursorHistory((history) => [...history, cursor]);
               void setCursor(sessionQuery.data?.next_cursor ?? null);
             }}
-          >Next</Button>
+          >
+            Next
+          </Button>
         </div>
       </footer>
     </section>

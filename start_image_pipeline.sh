@@ -267,7 +267,7 @@ start_langgraph() {
   _ensure_dirs
   echo "  Starting LangGraph (graph server)..."
   cd "$ROOT/backend"
-  nohup ./.venv/bin/langgraph up --image "jasper-langgraph:current" --port "$LANGGRAPH_PORT" --wait \
+  nohup ./.venv/bin/langgraph up --image "langgraph-openai-ollama:current" --port "$LANGGRAPH_PORT" --wait \
     --docker-compose "$ROOT/backend/docker-compose.override.yml" \
     >> "$LOGDIR/langgraph.log" 2>&1 &
   echo $! > "$PIDDIR/langgraph.pid"

@@ -3,9 +3,13 @@ services:
     volumes:
       - ..:/workspace
       - /Volumes/Storage:/Volumes/Storage
-      - ${HOME}/world_monitor:${HOME}/world_monitor
+      - ${HOME}:${HOME}
       - coding-tools:/opt/coding-tools
-      - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock
+    tmpfs:
+      - ${HOME}/.ssh
+      - ${HOME}/.aws
+      - ${HOME}/.gnupg
+      - ${HOME}/.config/gh
     environment:
       - AGENT_WORKSPACE=/workspace
       - TODOS_FILE=/workspace/todos.json
@@ -15,7 +19,6 @@ services:
       - SESSION_RUNTIME_ID=backend-postgres-v1
       - NPM_CONFIG_PREFIX=/opt/coding-tools/node
       - PNPM_HOME=/opt/coding-tools/pnpm
-      - SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock
 
 volumes:
   coding-tools:

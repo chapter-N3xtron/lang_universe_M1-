@@ -82,6 +82,7 @@ function HumanMessageImpl({
   return (
     <div
       data-message-id={message.id}
+      data-conversation-placement-target={arrivalAnchorKey ? "true" : undefined}
       data-conversation-arrival-anchor-top={arrivalAnchorKey}
       className={cn(
         "group ml-auto flex items-center gap-2",

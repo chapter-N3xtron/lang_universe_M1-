@@ -23,6 +23,7 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { GitHubSVG } from "@/components/icons/github";
 import { Textarea } from "@/components/ui/textarea";
+import { ManualScrollObservationControl } from "@/components/manual-scroll-observation-control";
 import {
   Dialog,
   DialogClose,
@@ -193,6 +194,10 @@ export function SessionWorkspaceTopBar({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ManualScrollObservationControl
+        key={threadId ?? "no-thread"}
+        threadId={threadId}
+      />
       <div className="ml-auto flex items-center gap-1">
         <TooltipIconButton
           size="lg"

@@ -8,7 +8,6 @@ import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import { useTTS } from "@/hooks/useTTS";
 import type { ConceptMapArtifact } from "@/lib/visual/jasper-response.generated";
-import { getContentString } from "./utils";
 
 interface MessageListProps {
   isLoading: boolean;
@@ -223,46 +222,124 @@ function MessageListImpl({
   const lastHuman = [...messages]
     .reverse()
     .find((message) => message.type === "human");
+  const messageId = (message: Message | undefined, fallback: number) =>
+    String(message?.id ?? fallback);
+  const lastMessageId = messageId(lastMessage, messages.length - 1);
+  const lastHumanId = messageId(lastHuman, messages.length - 1);
   const arrivalAnchorKey = lastMessage
-    ? `${lastMessage.type}:${String(lastMessage.id ?? messages.length - 1)}`
+    ? `${lastMessage.type}:${lastMessageId}`
     : undefined;
-  const assistantAnchorKey = String(
-    lastHuman?.id ?? lastMessage?.id ?? messages.length - 1,
-  );
-  // Each newly inserted turn gets one placement after layout settles. The
-  // key is tied to the arriving message so assistant growth does not create
-  // another scroll owner.
-  const positioningKey =
-    lastMessage && getContentString(lastMessage.content).trim()
-      ? lastMessage.type === "ai"
-        ? `assistant:${assistantAnchorKey}`
-        : arrivalAnchorKey
-      : undefined;
+  const assistantAnchorKey = lastMessageId;
   const positioningCancelledRef = useRef(false);
-  const programmaticScrollUntilRef = useRef(0);
+  const programmaticScrollRef = useRef<{ top: number; until: number } | null>(
+    null,
+  );
+  const placementStatesRef = useRef(
+    new Map<
+      string,
+      {
+        phase:
+          | "hydrated"
+          | "user-arrived"
+          | "assistant-completed"
+          | "human-controlled";
+        hydrated: boolean;
+        userMessageId?: string;
+        assistantMessageId?: string;
+      }
+    >(),
+  );
   const previousThreadIdRef = useRef(threadId);
-  const reopenPlacementThreadRef = useRef<string | null>(null);
-  const reopenPlacementPendingRef = useRef(false);
-  const hydratedThreadRef = useRef<string | null>(null);
   const createdThreadCandidateRef = useRef(false);
+  const [placementRequest, setPlacementRequest] = useState<{
+    threadId: string;
+    phase: "hydrated" | "user-arrived" | "assistant-completed";
+  } | null>(null);
+
+  const requestPlacement = useCallback(
+    (
+      nextThreadId: string,
+      phase: "hydrated" | "user-arrived" | "assistant-completed",
+    ) => {
+      const state = placementStatesRef.current.get(nextThreadId);
+      if (state?.phase === "human-controlled") return;
+      setPlacementRequest({ threadId: nextThreadId, phase });
+    },
+    [],
+  );
 
   useEffect(() => {
-    // Hydrated history is top-anchored once, but a later user turn starts a
-    // new arrival cycle and must allow exactly one assistant placement.
+    const previousThreadId = previousThreadIdRef.current;
+    const hasThreadIdInUrl =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("threadId");
+    if (!threadId && !hasThreadIdInUrl)
+      createdThreadCandidateRef.current = true;
+    if (previousThreadId !== threadId) {
+      positioningCancelledRef.current = false;
+      setPlacementRequest(null);
+    }
+    previousThreadIdRef.current = threadId;
+    if (!threadId || messages.length === 0) return;
+    let state = placementStatesRef.current.get(threadId);
+    if (!state) {
+      state = { phase: "hydrated", hydrated: false };
+      placementStatesRef.current.set(threadId, state);
+    }
+    const isNewlyCreatedThread =
+      createdThreadCandidateRef.current && previousThreadId === null;
+    if (!state.hydrated && !isNewlyCreatedThread) {
+      state.hydrated = true;
+      state.phase = "hydrated";
+      requestPlacement(threadId, "hydrated");
+      return;
+    }
     if (
       lastMessage?.type === "human" &&
-      hydratedThreadRef.current === threadId
+      state.userMessageId !== lastMessageId
     ) {
-      hydratedThreadRef.current = null;
+      state.userMessageId = lastMessageId;
+      state.phase = "user-arrived";
+      requestPlacement(threadId, "user-arrived");
+      return;
     }
-  }, [lastMessage?.type, threadId]);
+    // Completion is semantic: streaming content changes while loading do not qualify.
+    if (
+      lastMessage?.type === "ai" &&
+      !isLoading &&
+      state.assistantMessageId !== lastMessageId
+    ) {
+      state.assistantMessageId = lastMessageId;
+      state.phase = "assistant-completed";
+      requestPlacement(threadId, "assistant-completed");
+    }
+  }, [
+    isLoading,
+    lastHumanId,
+    lastMessage,
+    lastMessageId,
+    messages.length,
+    requestPlacement,
+    threadId,
+  ]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const cancel = () => {
-      if (performance.now() < programmaticScrollUntilRef.current) return;
+      const programmatic = programmaticScrollRef.current;
+      if (
+        programmatic &&
+        performance.now() < programmatic.until &&
+        Math.abs(viewport.scrollTop - programmatic.top) < 1
+      )
+        return;
       positioningCancelledRef.current = true;
+      if (threadId) {
+        const state = placementStatesRef.current.get(threadId);
+        if (state) state.phase = "human-controlled";
+      }
+      setPlacementRequest(null);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -275,167 +352,93 @@ function MessageListImpl({
           "End",
           " ",
         ].includes(event.key)
-      ) {
+      )
         cancel();
-      }
     };
-    const onCancel = () => cancel();
     viewport.addEventListener("wheel", cancel, { passive: true });
     viewport.addEventListener("touchstart", cancel, { passive: true });
+    viewport.addEventListener("touchmove", cancel, { passive: true });
+    viewport.addEventListener("pointermove", cancel, { passive: true });
+    viewport.addEventListener("selectstart", cancel, { passive: true });
+    viewport.addEventListener("dragstart", cancel, { passive: true });
+    viewport.addEventListener("pointerdown", cancel, { passive: true });
+    viewport.addEventListener("scroll", cancel, { passive: true });
     window.addEventListener("keydown", onKeyDown, true);
-    document.addEventListener("selectionchange", cancel, { passive: true });
-    window.addEventListener("conversation:cancel-positioning", onCancel);
+    window.addEventListener("conversation:cancel-positioning", cancel);
     return () => {
       viewport.removeEventListener("wheel", cancel);
       viewport.removeEventListener("touchstart", cancel);
+      viewport.removeEventListener("touchmove", cancel);
+      viewport.removeEventListener("pointermove", cancel);
+      viewport.removeEventListener("selectstart", cancel);
+      viewport.removeEventListener("dragstart", cancel);
+      viewport.removeEventListener("pointerdown", cancel);
+      viewport.removeEventListener("scroll", cancel);
       window.removeEventListener("keydown", onKeyDown, true);
-      document.removeEventListener("selectionchange", cancel);
-      window.removeEventListener("conversation:cancel-positioning", onCancel);
+      window.removeEventListener("conversation:cancel-positioning", cancel);
     };
-  }, [viewportRef]);
+  }, [threadId, viewportRef]);
 
   useEffect(() => {
-    const previousThreadId = previousThreadIdRef.current;
-    const hasThreadIdInUrl =
-      typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).has("threadId");
-    if (!threadId && !hasThreadIdInUrl) {
-      createdThreadCandidateRef.current = true;
-    }
-    const isReopenedCreatedThread =
-      createdThreadCandidateRef.current &&
-      previousThreadId === null &&
-      threadId !== null &&
-      messages.length > 0;
-    if (!threadId || messages.length === 0) {
-      previousThreadIdRef.current = threadId;
-      return;
-    }
-
-    if (isReopenedCreatedThread) {
-      // A newly created thread receives its server id alongside the optimistic
-      // message. It is an arrival, not hydrated history.
-      reopenPlacementThreadRef.current = threadId;
-      reopenPlacementPendingRef.current = false;
-      previousThreadIdRef.current = threadId;
-      return;
-    }
-
-    if (reopenPlacementThreadRef.current === threadId) {
-      previousThreadIdRef.current = threadId;
-      return;
-    }
-
-    reopenPlacementThreadRef.current = threadId;
-    hydratedThreadRef.current = threadId;
-    reopenPlacementPendingRef.current = true;
-    previousThreadIdRef.current = threadId;
-    let cancelled = false;
-    let frame = 0;
-    let stableFrames = 0;
-    let previousHeight = -1;
-    const placeLatestAtTop = () => {
-      const latestMessages =
-        viewportRef.current?.querySelectorAll<HTMLElement>("[data-message-id]");
-      if (cancelled) return;
-      const viewport = viewportRef.current;
-      if (!viewport) return;
-      if (!latestMessages?.length) {
-        window.requestAnimationFrame(placeLatestAtTop);
-        return;
-      }
-      const height = viewport.scrollHeight;
-      stableFrames = height === previousHeight ? stableFrames + 1 : 0;
-      previousHeight = height;
-      if (stableFrames >= 2 || frame >= 12) {
-        programmaticScrollUntilRef.current = performance.now() + 100;
-        viewport.scrollTo({
-          top: Math.max(
-            0,
-            viewport.scrollTop +
-              latestMessages[latestMessages.length - 1].getBoundingClientRect()
-                .top -
-              viewport.getBoundingClientRect().top -
-              32,
-          ),
-          behavior: "auto",
-        });
-        reopenPlacementPendingRef.current = false;
-        return;
-      }
-      frame += 1;
-      window.requestAnimationFrame(placeLatestAtTop);
-    };
-    const frameId = window.requestAnimationFrame(placeLatestAtTop);
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [messages.length, threadId, viewportRef]);
-
-  useEffect(() => {
-    if (
-      !positioningKey ||
-      reopenPlacementPendingRef.current ||
-      hydratedThreadRef.current === threadId
-    )
-      return;
+    if (!placementRequest || placementRequest.threadId !== threadId) return;
     positioningCancelledRef.current = false;
     let cancelled = false;
     let frame = 0;
     let stableFrames = 0;
     let previousRect: DOMRect | undefined;
     let rafId: number | undefined;
-
+    const anchor =
+      placementRequest.phase === "hydrated"
+        ? "[data-message-id]"
+        : `[data-conversation-arrival-anchor-top="${CSS.escape(placementRequest.phase === "user-arrived" ? `human:${lastMessageId}` : `assistant:${lastMessageId}`)}"]`;
     const positionOnce = () => {
       if (cancelled || positioningCancelledRef.current) return;
       const viewport = viewportRef.current;
-      const topAnchor = viewport?.querySelector<HTMLElement>(
-        `[data-conversation-arrival-anchor-top="${CSS.escape(positioningKey)}"]`,
+      const nodes = viewport?.querySelectorAll<HTMLElement>(anchor);
+      const target = nodes?.[nodes.length - 1];
+      if (!viewport || !target) return;
+      const contentShell = viewport.firstElementChild as HTMLElement | null;
+      if (!contentShell) return;
+      const usableTop = Number.parseFloat(
+        getComputedStyle(contentShell).paddingTop || "0",
       );
-      if (!viewport || !topAnchor) return;
       const top = Math.max(
         0,
         viewport.scrollTop +
-          topAnchor.getBoundingClientRect().top -
+          target.getBoundingClientRect().top -
           viewport.getBoundingClientRect().top -
-          32,
+          usableTop,
       );
-      // Use one immediate placement so later answer growth and stream updates
-      // never create a competing scroll owner.
-      // Immediate placement is also the reduced-motion-safe behavior.
-      programmaticScrollUntilRef.current = performance.now() + 100;
+      programmaticScrollRef.current = { top, until: performance.now() + 100 };
       viewport.scrollTo({ top, behavior: "auto" });
+      setPlacementRequest(null);
     };
-
     const settle = () => {
       if (cancelled || positioningCancelledRef.current) return;
       const viewport = viewportRef.current;
-      const topAnchor = viewport?.querySelector<HTMLElement>(
-        `[data-conversation-arrival-anchor-top="${CSS.escape(positioningKey)}"]`,
-      );
-      if (!viewport || !topAnchor) return;
-      const rect = topAnchor.getBoundingClientRect();
+      const nodes = viewport?.querySelectorAll<HTMLElement>(anchor);
+      const target = nodes?.[nodes.length - 1];
+      if (!viewport || !target) {
+        rafId = window.requestAnimationFrame(settle);
+        return;
+      }
+      const rect = target.getBoundingClientRect();
       const stable =
         previousRect &&
         Math.abs(rect.top - previousRect.top) < 0.5 &&
         Math.abs(rect.height - previousRect.height) < 0.5;
       stableFrames = stable ? stableFrames + 1 : 0;
       previousRect = rect;
-      if (stableFrames >= 2 || frame >= 12) {
-        positionOnce();
-        return;
-      }
+      if (stableFrames >= 2 || frame >= 12) return positionOnce();
       frame += 1;
       rafId = window.requestAnimationFrame(settle);
     };
-
     rafId = window.requestAnimationFrame(settle);
     return () => {
       cancelled = true;
       if (rafId !== undefined) window.cancelAnimationFrame(rafId);
     };
-  }, [positioningKey, threadId, viewportRef]);
+  }, [lastHumanId, lastMessageId, placementRequest, threadId, viewportRef]);
 
   return (
     <>

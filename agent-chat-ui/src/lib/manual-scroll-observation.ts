@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Development-only, in-memory observation capture for a manually recorded smoke
+ * Local-only, in-memory observation capture for a manually recorded smoke
  * session. This module never reads network requests, storage, cookies, headers,
  * environment files, or model/provider internals.
  */
@@ -19,9 +19,9 @@ type RecordingMetadata = {
   notes?: string;
 };
 
-type CaptureOptions = {
+export type CaptureOptions = {
   scenarioId: string;
-  threadId?: string;
+  threadId: string;
   recording?: RecordingMetadata;
 };
 
@@ -42,7 +42,6 @@ export type ObservationManifest = {
   };
   artifacts: {
     observation_log: string;
-    manifest: string;
     recording: RecordingMetadata & { status: "manual" | "not-provided" };
   };
   started_at: string;
@@ -75,23 +74,16 @@ type ObservationBundle = {
   events: ObservationEvent[];
 };
 
-type CaptureController = {
-  start(options: CaptureOptions): ObservationManifest;
+export type CaptureController = {
   pause(): void;
   resume(): void;
   stop(): ObservationManifest | null;
   discard(): void;
   delete(): void;
   setRecording(metadata: RecordingMetadata): void;
-  status(): ObservationManifest | null;
+  status(): ObservationManifest;
   redact(value: string): { value: string; redacted: boolean };
 };
-
-declare global {
-  interface Window {
-    manualScrollObservation?: CaptureController;
-  }
-}
 
 const SECRET_RULES = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gi,
@@ -211,7 +203,6 @@ function installCapture(options: CaptureOptions): CaptureController {
     },
     artifacts: {
       observation_log: `${sessionId}.json`,
-      manifest: `${sessionId}.manifest.json`,
       recording: {
         ...recording,
         status:
@@ -335,7 +326,6 @@ function installCapture(options: CaptureOptions): CaptureController {
   };
 
   return {
-    start: () => manifest(),
     pause: () => {
       if (lifecycle === "active") {
         emit("session.pause", "manual");
@@ -361,7 +351,6 @@ function installCapture(options: CaptureOptions): CaptureController {
       };
       try {
         download(finalManifest.artifacts.observation_log, bundle);
-        download(finalManifest.artifacts.manifest, finalManifest);
       } catch (error) {
         finalizationError =
           error instanceof Error ? error.message : "download failed";
@@ -385,33 +374,17 @@ function installCapture(options: CaptureOptions): CaptureController {
   };
 }
 
-export function installManualScrollObservation(): void {
-  if (typeof window === "undefined" || process.env.NODE_ENV === "production")
-    return;
-  if (window.manualScrollObservation) return;
-  let controller: CaptureController | null = null;
-  window.manualScrollObservation = {
-    start(options) {
-      if (controller && controller.status()?.lifecycle !== "discarded")
-        throw new Error("A capture session is already active");
-      if (!options?.scenarioId?.trim())
-        throw new Error("start requires a named scenarioId");
-      if (
-        !window.confirm(
-          "Manual scroll observation will capture rendered message content. Keep it local, stop/discard when finished, and delete downloaded artifacts afterwards. Start?",
-        )
-      )
-        throw new Error("content-capture warning declined");
-      controller = installCapture(options);
-      return controller.status()!;
-    },
-    pause: () => controller?.pause(),
-    resume: () => controller?.resume(),
-    stop: () => controller?.stop() ?? null,
-    discard: () => controller?.discard(),
-    delete: () => controller?.delete(),
-    setRecording: (metadata) => controller?.setRecording(metadata),
-    status: () => controller?.status() ?? null,
-    redact: redacted,
-  };
+export function startManualScrollObservation(
+  options: CaptureOptions,
+): CaptureController {
+  if (!options.scenarioId.trim())
+    throw new Error("Capture requires a scenario ID");
+  if (!options.threadId.trim()) throw new Error("Capture requires a thread ID");
+  if (
+    !window.confirm(
+      "JSON capture records rendered message content. Keep the downloaded file local and review it before sharing. Start capture?",
+    )
+  )
+    throw new Error("Content-capture warning declined");
+  return installCapture(options);
 }

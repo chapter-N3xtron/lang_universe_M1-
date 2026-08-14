@@ -211,6 +211,7 @@ function ThreadImpl() {
                     "mx-auto w-full max-w-3xl pt-8 pb-8",
                     !chatStarted && "flex min-h-full flex-col justify-end",
                   )}
+                  data-conversation-content-shell
                 >
                   <MessageList
                     isLoading={isLoading}

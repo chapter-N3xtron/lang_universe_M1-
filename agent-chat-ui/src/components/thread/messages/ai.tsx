@@ -219,6 +219,7 @@ function AssistantMessageImpl({
       data-message-id={message?.id}
       data-answer-shell={isToolResult ? undefined : anchorKey}
       data-answer-anchor={isToolResult ? undefined : anchorKey}
+      data-conversation-placement-target={isToolResult ? undefined : "true"}
       data-conversation-arrival-anchor-top={
         isToolResult ? undefined : `assistant:${conversationArrivalAnchorKey}`
       }
@@ -231,7 +232,7 @@ function AssistantMessageImpl({
           <span
             aria-hidden="true"
             data-answer-anchor-top={anchorKey}
-            data-conversation-arrival-anchor-top={`assistant:${conversationArrivalAnchorKey}`}
+            data-conversation-arrival-anchor-top={undefined}
           />
         )}
         {isToolResult ? (

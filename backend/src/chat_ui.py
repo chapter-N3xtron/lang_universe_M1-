@@ -18,6 +18,12 @@ from src.librarian_agent import librarian_agent
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
 from src.session_catalog import record_session_projection
+from src.workspace_policy import (
+    ExecutionManifest,
+    WorkspacePolicyError,
+    canonical_workspace,
+    execution_manifest,
+)
 
 
 class State(TypedDict):
@@ -31,6 +37,7 @@ class State(TypedDict):
     user_identity: str
     coding_session_id: str
     coding_status: str
+    execution_manifest: ExecutionManifest
     coding_task: str
     jasper_structured_response: dict
     visual_artifacts: list[dict]
@@ -361,12 +368,36 @@ def create_chat_ui():
             return Command(goto="record_session")
 
         configurable = config.get("configurable", {})
+        try:
+            workspace = (
+                canonical_workspace(state.get("workspace"))
+                if state.get("workspace")
+                else None
+            )
+        except WorkspacePolicyError:
+            return Command(
+                goto="record_session",
+                update={
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "name": "jasper",
+                            "content": (
+                                "The selected workspace is unavailable or unauthorized "
+                                "(invalid_workspace). No substitute workspace was used."
+                            ),
+                        }
+                    ]
+                },
+            )
+        manifest = execution_manifest(workspace) if workspace is not None else None
         result = await call_jasper(
             {
                 "messages": state["messages"],
                 "todos": state.get("todos", []),
                 "model": state.get("model", ""),
-                "workspace": state.get("workspace") or os.getcwd(),
+                "workspace": str(workspace) if workspace is not None else "",
+                "execution_manifest": manifest,
                 "execution_mode": state.get("execution_mode") or state.get("mode"),
                 "thread_identity": state.get("thread_identity")
                 or configurable.get("thread_id", ""),
@@ -457,6 +488,16 @@ def create_chat_ui():
             "coding_task": "",
             "coding_session_id": result.get("coding_session_id", ""),
             "coding_status": coding_status,
+            **(
+                {"workspace": result["workspace"]}
+                if result.get("workspace") is not None
+                else {}
+            ),
+            **(
+                {"execution_manifest": result["execution_manifest"]}
+                if result.get("execution_manifest") is not None
+                else {}
+            ),
         }
         return Command(goto="jasper", update=update)
 
@@ -491,8 +532,31 @@ def create_chat_ui():
     ) -> dict:
         """Persist the completed turn without adding another model call."""
 
-        await record_session_projection(state, config, runtime)
-        return {}
+        try:
+            workspace = (
+                canonical_workspace(state.get("workspace"))
+                if state.get("workspace")
+                else None
+            )
+        except WorkspacePolicyError:
+            await record_session_projection(state, config, runtime)
+            return {}
+        manifest = execution_manifest(workspace) if workspace is not None else None
+        projection_state = dict(state)
+        if workspace is not None and manifest is not None:
+            projection_state.update(
+                {
+                    "workspace": str(workspace),
+                    "execution_manifest": manifest,
+                }
+            )
+        await record_session_projection(projection_state, config, runtime)
+        if workspace is None or manifest is None:
+            return {}
+        return {
+            "workspace": str(workspace),
+            "execution_manifest": manifest,
+        }
 
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("session_opening", session_opening_node)

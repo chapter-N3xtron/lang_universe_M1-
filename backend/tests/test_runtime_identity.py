@@ -9,6 +9,9 @@ def test_runtime_identity_fails_closed_without_deployment_marker(monkeypatch):
         "runtime_id": "unverified",
         "durable": False,
         "persistence": "unverified",
+        "command_runtime": "linux_agent_server_container",
+        "native_host_operations": "unavailable_without_separate_approval",
+        "host_operation_request": "unavailable",
     }
 
 
@@ -20,4 +23,7 @@ def test_runtime_identity_reports_docker_postgres_marker(monkeypatch):
         "runtime_id": "backend-postgres-v1",
         "durable": True,
         "persistence": "postgres",
+        "command_runtime": "linux_agent_server_container",
+        "native_host_operations": "unavailable_without_separate_approval",
+        "host_operation_request": "unavailable",
     }

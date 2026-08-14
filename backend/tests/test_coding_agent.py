@@ -49,7 +49,13 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
         )
     )
 
-    assert result["messages"] == output
+    assert result["messages"][:2] == output[:2]
+    assert result["messages"][-1].content.startswith("Repository summary")
+    assert "linux_agent_server_container" in result["messages"][-1].content
+    assert result["execution_manifest"]["selected_repository"] == str(
+        tmp_path.resolve()
+    )
+    assert result["workspace"] == str(tmp_path.resolve())
     assert result["coding_session_id"] == coding_agent.coding_session_id(
         thread_identity="thread-7", workspace=tmp_path
     )
@@ -274,6 +280,10 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
     }
     assert captured["agent"]["permissions"] is None
     assert captured["agent"]["skills"] == ["/.agents/skills/"]
+    system_prompt = captured["agent"]["system_prompt"]
+    assert "Never search parent, child, or sibling" in system_prompt
+    assert "linux_agent_server_container" in system_prompt
+    assert "request_macos_host_operation: unavailable" in system_prompt
 
     coding_agent._build_deep_agent(
         tmp_path.resolve(),

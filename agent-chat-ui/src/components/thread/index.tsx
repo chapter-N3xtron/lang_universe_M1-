@@ -250,9 +250,6 @@ function ThreadImpl() {
               !chatStarted && "grid-rows-[1fr]",
             )}
           >
-
-
-
             <StickToBottom className="relative flex-1 overflow-hidden">
               <StickyToBottomContent
                 className="absolute inset-0 flex min-h-0 flex-col overflow-hidden"
@@ -299,6 +296,8 @@ function ThreadImpl() {
             voiceOptions={voiceOptions}
             chatStarted={chatStarted}
             targetAgent={stream.values?.target_agent}
+            threadId={threadId}
+            workspace={stream.values?.workspace}
             streamActions={streamActions}
             onStartSubmit={handleSubmit}
             apiUrl={apiUrl}

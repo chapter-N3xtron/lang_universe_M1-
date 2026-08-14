@@ -2438,6 +2438,7 @@ name = "langgraph-agent-chat-deep-agents"
 version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "deepagents" },
     { name = "fastapi" },
     { name = "firecrawl-py" },
@@ -2492,6 +2493,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'sidecar'", specifier = ">=4.14,<5" },
+    { name = "cryptography", specifier = ">=49.0.0" },
     { name = "deepagents", specifier = "==0.7.0b2" },
     { name = "fastapi", specifier = ">=0.115.0,<1" },
     { name = "faster-whisper", marker = "extra == 'sidecar'", specifier = ">=1.0.0" },

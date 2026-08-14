@@ -5,9 +5,13 @@
 #   Ollama     :11434   local LLM host (required for Magic Coder)
 #   ComfyUI    :8188    image renderer (optional)
 #   Element    GUI      VST/AU plugin host (Rare → LALA → reverb/delay)
+#   Host exec  :8765    optional, separately installed macOS executor (loopback only)
 #   LangGraph  :8123    supervisor graph server (core — UI talks to this)
 #   Backend    :8000    FastAPI sidecar (TTS/STT/models list)
 #   Frontend   :3001    Next.js chat UI (production build, served by next start)
+#
+# The host executor is never installed or updated by start/restart. An operator must
+# explicitly run `install-host-executor`; this launcher performs no canary actions.
 #
 # Audio chain (macOS only):
 #   System output → BlackHole 2ch → Element → Built-in speakers
@@ -18,9 +22,11 @@
 #   ./start_image_pipeline.sh stop       Shut everything down
 #   ./start_image_pipeline.sh status     Show what's running
 #   ./start_image_pipeline.sh restart    Stop then start
-#   ./start_image_pipeline.sh restart-core  Restart LangGraph, sidecar, and UI only
+#   ./start_image_pipeline.sh restart-core  Restart host executor and core services
+#   ./start_image_pipeline.sh install-host-executor  Explicit operator-only install
 
 set -e
+umask 077
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOGDIR="$ROOT/logs"
@@ -36,6 +42,23 @@ COMFYUI_PORT=8188
 LANGGRAPH_PORT=8123
 BACKEND_PORT=8000
 FRONTEND_PORT=3001
+HOST_EXECUTOR_PORT=8765
+
+# This installation is deliberately outside every writable repository. Runtime
+# startup only consumes this integrity-checked snapshot; it never imports from ROOT.
+HOST_EXECUTOR_ROOT="$HOME/.jasper/macos-host-executor"
+HOST_EXECUTOR_RUNTIME="$HOST_EXECUTOR_ROOT/runtime"
+HOST_EXECUTOR_PRIVATE="$HOST_EXECUTOR_ROOT/private"
+HOST_EXECUTOR_PUBLIC="$HOST_EXECUTOR_ROOT/public"
+HOST_EXECUTOR_POLICY="$HOST_EXECUTOR_PRIVATE/config/policy.json"
+HOST_EXECUTOR_STATE="$HOST_EXECUTOR_PRIVATE/state"
+HOST_EXECUTOR_PIDFILE="$HOST_EXECUTOR_PRIVATE/run/executor.pid"
+HOST_EXECUTOR_LOG="$HOST_EXECUTOR_PRIVATE/logs/executor-redacted.log"
+HOST_EXECUTOR_PYTHON="$HOST_EXECUTOR_RUNTIME/venv/bin/python"
+HOST_EXECUTOR_HELPER="$HOST_EXECUTOR_RUNTIME/bin/macos-host-confirmation"
+HOST_EXECUTOR_PUBLIC_KEY="$HOST_EXECUTOR_PUBLIC/receipt-signing.pub"
+HOST_EXECUTOR_AGENT_SERVER="http://127.0.0.1:8123"
+HOST_EXECUTOR_BOOTSTRAP_PYTHON="${HOST_EXECUTOR_BOOTSTRAP_PYTHON:-$(command -v python3 2>/dev/null || true)}"
 
 COMFYUI_DIR="$HOME/fun-multi-character-chats/ComfyUI"
 COMFYUI_PYTHON="$HOME/fun-multi-character-chats/.venv/bin/python"
@@ -54,7 +77,8 @@ AUDIO_RESTORE_DEVICE="MacBook Pro Speakers"
 # ── helpers ────────────────────────────────────────────────────────────
 
 _ensure_dirs() {
-  mkdir -p "$LOGDIR" "$PIDDIR"
+  mkdir -p "$LOGDIR" "$PIDDIR" "$HOST_EXECUTOR_PUBLIC"
+  chmod 755 "$HOST_EXECUTOR_PUBLIC"
 }
 
 _pid_alive() {
@@ -256,6 +280,246 @@ status_element() {
   fi
 }
 
+# ── optional macOS host executor ───────────────────────────────────────
+
+_host_executor_installed() {
+  [ -f "$HOST_EXECUTOR_RUNTIME/integrity.sha256" ]
+}
+
+_host_executor_command() {
+  print -r -- "$HOST_EXECUTOR_PYTHON -B -m macos_host_executor --host 127.0.0.1 --port $HOST_EXECUTOR_PORT --policy-json $HOST_EXECUTOR_POLICY --agent-server-url $HOST_EXECUTOR_AGENT_SERVER --confirmation-helper $HOST_EXECUTOR_HELPER --state-directory $HOST_EXECUTOR_STATE --public-key-output $HOST_EXECUTOR_PUBLIC_KEY"
+}
+
+_host_executor_pid_matches() {
+  local pid="$1" expected actual
+  [[ "$pid" == <-> ]] || return 1
+  _pid_alive "$pid" || return 1
+  expected=$(_host_executor_command)
+  actual=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+  [ "$actual" = "$expected" ]
+}
+
+_verify_host_executor_integrity() {
+  _host_executor_installed || return 1
+  (cd "$HOST_EXECUTOR_RUNTIME" && /usr/bin/shasum -a 256 -c integrity.sha256 >/dev/null 2>&1)
+}
+
+_host_executor_healthy() {
+  local body
+  body=$(curl -fsS --connect-timeout 1 --max-time 2 \
+    "http://127.0.0.1:$HOST_EXECUTOR_PORT/health" 2>/dev/null) || return 1
+  print -r -- "$body" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' && \
+    print -r -- "$body" | grep -Eq '"service"[[:space:]]*:[[:space:]]*"macos-host-executor"'
+}
+
+install_host_executor() {
+  if [ ! -t 0 ]; then
+    echo "  Refusing non-interactive host-executor installation."
+    return 1
+  fi
+  if [ ! -x "$HOST_EXECUTOR_BOOTSTRAP_PYTHON" ] || \
+    ! "$HOST_EXECUTOR_BOOTSTRAP_PYTHON" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))'; then
+    echo "  Python 3.11 or newer is required; set HOST_EXECUTOR_BOOTSTRAP_PYTHON."
+    return 1
+  fi
+  echo "This operator-only action snapshots the current executor source outside the repo."
+  echo "It installs Python dependencies and compiles the native Swift confirmation helper."
+  printf "Type INSTALL to continue: "
+  local answer
+  read -r answer
+  [ "$answer" = "INSTALL" ] || { echo "  Installation cancelled."; return 1; }
+
+  if [ -f "$HOST_EXECUTOR_PIDFILE" ]; then
+    local running_pid
+    running_pid=$(cat "$HOST_EXECUTOR_PIDFILE" 2>/dev/null || true)
+    if _host_executor_pid_matches "$running_pid" || \
+      { [[ "$running_pid" == <-> ]] && _pid_alive "$running_pid"; }; then
+      echo "  Stop the exact host-executor process before replacing its runtime snapshot."
+      return 1
+    fi
+    # A dead PID is only stale state. Removing the file cannot signal a reused PID.
+    rm -f "$HOST_EXECUTOR_PIDFILE"
+  fi
+
+  umask 077
+  mkdir -p "$HOST_EXECUTOR_ROOT" "$HOST_EXECUTOR_PRIVATE/config" \
+    "$HOST_EXECUTOR_PRIVATE/state" "$HOST_EXECUTOR_PRIVATE/run" \
+    "$HOST_EXECUTOR_PRIVATE/logs" "$HOST_EXECUTOR_PRIVATE/tmp" \
+    "$HOST_EXECUTOR_PRIVATE/home" "$HOST_EXECUTOR_PUBLIC"
+  chmod 700 "$HOST_EXECUTOR_ROOT" "$HOST_EXECUTOR_PRIVATE" \
+    "$HOST_EXECUTOR_PRIVATE/config" "$HOST_EXECUTOR_PRIVATE/state" \
+    "$HOST_EXECUTOR_PRIVATE/run" "$HOST_EXECUTOR_PRIVATE/logs" \
+    "$HOST_EXECUTOR_PRIVATE/tmp" "$HOST_EXECUTOR_PRIVATE/home"
+  chmod 755 "$HOST_EXECUTOR_PUBLIC"
+
+  local staged="$HOST_EXECUTOR_ROOT/.runtime-new-$$"
+  rm -rf "$staged"
+  mkdir -p "$staged/snapshot" "$staged/bin"
+  /usr/bin/ditto --noqtn "$ROOT/macos-host-executor" "$staged/snapshot"
+  rm -rf "$staged/snapshot/.pytest_cache" "$staged/snapshot/.ruff_cache" \
+    "$staged/snapshot/.venv" "$staged/snapshot/native/ConfirmationHelper/.build"
+
+  echo "  Creating isolated Python environment..."
+  "$HOST_EXECUTOR_BOOTSTRAP_PYTHON" -m venv "$staged/venv"
+  "$staged/venv/bin/python" -m pip install --disable-pip-version-check \
+    "$staged/snapshot"
+
+  echo "  Compiling native confirmation helper..."
+  /usr/bin/xcrun swift build -c release \
+    --package-path "$staged/snapshot/native/ConfirmationHelper"
+  cp "$staged/snapshot/native/ConfirmationHelper/.build/release/macos-host-confirmation" \
+    "$staged/bin/macos-host-confirmation"
+  rm -rf "$staged/snapshot/native/ConfirmationHelper/.build"
+  chmod 500 "$staged/bin/macos-host-confirmation"
+
+  (cd "$staged" && find snapshot venv bin -type f \
+    -exec /usr/bin/shasum -a 256 {} + | LC_ALL=C sort > integrity.sha256)
+  chmod -R a-w "$staged"
+  find "$staged" -type d -exec chmod a+rx {} +
+  chmod u+w "$staged"
+
+  local previous="$HOST_EXECUTOR_ROOT/.runtime-previous"
+  rm -rf "$previous"
+  [ ! -d "$HOST_EXECUTOR_RUNTIME" ] || mv "$HOST_EXECUTOR_RUNTIME" "$previous"
+  mv "$staged" "$HOST_EXECUTOR_RUNTIME"
+  chmod a-w "$HOST_EXECUTOR_RUNTIME"
+  rm -rf "$previous"
+
+  if [ ! -f "$HOST_EXECUTOR_POLICY" ]; then
+    cp "$HOST_EXECUTOR_RUNTIME/snapshot/policy.example.json" "$HOST_EXECUTOR_POLICY"
+    chmod 600 "$HOST_EXECUTOR_POLICY"
+  fi
+  echo "  Installed integrity-isolated runtime at $HOST_EXECUTOR_RUNTIME"
+  echo "  Review $HOST_EXECUTOR_POLICY before enabling any host action."
+  echo "  No host operation or canary was run."
+}
+
+start_host_executor() {
+  if ! _host_executor_installed; then
+    echo "  macOS host operations unavailable (operator has not installed executor)"
+    return 0
+  fi
+  if ! _verify_host_executor_integrity; then
+    echo "  Host executor integrity check failed; refusing core startup"
+    return 1
+  fi
+  if [ ! -f "$HOST_EXECUTOR_POLICY" ]; then
+    echo "  Host executor policy is missing; refusing core startup"
+    return 1
+  fi
+
+  local pid=""
+  [ ! -f "$HOST_EXECUTOR_PIDFILE" ] || pid=$(cat "$HOST_EXECUTOR_PIDFILE" 2>/dev/null || true)
+  if _host_executor_pid_matches "$pid"; then
+    if _host_executor_healthy; then
+      echo "  macOS host executor already healthy on 127.0.0.1:$HOST_EXECUTOR_PORT (pid $pid)"
+      return 0
+    fi
+    echo "  Installed host executor has matching process identity but is unhealthy"
+    return 1
+  elif [[ "$pid" == <-> ]] && _pid_alive "$pid"; then
+    echo "  Refusing live foreign executor PID identity in $HOST_EXECUTOR_PIDFILE"
+    return 1
+  elif [ -n "$pid" ]; then
+    # Dead/malformed PID state is safe to clear; never signal it.
+    rm -f "$HOST_EXECUTOR_PIDFILE"
+  fi
+
+  umask 077
+  mkdir -p "$HOST_EXECUTOR_STATE" "$HOST_EXECUTOR_PRIVATE/run" \
+    "$HOST_EXECUTOR_PRIVATE/logs" "$HOST_EXECUTOR_PRIVATE/tmp" \
+    "$HOST_EXECUTOR_PRIVATE/home" "$HOST_EXECUTOR_PUBLIC"
+  chmod 700 "$HOST_EXECUTOR_PRIVATE" "$HOST_EXECUTOR_STATE" \
+    "$HOST_EXECUTOR_PRIVATE/run" "$HOST_EXECUTOR_PRIVATE/logs" \
+    "$HOST_EXECUTOR_PRIVATE/tmp" "$HOST_EXECUTOR_PRIVATE/home"
+  chmod 755 "$HOST_EXECUTOR_PUBLIC"
+  touch "$HOST_EXECUTOR_LOG"
+  chmod 600 "$HOST_EXECUTOR_LOG"
+
+  echo "  Starting optional macOS host executor..."
+  nohup env -i HOME="$HOST_EXECUTOR_PRIVATE/home" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    TMPDIR="$HOST_EXECUTOR_PRIVATE/tmp" PYTHONDONTWRITEBYTECODE=1 \
+    "$HOST_EXECUTOR_PYTHON" -B -m macos_host_executor \
+    --host 127.0.0.1 --port "$HOST_EXECUTOR_PORT" \
+    --policy-json "$HOST_EXECUTOR_POLICY" \
+    --agent-server-url "$HOST_EXECUTOR_AGENT_SERVER" \
+    --confirmation-helper "$HOST_EXECUTOR_HELPER" \
+    --state-directory "$HOST_EXECUTOR_STATE" \
+    --public-key-output "$HOST_EXECUTOR_PUBLIC_KEY" \
+    >> "$HOST_EXECUTOR_LOG" 2>&1 &
+  pid=$!
+  print -r -- "$pid" > "$HOST_EXECUTOR_PIDFILE"
+  disown
+
+  local attempt
+  for attempt in {1..30}; do
+    if ! _host_executor_pid_matches "$pid"; then
+      echo "  Host executor exited or changed identity; refusing core startup"
+      rm -f "$HOST_EXECUTOR_PIDFILE"
+      return 1
+    fi
+    if _host_executor_healthy; then
+      chmod 444 "$HOST_EXECUTOR_PUBLIC_KEY"
+      echo "  macOS host executor healthy on http://127.0.0.1:$HOST_EXECUTOR_PORT"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "  Installed host executor failed health checks; refusing core startup"
+  return 1
+}
+
+stop_host_executor() {
+  if [ ! -f "$HOST_EXECUTOR_PIDFILE" ]; then
+    echo "  macOS host executor not running"
+    return 0
+  fi
+  local pid
+  pid=$(cat "$HOST_EXECUTOR_PIDFILE" 2>/dev/null || true)
+  if ! _host_executor_pid_matches "$pid"; then
+    if [[ "$pid" == <-> ]] && _pid_alive "$pid"; then
+      echo "  Refusing to signal live foreign host-executor PID '$pid'"
+      return 1
+    fi
+    rm -f "$HOST_EXECUTOR_PIDFILE"
+    echo "  Removed stale host-executor PID state without signaling a process"
+    return 0
+  fi
+  kill -TERM "$pid"
+  local attempt
+  for attempt in {1..50}; do
+    _pid_alive "$pid" || break
+    sleep 0.1
+  done
+  if _pid_alive "$pid"; then
+    if ! _host_executor_pid_matches "$pid"; then
+      echo "  Host-executor identity changed during stop; refusing further signals"
+      return 1
+    fi
+    kill -KILL "$pid"
+  fi
+  rm -f "$HOST_EXECUTOR_PIDFILE"
+  echo "  macOS host executor (pid $pid) stopped"
+}
+
+status_host_executor() {
+  if ! _host_executor_installed; then
+    echo "  Host exec  :$HOST_EXECUTOR_PORT  –  unavailable (not installed)"
+    return 0
+  fi
+  local pid=""
+  [ ! -f "$HOST_EXECUTOR_PIDFILE" ] || pid=$(cat "$HOST_EXECUTOR_PIDFILE" 2>/dev/null || true)
+  if _host_executor_pid_matches "$pid" && _host_executor_healthy; then
+    echo "  Host exec  :$HOST_EXECUTOR_PORT  ✓  healthy (pid $pid)"
+  elif [ -n "$pid" ]; then
+    echo "  Host exec  :$HOST_EXECUTOR_PORT  !  installed but unhealthy/identity mismatch"
+    return 1
+  else
+    echo "  Host exec  :$HOST_EXECUTOR_PORT  ✗  installed but stopped"
+    return 1
+  fi
+}
+
 # ── langgraph ──────────────────────────────────────────────────────────
 
 start_langgraph() {
@@ -397,6 +661,9 @@ start_frontend() {
   # lets the user (or their coding agent) edit UI code and have the next launch
   # pick up the changes automatically — no manual `pnpm build` step required.
   local needs_build=0
+  local frontend_api_url="http://127.0.0.1:$LANGGRAPH_PORT"
+  local frontend_assistant_id="agent"
+  local frontend_build_config="api=$frontend_api_url assistant=$frontend_assistant_id"
   if [ ! -f ".next/BUILD_ID" ] || [ ! -f ".next/prerender-manifest.json" ]; then
     needs_build=1
   else
@@ -416,13 +683,19 @@ start_frontend() {
       needs_build=1
     fi
   fi
+  if [ "$(cat .next/.jasper-runtime-config 2>/dev/null || true)" != "$frontend_build_config" ]; then
+    needs_build=1
+  fi
 
   if [ "$needs_build" = "1" ]; then
     echo "  Building frontend (production)..."
-    ./node_modules/.bin/next build >> "$LOGDIR/frontend-build.log" 2>&1 || {
+    NEXT_PUBLIC_API_URL="$frontend_api_url" \
+      NEXT_PUBLIC_ASSISTANT_ID="$frontend_assistant_id" \
+      ./node_modules/.bin/next build >> "$LOGDIR/frontend-build.log" 2>&1 || {
       echo "  Frontend build failed — check $LOGDIR/frontend-build.log"
       return 1
     }
+    print -r -- "$frontend_build_config" > .next/.jasper-runtime-config
   else
     echo "  Using cached build (.next/BUILD_ID up to date)"
   fi
@@ -476,6 +749,16 @@ case "${1:-}" in
 
     echo "── LangGraph (graph server, port $LANGGRAPH_PORT) ──"
     start_langgraph
+    echo ""
+
+    # Pending-interrupt verification requires Agent Server first. An installed
+    # executor that cannot become healthy closes the whole core boundary.
+    echo "── macOS host executor (optional, port $HOST_EXECUTOR_PORT) ──"
+    if ! start_host_executor; then
+      stop_langgraph
+      echo "  Core startup refused: installed host executor is unavailable."
+      exit 1
+    fi
     echo ""
 
     echo "── Backend (sidecar, port $BACKEND_PORT) ──"
@@ -540,6 +823,9 @@ case "${1:-}" in
     echo "── Backend ──"
     stop_backend
 
+    echo "── macOS host executor ──"
+    stop_host_executor
+
     echo "── LangGraph ──"
     stop_langgraph
 
@@ -569,6 +855,7 @@ case "${1:-}" in
     echo ""
     echo "── Core services ──"
     status_langgraph
+    status_host_executor || true
     status_backend
     status_frontend
     echo ""
@@ -590,17 +877,27 @@ case "${1:-}" in
     echo ""
     stop_frontend
     stop_backend
+    stop_host_executor
     stop_langgraph
     echo ""
     start_langgraph
+    if ! start_host_executor; then
+      stop_langgraph
+      echo "  Core restart refused: installed host executor is unavailable."
+      exit 1
+    fi
     start_backend
     start_frontend
     echo ""
     echo "Core chat services ready at http://localhost:$FRONTEND_PORT"
     ;;
 
+  install-host-executor)
+    install_host_executor
+    ;;
+
   *)
-    echo "Usage: $0 {start|stop|status|restart|restart-core}"
+    echo "Usage: $0 {start|stop|status|restart|restart-core|install-host-executor}"
     exit 1
     ;;
 esac

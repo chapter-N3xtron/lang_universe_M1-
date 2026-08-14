@@ -466,7 +466,7 @@ def test_explicit_jasper_selection_stays_sticky_across_turns():
     assert "route_to_magic-coder" not in decisions
 
 
-def test_jasper_passes_selected_workspace_and_langgraph_thread_to_coding():
+def test_jasper_passes_selected_workspace_and_langgraph_thread_to_coding(tmp_path):
     captured = []
 
     async def fake_call_jasper(state):
@@ -485,7 +485,7 @@ def test_jasper_passes_selected_workspace_and_langgraph_thread_to_coding():
             app.ainvoke(
                 {
                     "messages": [{"role": "user", "content": "Use Coding"}],
-                    "workspace": "/selected/workspace",
+                    "workspace": str(tmp_path),
                     "target_agent": "jasper",
                     "mode": "read_only",
                     "model": "ollama/test-model",
@@ -494,7 +494,10 @@ def test_jasper_passes_selected_workspace_and_langgraph_thread_to_coding():
             )
         )
 
-    assert captured[0]["workspace"] == "/selected/workspace"
+    assert captured[0]["workspace"] == str(tmp_path.resolve())
+    assert captured[0]["execution_manifest"]["selected_repository"] == str(
+        tmp_path.resolve()
+    )
     assert captured[0]["thread_identity"] == "jasper-coding-thread"
 
 

@@ -25,6 +25,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "langchain-openai>=1.4,<2",
     "open-deep-research",
+    "cryptography>=49.0.0",
 ]
 
 [project.optional-dependencies]

@@ -17,6 +17,19 @@ from langgraph.graph import END, START, StateGraph
 
 from src.coding_persistence import coding_session_id, export_coding_session
 from src.llm import get_coding_llm
+from src.macos_host_operations import (
+    create_request_macos_host_operation_tool,
+    load_operator_config,
+)
+from src.workspace_policy import (
+    ExecutionManifest,
+    WorkspacePolicyError,
+    canonical_workspace,
+    execution_manifest,
+    format_execution_manifest,
+)
+
+InvalidWorkspaceError = WorkspacePolicyError
 
 
 class CodingAgentState(TypedDict, total=False):
@@ -28,10 +41,7 @@ class CodingAgentState(TypedDict, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: str
-
-
-class InvalidWorkspaceError(ValueError):
-    """Raised when a coding request is not confined to an absolute directory."""
+    execution_manifest: ExecutionManifest
 
 
 _SENSITIVE_VIRTUAL_PATHS = [
@@ -50,9 +60,17 @@ _SENSITIVE_VIRTUAL_PATHS = [
 ]
 logger = logging.getLogger(__name__)
 
-_SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str], Any] = OrderedDict()
+_SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str, str], Any] = OrderedDict()
 _SESSION_AGENT_CACHE_SIZE = 8
 _CODING_TOOL_PATHS = ("/opt/coding-tools/node/bin", "/opt/coding-tools/pnpm")
+
+_HOST_OPERATION_INTERRUPT = {
+    "allowed_decisions": ["approve", "reject"],
+    "description": (
+        "Review this exact macOS host-operation plan. Approval only resumes receipt "
+        "verification; host execution is independently confirmed outside Coding."
+    ),
+}
 
 _LOCAL_APPROVAL_INTERRUPT_ON = {
     "write_file": {
@@ -75,18 +93,9 @@ _LOCAL_APPROVAL_INTERRUPT_ON = {
 
 
 def _validated_workspace(raw_workspace: str | None) -> Path:
-    if not raw_workspace:
-        raise InvalidWorkspaceError("workspace is required")
-    candidate = Path(raw_workspace).expanduser()
-    if not candidate.is_absolute():
-        raise InvalidWorkspaceError("workspace must be absolute")
-    try:
-        resolved = candidate.resolve(strict=True)
-    except OSError as exc:
-        raise InvalidWorkspaceError("workspace does not exist") from exc
-    if not resolved.is_dir():
-        raise InvalidWorkspaceError("workspace must be a directory")
-    return resolved
+    """Compatibility wrapper around the shared fail-closed workspace policy."""
+
+    return canonical_workspace(raw_workspace)
 
 
 def _message_type(message: Any) -> str:
@@ -167,7 +176,26 @@ def _build_deep_agent(
         )
     else:
         backend = filesystem_backend_type(root_dir=workspace, virtual_mode=True)
-    interrupt_on = _LOCAL_APPROVAL_INTERRUPT_ON if approval_mode else None
+    operator_config = load_operator_config()
+    host_tool_enabled = operator_config is not None and (approval_mode or autonomous_mode)
+    tools = (
+        [create_request_macos_host_operation_tool(operator_config)]
+        if host_tool_enabled and operator_config is not None
+        else []
+    )
+    if approval_mode:
+        interrupt_on = {
+            **_LOCAL_APPROVAL_INTERRUPT_ON,
+            **(
+                {"request_macos_host_operation": _HOST_OPERATION_INTERRUPT}
+                if host_tool_enabled
+                else {}
+            ),
+        }
+    elif autonomous_mode and host_tool_enabled:
+        interrupt_on = {"request_macos_host_operation": _HOST_OPERATION_INTERRUPT}
+    else:
+        interrupt_on = None
     if approval_mode:
         mutation_prompt = (
             "Use the built-in repository file tools and execute tool for coding work. "
@@ -189,14 +217,29 @@ def _build_deep_agent(
     skills = (
         ["/.agents/skills/"] if (workspace / ".agents" / "skills").is_dir() else None
     )
+    manifest_text = format_execution_manifest(execution_manifest(workspace))
 
     return create_deep_agent(
         model=get_coding_llm(model_name),
-        tools=[],
+        tools=tools,
         name="coding_agent",
         system_prompt=(
-            "You are the repository coding agent. Inspect only the selected "
-            "workspace. Use absolute virtual paths rooted at /. " + mutation_prompt
+            "You are the repository coding agent. The exact selected repository is "
+            "authoritative, including when it is empty. Never search parent, child, "
+            "or sibling directories for another repository; never substitute the "
+            "home directory, current working directory, /workspace, or another "
+            "checkout. Use absolute virtual paths rooted at /, which maps only to "
+            "the selected repository. Commands execute in the Linux Agent Server "
+            "container; repository files originate from the macOS-host bind mount. "
+            "Never describe container commands as Mac-host commands or infer a "
+            "macOS mutation from Linux output. For work requiring macOS, a native "
+            "application, Homebrew, DMG handling, or /Applications, call "
+            "request_macos_host_operation only when the execution manifest reports "
+            "that capability available; otherwise report the host operation as "
+            "unavailable and do not attempt a Linux substitute.\n\n"
+            + manifest_text
+            + "\n\n"
+            + mutation_prompt
         ),
         memory=memory,
         skills=skills,
@@ -213,7 +256,13 @@ async def _session_agent(
     execution_mode: str,
 ):
     mode = _execution_mode(execution_mode)
-    key = (str(workspace), model_name or "", mode)
+    operator_config = load_operator_config()
+    config_identity = (
+        f"{operator_config.endpoint}:{operator_config.key_id}"
+        if operator_config is not None
+        else "unavailable"
+    )
+    key = (str(workspace), model_name or "", mode, config_identity)
     if key in _SESSION_AGENT_CACHE:
         app = _SESSION_AGENT_CACHE.pop(key)
         _SESSION_AGENT_CACHE[key] = app
@@ -280,6 +329,38 @@ def _has_final_assistant_message(messages: list[Any]) -> bool:
     )
 
 
+def _format_coding_result(
+    messages: list[Any], manifest: ExecutionManifest
+) -> list[Any]:
+    """Attach the same deterministic execution identity to the final result."""
+
+    formatted = list(messages)
+    for index in range(len(formatted) - 1, -1, -1):
+        message = formatted[index]
+        if _message_type(message) not in {"ai", "assistant"} or _tool_calls(message):
+            continue
+        content = _message_text(message)
+        if not content:
+            continue
+        result_text = f"{content}\n\n{format_execution_manifest(manifest)}"
+        if isinstance(message, dict):
+            replacement = dict(message)
+            replacement["content"] = result_text
+            replacement["execution_manifest"] = dict(manifest)
+        else:
+            additional_kwargs = dict(getattr(message, "additional_kwargs", {}))
+            additional_kwargs["execution_manifest"] = dict(manifest)
+            replacement = message.model_copy(
+                update={
+                    "content": result_text,
+                    "additional_kwargs": additional_kwargs,
+                }
+            )
+        formatted[index] = replacement
+        break
+    return formatted
+
+
 async def _invoke_session(
     app: Any,
     input_messages: list[Any],
@@ -308,8 +389,11 @@ async def deep_agents_coding_node(
     state: CodingAgentState, config: RunnableConfig = None
 ) -> dict[str, Any]:
     session_id = ""
+    manifest: ExecutionManifest | None = None
+    workspace: Path | None = None
     try:
         workspace = _validated_workspace(state.get("workspace"))
+        manifest = execution_manifest(workspace)
         execution_mode = _execution_mode(state.get("execution_mode"))
         input_messages = list(state.get("messages", []))
         thread_identity = str(state.get("thread_identity") or "")
@@ -331,20 +415,25 @@ async def deep_agents_coding_node(
         all_messages = result.get("messages", [])
         new_messages = _current_turn_output(all_messages)
         if not _has_final_assistant_message(new_messages):
-            return {
-                "messages": [
-                    AIMessage(
-                        content=(
-                            "The coding agent did not return a final result "
-                            "(missing_final_result)."
-                        )
+            error_messages = [
+                AIMessage(
+                    content=(
+                        "The coding agent did not return a final result "
+                        "(missing_final_result)."
                     )
-                ],
+                )
+            ]
+            return {
+                "messages": _format_coding_result(error_messages, manifest),
+                "workspace": str(workspace),
+                "execution_manifest": manifest,
                 "coding_session_id": session_id,
                 "coding_status": "error",
             }
         return {
-            "messages": new_messages,
+            "messages": _format_coding_result(new_messages, manifest),
+            "workspace": str(workspace),
+            "execution_manifest": manifest,
             "coding_session_id": session_id,
             "coding_status": "completed",
         }
@@ -377,17 +466,26 @@ async def deep_agents_coding_node(
             extra={"coding_error_code": error_code, "coding_session_id": session_id},
         )
 
-    return {
-        "messages": [
-            AIMessage(
-                content=(
-                    f"The coding agent could not complete this request ({error_code})."
-                )
-            )
-        ],
+    error_messages = [
+        AIMessage(
+            content=f"The coding agent could not complete this request ({error_code})."
+        )
+    ]
+    if manifest is not None:
+        error_messages = _format_coding_result(error_messages, manifest)
+    response: dict[str, Any] = {
+        "messages": error_messages,
         "coding_session_id": session_id,
         "coding_status": "error",
     }
+    if workspace is not None and manifest is not None:
+        response.update(
+            {
+                "workspace": str(workspace),
+                "execution_manifest": manifest,
+            }
+        )
+    return response
 
 
 def create_coding_agent_graph():

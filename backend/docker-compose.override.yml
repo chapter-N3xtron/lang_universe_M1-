@@ -3,9 +3,23 @@ services:
     volumes:
       - ..:/workspace
       - /Volumes/Storage:/Volumes/Storage
-      - ${HOME}/world_monitor:${HOME}/world_monitor
+      - ${HOME}:${HOME}
+      - ${HOME}/.jasper/macos-host-executor/public:/run/macos-host-executor:ro
       - coding-tools:/opt/coding-tools
-      - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock
+    # The broad home mount preserves exact selected paths. Shadow every known
+    # credential/private executor location; Docker receives only the public key
+    # directory above and never executor control, state, staging, or signing data.
+    tmpfs:
+      - ${HOME}/.jasper
+      - ${HOME}/Library/Keychains
+      - ${HOME}/.ssh
+      - ${HOME}/.aws
+      - ${HOME}/.gnupg
+      - ${HOME}/.config/gh
+      - ${HOME}/.docker
+      - ${HOME}/.kube
+      - ${HOME}/.azure
+      - ${HOME}/.config/gcloud
     environment:
       - AGENT_WORKSPACE=/workspace
       - TODOS_FILE=/workspace/todos.json
@@ -13,9 +27,10 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - SESSION_RUNTIME_MODE=durable
       - SESSION_RUNTIME_ID=backend-postgres-v1
+      - MACOS_HOST_EXECUTOR_URL=http://host.docker.internal:8765
+      - MACOS_HOST_EXECUTOR_PUBLIC_KEY_FILE=/run/macos-host-executor/receipt-signing.pub
       - NPM_CONFIG_PREFIX=/opt/coding-tools/node
       - PNPM_HOME=/opt/coding-tools/pnpm
-      - SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock
 
 volumes:
   coding-tools:

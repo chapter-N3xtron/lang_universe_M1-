@@ -97,6 +97,9 @@ def test_jasper_prompt_contains_versioned_interaction_governance():
     assert "authorize The Librarian" in prompt
     assert "Do not invent a standard or propose speculative coding" in prompt
     assert "model estimate, not an empirically calibrated probability" in prompt
+    assert "Never search a parent, child, or sibling" in prompt
+    assert "Linux Agent Server container" in prompt
+    assert "request_macos_host_operation" in prompt
 
 
 @pytest.mark.asyncio

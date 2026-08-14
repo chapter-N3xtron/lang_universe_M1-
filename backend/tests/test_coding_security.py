@@ -497,9 +497,10 @@ def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_directly(
 
     assert jasper_inputs == []
     assert result["messages"][-1]["name"] == "coding"
-    assert result["messages"][-1]["content"] == (
-        "OpenSpec installation was rejected and was not completed."
-    )
+    content = result["messages"][-1]["content"]
+    assert content.startswith("OpenSpec installation was rejected and was not completed.")
+    assert "command runtime: linux_agent_server_container" in content
+    assert f"selected repository: {tmp_path}" in content
     assert result["coding_status"] == "completed"
 
 

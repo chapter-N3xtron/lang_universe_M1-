@@ -12,6 +12,8 @@ Messages arrive as dicts with either LangGraph SDK format
 
 from typing import Any, TypedDict
 
+from src.workspace_policy import ExecutionManifest
+
 
 class AgentState(TypedDict, total=False):
     messages: list[dict]
@@ -23,6 +25,7 @@ class AgentState(TypedDict, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: str
+    execution_manifest: ExecutionManifest
 
 
 def _msg_role(m: Any) -> str | None:

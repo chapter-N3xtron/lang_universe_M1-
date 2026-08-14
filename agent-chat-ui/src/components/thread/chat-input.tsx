@@ -94,6 +94,8 @@ interface ChatInputProps {
   voiceOptions: { id: string; name: string }[];
   chatStarted: boolean;
   targetAgent?: string;
+  threadId: string | null;
+  workspace?: string;
   streamActions: {
     submit: StreamContextType["submit"];
     stop: () => void;
@@ -128,6 +130,8 @@ function ChatInputImpl({
   voiceOptions,
   chatStarted,
   targetAgent,
+  threadId,
+  workspace,
   streamActions,
   onStartSubmit,
   apiUrl,
@@ -144,7 +148,16 @@ function ChatInputImpl({
     agentSelection.source === targetAgent
       ? agentSelection.value
       : agentValue(targetAgent);
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string>("");
+  const [workspaceDrafts, setWorkspaceDrafts] = useState<
+    Record<string, string>
+  >({});
+  const workspaceKey = threadId ?? "__new_thread__";
+  const effectiveWorkspace = Object.prototype.hasOwnProperty.call(
+    workspaceDrafts,
+    workspaceKey,
+  )
+    ? workspaceDrafts[workspaceKey]
+    : workspace;
   const [isPickingWorkspace, setIsPickingWorkspace] = useState(false);
   const [selectedModel, setSelectedModel] = useState("");
   useEffect(() => {
@@ -256,7 +269,7 @@ function ChatInputImpl({
           messages: [newHumanMessage],
           context: undefined,
           target_agent: selectedAgent,
-          workspace: selectedWorkspace || undefined,
+          workspace: effectiveWorkspace,
           model: effectiveSelectedModel || undefined,
           execution_mode: executionMode,
         },
@@ -277,7 +290,7 @@ function ChatInputImpl({
             ...prev,
             context: undefined,
             target_agent: selectedAgent,
-            workspace: selectedWorkspace || undefined,
+            workspace: effectiveWorkspace,
             model: effectiveSelectedModel || undefined,
             execution_mode: executionMode,
             messages: [...(prev.messages ?? []), newHumanMessage],
@@ -293,7 +306,7 @@ function ChatInputImpl({
       contentBlocks,
       isLoading,
       selectedAgent,
-      selectedWorkspace,
+      effectiveWorkspace,
       effectiveSelectedModel,
       executionMode,
       modelProviders,
@@ -578,13 +591,28 @@ function ChatInputImpl({
                 onClick={async () => {
                   setIsPickingWorkspace(true);
                   try {
-                    const res = await fetch(
+                    const pickerUrl = new URL(
                       "http://127.0.0.1:8000/api/fs/pick-folder",
                     );
+                    pickerUrl.searchParams.set(
+                      "starting_path",
+                      effectiveWorkspace ?? "",
+                    );
+                    const res = await fetch(pickerUrl);
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    if (!data.cancelled && data.path) {
-                      setSelectedWorkspace(data.path);
+                    const data = (await res.json()) as {
+                      cancelled?: boolean;
+                      path?: unknown;
+                    };
+                    if (
+                      !data.cancelled &&
+                      typeof data.path === "string" &&
+                      data.path.length > 0
+                    ) {
+                      setWorkspaceDrafts((drafts) => ({
+                        ...drafts,
+                        [workspaceKey]: data.path as string,
+                      }));
                     }
                   } catch (error) {
                     console.error("[Repo picker] failed:", error);
@@ -603,15 +631,14 @@ function ChatInputImpl({
                 ) : (
                   <Folder className="size-4 text-gray-600" />
                 )}
-                <span className="text-xs text-gray-600">
+                <span
+                  className="max-w-56 truncate text-xs text-gray-600"
+                  data-testid="effective-workspace"
+                  title={effectiveWorkspace}
+                >
                   {isPickingWorkspace
                     ? "Opening…"
-                    : selectedWorkspace
-                      ? selectedWorkspace
-                          .replace(/\/+$/, "")
-                          .split("/")
-                          .pop() || selectedWorkspace
-                      : "Repo selector"}
+                    : (effectiveWorkspace ?? "Repo selector")}
                 </span>
               </button>
               <div className="flex items-center gap-1 lg:order-4">

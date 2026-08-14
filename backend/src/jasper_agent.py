@@ -6,7 +6,6 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Annotated, Literal, TypedDict
 from uuid import uuid4
 
@@ -47,6 +46,12 @@ from src.visual_models import (
     LayoutSuggestion,
     openai_jasper_response_json_schema,
     safe_text_response,
+)
+from src.workspace_policy import (
+    ExecutionManifest,
+    canonical_workspace,
+    execution_manifest,
+    format_execution_manifest,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,6 +97,7 @@ class State(TypedDict, total=False):
     thread_identity: str
     user_identity: str
     coding_session_id: str
+    execution_manifest: ExecutionManifest
     session_evidence: list[dict]
 
 
@@ -105,6 +111,7 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: str
+    execution_manifest: ExecutionManifest
     coding_task: str
     librarian_task: str
     session_evidence: list[dict]
@@ -128,20 +135,23 @@ def transfer_to_coding(
         raise ValueError(
             "Select read_only, approval, or autonomous before handing work to Coding."
         )
+    workspace = canonical_workspace(state.get("workspace"))
+    manifest = execution_manifest(workspace)
     last_ai_message = next(
         message
         for message in reversed(state.get("messages", []))
         if isinstance(message, AIMessage)
     )
     transfer_message = ToolMessage(
-        content=f"Coding task: {task}",
+        content=f"Coding task: {task}\n\n{format_execution_manifest(manifest)}",
         tool_call_id=runtime.tool_call_id,
     )
     return Command(
         goto="coding",
         update={
             "coding_task": task,
-            "workspace": state.get("workspace", ""),
+            "workspace": str(workspace),
+            "execution_manifest": manifest,
             "model": state.get("model"),
             "execution_mode": execution_mode,
             "thread_identity": state.get("thread_identity", ""),
@@ -276,8 +286,18 @@ status and attribution. Use draw_concept_map when the user asks for a diagram or
 visual map would materially improve understanding. Do not create a visual merely to
 decorate a simple answer.
 
-Use Deep Agents filesystem tools ls, glob, grep, and read_file to discover and inspect
-the selected repository. Use read_repository_file for every repository file whose
+Use Deep Agents filesystem tools ls, glob, grep, and read_file to inspect only the
+exact selected repository. An existing empty selected directory is valid. Never search
+a parent, child, or sibling for another repository, and never substitute the home
+directory, current working directory, /workspace, or another checkout. Use the
+server-produced execution manifest as deployment truth: selected repository files
+originate from a macOS-host bind mount, while ordinary commands run in the Linux Agent
+Server container. Never call Linux commands Mac-host commands or claim they changed
+macOS, /Applications, Homebrew, a DMG, Finder, Keychain, launch services, or a native
+Mac application. For macOS-only work, delegate to Coding with instructions to call
+request_macos_host_operation only when the manifest reports it available; otherwise
+report that host operations are unavailable and do not propose a Linux substitute.
+Use read_repository_file for every repository file whose
 contents support a grounded visual so its evidence ID can be cited. Delegate external
 research with transfer_to_librarian. Delegate repository
 analysis and coding work with transfer_to_coding. Do not perform either specialist's
@@ -373,9 +393,7 @@ def _middleware():
 def _workspace_backend(
     workspace: str | None,
 ) -> tuple[FilesystemBackend, list[FilesystemPermission]]:
-    root = Path(workspace or Path(__file__).resolve().parents[2]).resolve(strict=True)
-    if not root.is_dir():
-        raise ValueError("workspace must be a directory")
+    root = canonical_workspace(workspace)
     backend = FilesystemBackend(root_dir=root, virtual_mode=True)
     permissions = [
         FilesystemPermission(
@@ -419,9 +437,19 @@ def _build_agent(
             response_format=response_format,
             name="jasper",
         )
+    if not workspace:
+        return create_agent(
+            model=model,
+            tools=list(ACTIVE_TOOLS if tools is None else tools),
+            system_prompt=SYSTEM_PROMPT,
+            middleware=_middleware(),
+            response_format=response_format,
+            state_schema=JasperDeepAgentState,
+            name="jasper",
+        )
 
     backend, permissions = _workspace_backend(workspace)
-    root = Path(workspace or Path(__file__).resolve().parents[2]).resolve(strict=True)
+    root = canonical_workspace(workspace)
     approval_mode = execution_mode == "approval"
     active_tools = list(ACTIVE_TOOLS if tools is None else tools)
     if approval_mode:
@@ -733,6 +761,11 @@ async def call_jasper(state: State):
     messages = list(state.get("messages", []))
     selected_model = state.get("model")
     message_id = f"jasper-{uuid4().hex}"
+    canonical = (
+        canonical_workspace(state.get("workspace")) if state.get("workspace") else None
+    )
+    manifest = execution_manifest(canonical) if canonical is not None else None
+    workspace = str(canonical) if canonical is not None else None
 
     try:
         model = get_agent_llm(selected_model)
@@ -749,8 +782,10 @@ async def call_jasper(state: State):
             )
             if state.get(key) is not None
         }
+        if manifest is not None:
+            agent_context["execution_manifest"] = manifest
         with (
-            agent_workspace(state.get("workspace")),
+            agent_workspace(workspace),
             agent_evidence(get_user_query(messages), state.get("session_evidence")),
         ):
             if strategy in {"native", "tool"}:
@@ -758,21 +793,21 @@ async def call_jasper(state: State):
                     model,
                     messages,
                     strategy,
-                    workspace=state.get("workspace"),
+                    workspace=workspace,
                     agent_context=agent_context,
                 )
             elif strategy == "two_pass":
                 response = await _invoke_two_pass(
                     model,
                     messages,
-                    workspace=state.get("workspace"),
+                    workspace=workspace,
                     agent_context=agent_context,
                 )
             else:
                 response = await _invoke_text(
                     model,
                     messages,
-                    workspace=state.get("workspace"),
+                    workspace=workspace,
                     agent_context=agent_context,
                 )
     except GraphBubbleUp:
@@ -829,7 +864,7 @@ async def call_jasper(state: State):
         "jasper_confidence_score": response.confidence_score,
         "jasper_confidence_basis": response.confidence_basis,
     }
-    return {
+    result = {
         "messages": [
             AIMessage(
                 id=message_id,
@@ -844,6 +879,14 @@ async def call_jasper(state: State):
         "jasper_strategy": strategy,
         "jasper_diagnostic": diagnostic,
     }
+    if workspace is not None and manifest is not None:
+        result.update(
+            {
+                "workspace": workspace,
+                "execution_manifest": manifest,
+            }
+        )
+    return result
 
 
 def create_jasper_graph():

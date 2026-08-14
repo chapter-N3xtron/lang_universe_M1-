@@ -32,6 +32,7 @@ from src.epub_attachments import (
 from src.ollama_client import list_ollama_cloud_models, list_ollama_models
 from src.openai_client import list_openai_gpt_models
 from src.stt import transcribe
+from src.workspace_policy import WorkspacePolicyError, canonical_workspace
 
 load_dotenv()
 
@@ -99,16 +100,10 @@ class CodingSessionScope(BaseModel):
 
 
 def _session_workspace(raw_workspace: str) -> Path:
-    workspace = Path(raw_workspace).expanduser()
-    if not workspace.is_absolute():
-        raise HTTPException(status_code=400, detail="workspace must be absolute")
     try:
-        workspace = workspace.resolve(strict=True)
-    except OSError as exc:
-        raise HTTPException(status_code=400, detail="workspace does not exist") from exc
-    if not workspace.is_dir():
-        raise HTTPException(status_code=400, detail="workspace must be a directory")
-    return workspace
+        return canonical_workspace(raw_workspace)
+    except WorkspacePolicyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/coding-sessions/reset")

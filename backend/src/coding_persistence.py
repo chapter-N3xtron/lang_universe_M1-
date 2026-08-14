@@ -14,6 +14,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from src.workspace_policy import canonical_workspace
+
 DEFAULT_CHECKPOINT_FILE = (
     Path(__file__).resolve().parent.parent / "data" / "deep_agents_checkpoints.sqlite3"
 )
@@ -27,7 +29,7 @@ def coding_session_id(
         raise ValueError("thread identity is required")
     thread_key = str(thread_identity)
     user_key = str(user_identity or "anonymous")
-    resolved = workspace.resolve(strict=True)
+    resolved = canonical_workspace(workspace)
     material = "\0".join(("coding-session-v1", user_key, thread_key, str(resolved)))
     digest = hashlib.sha256(material.encode()).hexdigest()
     return f"coding-v1-{digest}"

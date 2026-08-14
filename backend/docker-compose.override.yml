@@ -6,6 +6,7 @@ services:
       - ${HOME}/world_monitor:${HOME}/world_monitor
       - coding-tools:/opt/coding-tools
       - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - AGENT_WORKSPACE=/workspace
       - TODOS_FILE=/workspace/todos.json

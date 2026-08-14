@@ -40,6 +40,9 @@ Shell commands start in the selected workspace, have a 120-second default timeou
 and return at most 100,000 bytes. The backend inherits the Agent Server environment
 so repository tools work normally. Docker Desktop's SSH agent socket is forwarded to
 the container for authenticated Git operations without mounting private key files.
+The image includes the Docker CLI with Compose and Buildx plugins, and the host Docker
+socket is mounted so an explicitly approved command can inspect the live LangGraph
+deployment and build or manage separate service containers.
 
 ## Trust boundary
 
@@ -50,3 +53,10 @@ controlled local deployment. Every shell command and mutation requires explicit
 human approval. Reviewers must reject commands that access unrelated paths, reveal
 secrets, edit `.git` files directly, force-push, delete remote history, or otherwise
 exceed the selected repository task.
+
+Access to the host Docker socket is effective host-root authority. An approved Docker
+command can create privileged containers, mount arbitrary host paths, inspect other
+containers and their environment variables, alter networks, or remove data. Approval
+must be limited to commands whose complete Docker or Compose action the reviewer
+understands. Plane, Temporal, and their credentials remain separate trust domains;
+Docker access does not authorize an agent to read or receive their credentials.

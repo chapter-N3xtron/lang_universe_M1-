@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-13T03:55:18Z",
+  "updated_at": "2026-08-14T23:51:13Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2533,6 +2533,33 @@
         {
           "id": "verify-openspec-plan-approval",
           "content": "Verify UI preparation and approval, backend hash rejection after plan edits, task-progress behavior, workspace confinement, denied commands and delete, asynchronous resumability, and production build behavior for plan_approved Coding. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "coder-docker-service-management",
+      "title": "Give Coder Reviewed Docker Service Management",
+      "created_at": "2026-08-14T23:01:42Z",
+      "planned_by_model": "openai/gpt-5.6-sol",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "enable-reviewed-host-docker-access",
+          "content": "Give the LangGraph Coding agent Docker CLI, Compose, and Buildx capability against the existing host Docker daemon only in explicit human-approval mode so it can inspect the live LangGraph deployment and build or manage separate Plane and Temporal service containers. Document the effective host-root authority and keep Plane and Temporal credentials outside agent context. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Use the authoritative serving worktree at /Volumes/Storage/LangGraph_AgentChat_ui_Opencode_CLI-bottom-locking-runtime. Plane, Temporal Server, and the Temporal worker remain separate services rather than processes inside langgraph-api. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "verify-live-coder-docker-access",
+          "content": "Rebuild and restart the serving LangGraph image, then verify from the actual langgraph-api container that Docker CLI, Compose, Buildx, socket access, live deployment inspection, and reviewed Coding-agent execution work without installing Plane or Temporal prematurely. Report source checks separately from live deployment checks. Governance reference: GOVERNANCE_FRAMEWORK.md.",
           "status": "pending",
           "agent": "coding",
           "completed_by_model": null,

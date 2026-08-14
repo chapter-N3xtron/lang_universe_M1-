@@ -262,6 +262,40 @@ async def test_text_strategy_does_not_bind_tools_for_incompatible_models():
 
 
 @pytest.mark.asyncio
+async def test_two_pass_openai_uses_sanitized_native_schema():
+    model = MagicMock(profile={"tool_calling": True})
+    model.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value={"voice_text": "The useful plain answer."}
+    )
+
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    with (
+        patch.object(module, "_is_openai_model", return_value=True),
+        patch.object(
+            module,
+            "_invoke_plain",
+            new=AsyncMock(
+                return_value=(
+                    [AIMessage(content="The useful plain answer.")],
+                    "The useful plain answer.",
+                )
+            ),
+        ),
+    ):
+        result = await module._invoke_two_pass(
+            model, [{"role": "user", "content": "Explain this"}]
+        )
+
+    assert result.voice_text == "The useful plain answer."
+    schema = model.with_structured_output.call_args.args[0]
+    kwargs = model.with_structured_output.call_args.kwargs
+    assert kwargs == {"method": "json_schema", "strict": True}
+    assert "oneOf" not in json.dumps(schema)
+    assert "discriminator" not in json.dumps(schema)
+
+
+@pytest.mark.asyncio
 async def test_two_pass_format_failure_preserves_the_plain_answer():
     model = MagicMock(profile={"tool_calling": True})
     formatter = MagicMock()

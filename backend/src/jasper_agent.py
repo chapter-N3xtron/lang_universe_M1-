@@ -44,6 +44,7 @@ from src.visual_models import (
     ConceptMapArtifact,
     JasperResponse,
     LayoutSuggestion,
+    openai_jasper_response_json_schema,
     safe_text_response,
 )
 
@@ -63,6 +64,16 @@ class VerifiedModelCapability:
 # Entries are added only after the repository's live combined-capability test
 # passes for that exact provider/model ID. Empty is safer than guessed support.
 VERIFIED_MODEL_CAPABILITIES: dict[str, VerifiedModelCapability] = {}
+
+
+def _is_openai_model(model) -> bool:
+    return type(model).__module__.split(".", 1)[0] == "langchain_openai"
+
+
+def _response_schema_for_model(model):
+    if _is_openai_model(model):
+        return openai_jasper_response_json_schema()
+    return JasperResponse
 
 
 class State(TypedDict, total=False):
@@ -471,7 +482,10 @@ async def _invoke_combined(
     agent_context: dict | None = None,
 ) -> JasperResponse:
     if strategy == "native":
-        response_format = ProviderStrategy(JasperResponse)
+        response_format = ProviderStrategy(
+            _response_schema_for_model(model),
+            strict=True if _is_openai_model(model) else None,
+        )
     else:
         response_format = ToolStrategy(
             JasperResponse,
@@ -594,7 +608,14 @@ async def _invoke_two_pass(
         agent_context=agent_context,
     )
     tool_artifacts = _tool_artifacts(evidence_messages)
-    formatter = model.with_structured_output(JasperResponse)
+    if _is_openai_model(model):
+        formatter = model.with_structured_output(
+            openai_jasper_response_json_schema(),
+            method="json_schema",
+            strict=True,
+        )
+    else:
+        formatter = model.with_structured_output(JasperResponse)
     try:
         structured = await formatter.ainvoke(
             [SystemMessage(content=FORMATTER_PROMPT), *evidence_messages]

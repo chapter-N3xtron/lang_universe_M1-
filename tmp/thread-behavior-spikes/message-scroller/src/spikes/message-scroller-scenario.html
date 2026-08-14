@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>MessageScroller adapted source-pattern prototype</title>
+<style>
+  :root { color-scheme: light; font: 14px system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef1f5; }
+  #app { width: 760px; margin: 12px auto; background: white; border: 1px solid #b8c0cc; }
+  header { height: 64px; padding: 14px 18px; border-bottom: 1px solid #cbd2dc; overflow: hidden; }
+  header h1 { font-size: 16px; margin: 0 0 4px; }
+  header p { margin: 0; color: #566273; white-space: nowrap; }
+  main { padding: 12px; }
+  #viewport { height: 420px; overflow: auto; border: 1px solid #9da8b8; background: #f7f9fb; scroll-behavior: auto; }
+  #content { padding: 0 12px 20px; }
+  .turn { min-height: 3980px; padding: 14px 0; border-bottom: 1px dashed #bdc6d2; }
+  .bubble { border-radius: 8px; padding: 9px 12px; max-width: 82%; overflow: hidden; }
+  .human { margin-left: auto; background: #dbeafe; }
+  .assistant { margin: 12px 0; background: #e5e7eb; }
+  .assistant .markdown { line-height: 1.45; }
+  .assistant .growth { margin-top: 8px; height: 220px; background: repeating-linear-gradient(#d1d5db 0 2px, transparent 2px 20px); }
+  #composer { display: flex; gap: 8px; padding-top: 10px; }
+  textarea { flex: 1; resize: none; height: 58px; padding: 8px; border: 1px solid #9da8b8; }
+  button { border: 1px solid #7d8797; background: #fff; padding: 7px 10px; cursor: pointer; }
+  #status { min-height: 22px; color: #405066; padding-top: 6px; }
+  #audit { font: 11px ui-monospace, monospace; white-space: pre-wrap; background: #111827; color: #d1fae5; padding: 10px; margin-top: 10px; max-height: 180px; overflow: auto; }
+</style>
+<div id="app">
+  <header><h1>MessageScroller-style viewport / anchor / resize / cancellation spike</h1><p>Adapted source-pattern prototype — not an installable package</p></header>
+  <main>
+    <div id="viewport" aria-label="conversation viewport"><div id="content"></div></div>
+    <div id="composer"><textarea id="input" aria-label="message input"></textarea><button id="send">Send</button></div>
+    <div id="status" aria-live="polite">ready</div><div id="audit" aria-label="audit log"></div>
+  </main>
+</div>
+<script>
+(() => {
+  // Adapted MessageScroller-style primitive. It owns the rendered viewport and content.
+  class MessageScroller {
+    constructor(viewport, content, onHumanControl) {
+      this.viewport = viewport; this.content = content; this.cancelled = false; this.onHumanControl = onHumanControl;
+      this.ro = new ResizeObserver(() => this.onResize()); this.ro.observe(content);
+      ["wheel", "touchstart", "pointerdown", "selectstart", "keydown", "scroll"].forEach(e => viewport.addEventListener(e, () => this.cancel("human-" + e), {passive: true}));
+    }
+    cancel(reason) { this.cancelled = true; this.onHumanControl(reason); }
+    begin() { this.cancelled = false; }
+    onResize() { if (!this.cancelled && this.viewport.scrollHeight - this.viewport.scrollTop - this.viewport.clientHeight < 28) this.viewport.scrollTop = this.viewport.scrollHeight; }
+    usableTop() { return this.viewport.getBoundingClientRect().top; }
+    place(targetTop) { const max = Math.max(0, this.viewport.scrollHeight - this.viewport.clientHeight); this.viewport.scrollTop = Math.max(0, Math.min(max, targetTop - this.usableTop())); return this.viewport.scrollTop; }
+    destroy() { this.ro.disconnect(); }
+  }
+  const viewport = document.querySelector("#viewport"), content = document.querySelector("#content"), input = document.querySelector("#input"), send = document.querySelector("#send"), status = document.querySelector("#status"), audit = document.querySelector("#audit");
+  const state = { values: [], turns: [], placements: [], cancellations: [], duplicateRenderedCount: 0, hydrated: 0 };
+  const scroller = new MessageScroller(viewport, content, reason => state.cancellations.push({reason, turn: state.turns.length}));
+  const log = x => { audit.textContent += JSON.stringify(x) + "\n"; };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  function addTurn(id, text) {
+    const turn = { id, humanId: "human-" + id, assistantId: "assistant-" + id, text, placementCount: 0, chunks: 0, closed: false };
+    state.values.push({ id: turn.humanId, value: text }); state.turns.push(turn);
+    const section = document.createElement("section"); section.className = "turn"; section.dataset.turnId = id;
+    const human = document.createElement("div"); human.className = "bubble human"; human.dataset.messageId = turn.humanId; human.textContent = text; section.append(human);
+    const assistant = document.createElement("div"); assistant.className = "bubble assistant"; assistant.dataset.messageId = turn.assistantId; assistant.innerHTML = '<strong>Assistant</strong><div class="markdown"></div><div class="growth" hidden></div>'; section.append(assistant); content.append(section);
+    return {turn, section, assistant, markdown: assistant.querySelector(".markdown"), growth: assistant.querySelector(".growth")};
+  }
+  async function runTurn(text) {
+    const n = state.turns.length + 1, id = "turn-" + String(n).padStart(2, "0"), view = addTurn(id, text); scroller.begin();
+    status.textContent = "streaming " + id;
+    for (const chunk of [" **delayed delta one**", "\n\nA second paragraph with `markdown` layout.", "\n\nThird delta; semantic completion follows."]) { await sleep(35); view.markdown.textContent += chunk; view.turn.chunks++; }
+    await sleep(25); view.growth.hidden = false; await sleep(25); // delayed resize/rerender
+    await new Promise(requestAnimationFrame);
+    const targetTop = view.assistant.getBoundingClientRect().top, scrollTop = scroller.place(targetTop); view.turn.placementCount++; state.placements.push({turn:id, ids:[view.turn.humanId, view.turn.assistantId], targetTop, usableTop:scroller.usableTop(), scrollTop, scrollHeight:viewport.scrollHeight, drift:Math.abs(view.assistant.getBoundingClientRect().top-scroller.usableTop()), clipping:headerClipped()});
+    view.turn.closed = true; status.textContent = "closed " + id; log({event:"completed", id, chunks:view.turn.chunks, placementCount:view.turn.placementCount});
+  }
+  function headerClipped() { const r=document.querySelector("header").getBoundingClientRect(); return r.top < 0 || r.bottom > innerHeight; }
+  send.onclick = async () => { if (!input.value.trim() || state.turns.length >= 10) return; const text=input.value; input.value=""; await runTurn(text); if(state.turns.length===10) { state.duplicateRenderedCount=[...content.querySelectorAll('[data-message-id="human-duplicate"]')].length; status.textContent="10 turns complete"; } };
+  window.__messageScrollerSpike = { state, viewport, content, scroller, runTurn, headerClipped, boundary: () => ({top:scroller.place(-999), bottom:scroller.place(999999), max:viewport.scrollHeight-viewport.clientHeight}) };
+  // Hydration/reopen path uses existing IDs and clamps without a second placement.
+  window.__messageScrollerSpike.hydrate = () => { state.hydrated++; scroller.begin(); return state.turns.map(t => t.humanId); };
+})();
+</script>

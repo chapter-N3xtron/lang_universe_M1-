@@ -64,4 +64,6 @@ Governance reference: `GOVERNANCE_FRAMEWORK.md`.
 
 ## Model attribution
 
+- [ ] 8.9 Add model-use record coverage for selected/actual identity, authority/profile/version, verification references, measured/estimated metrics, retry/failure/escalation history, projection rebuild, and privacy redaction; coordinate with the model-selection and capability-verification changes.
+
 Plan audit and documentation revisions: model ID unavailable in this runtime (deep-agent).

@@ -70,3 +70,6 @@ The system SHALL permit sessions and Perspectives to support learning, dense-tex
 #### Scenario: User uses decision-tool output during scientific inquiry
 - **WHEN** a user associates a decision-tool output with dense scientific materials and records or revises a Perspective
 - **THEN** the system SHALL retain the decision-tool output as material distinct from the user-authored Perspective and allow the user to determine whether it informs their current view
+
+### Related model-use boundary
+Model-use records and selected-versus-actual model metadata are governed by `../durable-interaction-records/` and `../model-selection-and-stewardship/`. A user-authored Perspective SHALL remain distinct from any generated recommendation, including a recommendation about model choice.

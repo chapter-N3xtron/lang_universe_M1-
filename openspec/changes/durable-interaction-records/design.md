@@ -148,6 +148,10 @@ Store-to-session-catalog projection is idempotent and fully rebuildable from aut
 
 The following are unresolved and must remain blockers rather than guessed values: exact checkpoint and message TTL/ID-stability contract; Store and event/artifact retention; ownership and body-storage policy for each artifact class; authorization, privacy, sharing, deletion, physical purge, and restore semantics; backup scope and recovery-point/recovery-time assumptions; exact deployed AsyncPostgresStore batch/API adapter surface; safe non-production Store target and test-container runtime/mount policy; and the approval owner for legacy ambiguity resolution and rollout. The plan is not implementation-complete until each blocker has an owner, evidence, and an explicit decision.
 
+### Model-use record extension
+
+Model-use records are append-only interaction metadata, not a provider authority. They link selected and actual identities, selection source/profile, capability-verification references, task/run/workspace context, measured-versus-estimated metrics, and retry/failure/fallback/escalation outcomes. Projection/rebuild and privacy handling follow the existing Store authority and sanitized-payload rules. Selection and capability contracts are referenced rather than duplicated.
+
 No application implementation or deployment change is claimed by this planning audit.
 
 ## Open Questions

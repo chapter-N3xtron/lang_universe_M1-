@@ -66,3 +66,7 @@ of evidence. Existing `workspace_id` fields remain durable repository binding ID
 a session may have none, and artifacts remain owned by their producing
 thread/session. Visual workspace is reserved for presentation/layout state. See
 `openspec/TERMINOLOGY.md`.
+
+## Model provenance boundary
+
+Handoff, durable evidence, and session-source presentation reference the model-selection, capability-verification, and durable-interaction changes for selected-model authority, verification, selected-versus-actual identity, and continuity across resume/retry/reopen. Research/source evidence provenance remains distinct from model provenance; hidden escalation is not authorized.

@@ -1,66 +1,72 @@
-## Context
+## Design
 
-This change observes the active conversation scroll implementation; it does not implement or validate that behavior. The current coder implementation is a small client-side diagnostic module, activated by `ManualScrollObservationActivation` in the root layout. It is installed only when `NODE_ENV !== "production"` and `?manualScrollCapture=1` is present.
+The capture control is part of the local React UI:
 
-The current surface is intentionally console-driven:
-
-```js
-window.manualScrollObservation.start({
-  scenarioId: "reopen-stream-manual-scroll",
-  threadId: "<explicit thread id>",
-});
+```text
+Start screen recording
+        ↓
+Press Start JSON Capture
+        ↓
+React onClick starts the bundled recorder
+        ↓
+UI shows Capturing JSON · mm:ss
+        ↓
+Press Stop Capture
+        ↓
+Brave downloads one JSON file
 ```
 
-The browser confirmation is the content-capture consent boundary. There is currently no visible control, terminal command, automatic thread-ID discovery, or automatic screen recording.
+No JavaScript is pasted into or injected through the Brave console. The button calls code already bundled with the page.
 
-## Goals / Non-Goals
+## Control
 
-**Goals:**
+- Show the control only on `localhost` or `127.0.0.1`.
+- Enable Start only when the UI has an active `threadId`.
+- Pass that `threadId` directly from existing application state to the recorder.
+- Show a red capture indicator and elapsed time while active.
+- Expose only Start and Stop in the UI.
 
-- Give a human smoke tester a bounded, time-correlated view of browser-observed events beside a manually recorded screen capture.
-- Preserve rendered message content only inside an explicitly confirmed, isolated, local in-memory session and downloaded temporary artifact.
-- Make the bundle useful for debugging without implying deterministic replay or production telemetry.
-- Keep instrumentation active only for the session and restore patched browser methods on normal stop/discard cleanup; error, navigation, and cancellation cleanup remain unverified.
+## JSON Download
 
-**Non-Goals:**
+Stop creates one JSON bundle containing:
 
-- No production metrics, analytics pipeline, dashboard, automatic upload, terminal launcher, or visible frictionless UI in the current implementation.
-- No automatic harvesting of `threadId` from LangGraph Studio, app state, or network data.
-- No capture of network payloads, browser storage, credentials, cookies, auth headers, tokens, private keys, environment files, or internal model reasoning.
-- No modification of scroll anchoring, hydration, streaming, fallback, or message-rendering decisions.
-- No reproduction engine, scripted input runner, headless-test replacement, assertion oracle, or automated video capture.
+- session and thread identifiers;
+- start and stop timestamps;
+- ordered browser observations; and
+- final capture status.
 
-## Decisions
+The page serializes the bundle to a `Blob`, creates a blob URL with `URL.createObjectURL()`, and uses an anchor's `download` property to ask Brave to download it. The page then revokes the blob URL.
 
-1. **Use a distinct in-memory session namespace.** Generate a scenario ID supplied by the tester and a unique session ID. The manifest records schema, lifecycle, timestamps, artifact names, local-only status, and recording metadata. A durable production ledger is out of scope.
+Brave controls the final download location. The human saves or moves the file to:
 
-2. **Use a bounded append-oriented event timeline.** Events contain session/scenario IDs, sequence, monotonic elapsed time, wall time, type, source, optional correlation ID, and payload. The implementation caps the timeline at 2,000 events and caps each captured content string at 12,000 characters. It emits session lifecycle, UI snapshot, user-scroll, DOM-mutation, resize, programmatic-scroll, and recording-metadata events; transition state is currently represented by observable boolean/null fields in snapshots, not by a complete transition event detector.
+```text
+/Volumes/Storage/LangGraph_AgentChat_ui_Opencode_CLI/logs/scroll-observations/
+```
 
-3. **Observe scroll calls through reversible diagnostic hooks.** While active, the module wraps `Element.prototype.scrollTo` and `scrollBy`, records requested arguments and before/after metrics, and restores both originals during cleanup. This is diagnostic instrumentation and must not become an active scroll implementation.
+Coding reads the same folder at:
 
-4. **Keep QuickTime independent.** The tester starts/stops QuickTime manually and may attach filename/path/start/end/notes through `setRecording`. The browser downloads only the JSON bundle and manifest on `stop()`; it does not create or control the movie. The manifest marks the recording as manual or not provided.
+```text
+/workspace/logs/scroll-observations/
+```
 
-5. **Capture only rendered observation-boundary content.** Snapshots read `[data-message-id]` elements, rendered text, anchor IDs, bounding rectangles, viewport metrics, and visible UI state. The module does not inspect requests, responses, storage, cookies, headers, environment files, credentials, tokens, private keys, or model/provider internals. The denylist redacts private-key blocks, bearer/basic credentials, common secret assignments/query parameters, and selected environment-style assignments; content is truncated before those rules run.
+## Video Relationship
 
-6. **Use confirmation and manual lifecycle controls.** `start()` requires a non-empty scenario ID and `window.confirm()`. The console API supports `pause`, `resume`, `stop`, `discard`, `delete`, `setRecording`, `status`, and `redact`. `discard()` and `delete()` clear the in-memory events but cannot delete files already downloaded by the browser. There is no automated retention cleanup.
+The human starts screen recording before pressing Start JSON Capture. The visible timer makes the JSON capture interval clear in the video. The app does not control the screen recorder.
 
-7. **Describe requirements by implementation state.** Local opt-in capture, bounded observation, redaction boundaries, manual download, and separation are implemented. Visible controls, terminal launch, automatic ID discovery, deletion of downloaded artifacts, retention cleanup, and full browser/deletion validation remain future or validation work.
+The video shows visible behavior. JSON supplies timestamps and browser measurements. They are reviewed together as evidence; capture does not decide pass or fail by itself.
 
-## Risks / Trade-offs
+## Playwright Relationship
 
-- Message content can contain sensitive information despite warnings: confirmation, local-only default, bounded redaction, and explicit deletion instructions reduce but do not eliminate risk.
-- Redaction is heuristic and not a guarantee; users must review temporary downloads before sharing.
-- Video and log clocks can drift because QuickTime is independent; use manifest recording timestamps and event wall/monotonic timestamps as approximate correlation only.
-- Instrumentation can affect timing; it is active only during capture and hooks are restored during cleanup, but automated proof is still outstanding.
-- A diagnostic artifact can be mistaken for truth: label it observed evidence, not replay input or proof of anchoring correctness.
+Playwright is not used during manual recording. A small automated test separately clicks Start and Stop, waits for the download event, and verifies that the JSON is parseable and contains observations.
 
-## Migration Plan
+## Documentation Basis
 
-No migration or rollout occurs. The current implementation is gated out of production. Future work should add any UI/launcher only behind the same boundary, test disposable fixtures, and preserve the no-network/no-secret boundary.
+- React documents normal button event handlers with `onClick`: https://react.dev/learn/responding-to-events
+- MDN documents the widely available anchor `download` property: https://developer.mozilla.org/en-US/docs/Web/API/HTMLAnchorElement/download
+- MDN documents `URL.createObjectURL()` for `Blob` URLs and `URL.revokeObjectURL()` cleanup: https://developer.mozilla.org/en-US/docs/Web/API/URL/createObjectURL_static
+- Brave documents normal file downloads and changing download locations: https://support.brave.com/hc/en-us/articles/360018192491-How-do-I-fix-file-download-errors
+- Playwright documents waiting for a page download and reading or saving it: https://playwright.dev/docs/downloads
 
-## Open Questions / Future Work
+## Excluded Complexity
 
-- Whether and how to provide a visible human-facing start/stop control without making ordinary use noisy.
-- Whether a terminal launcher is appropriate.
-- A safe, explicit source for automatic thread-ID discovery.
-- Browser-compatible deletion/retention handling for downloaded files and complete automated browser validation.
+Do not add a console API, browser extension, userscript, custom protocol, file-picker API, backend writer, upload service, or automatic video control.

@@ -150,3 +150,21 @@ Failure-injection and acceptance tests using containers SHALL run only against d
 #### Scenario: Unsafe test target or mount is detected
 - **WHEN** a test configuration cannot prove disposable storage and isolated mounts
 - **THEN** the test fails closed without starting the container or touching data
+
+### Requirement: Durable model-selection and model-use records
+Each attempt SHALL retain a sanitized model-use record linked to `workspace_id` where applicable, session/branch/turn/attempt/run identity, selected and actual provider/model identity, selection authority/source, approved profile/version, capability-verification reference, and task scope. The record SHALL distinguish measured from estimated tokens, latency, resource use, and cost, and SHALL preserve retries, failures, fallback proposals/authorizations, escalations, and terminal outcomes.
+
+#### Scenario: Model use completes
+- **WHEN** an attempt finishes with the selected model or an authorized fallback
+- **THEN** the durable record SHALL show selected versus actual identity, authority, profile/version, verification reference, measured/estimated metrics, and outcome
+
+### Requirement: Model-use projection, rebuild, and privacy boundary
+Model-use records SHALL be rebuildable into user-visible projections and remain correlated across resume, retry, reopen, and fork without becoming a competing provider authority. Projections and diagnostics SHALL omit credentials, auth headers, payloads, secrets, protected paths, and internal reasoning; privacy, retention, deletion, and owner authorization SHALL apply consistently with interaction records.
+
+#### Scenario: Projection is rebuilt after loss
+- **WHEN** a model-use projection or cache is missing or stale
+- **THEN** it SHALL rebuild from authorized durable records while preserving provenance and selected-versus-actual distinction
+
+#### Scenario: Retry or fallback occurs
+- **WHEN** a retry, authorized fallback, or escalation is recorded
+- **THEN** prior outcomes remain addressable, the new attempt links to its cause and authority, and no hidden provider/model switch is implied

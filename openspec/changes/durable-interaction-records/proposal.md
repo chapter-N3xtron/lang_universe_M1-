@@ -38,3 +38,7 @@ identifiers. A session record may omit a repository binding. Artifacts remain ke
 the producing thread/session, not to a repository binding. LangGraph runtime,
 checkpoints, and Store are infrastructure rather than workspace entities. See
 `openspec/TERMINOLOGY.md`.
+
+## Model-use extension
+
+This change also proposes durable sanitized model-use records linked to `workspace_id` where applicable, session/branch/turn/attempt/run identity, selected and actual provider/model, authority/source, profile/version, capability-verification reference, measured versus estimated metrics, retries/failures/fallbacks/escalations, projection/rebuild behavior, and privacy boundaries. Selection and evidence semantics remain in the two new model-selection changes.

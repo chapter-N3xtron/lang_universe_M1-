@@ -140,3 +140,7 @@ The following are intentionally unresolved and must be decided through governanc
 - How should voice and visual provenance communicate Research status, uncertainty, citations, and limitations accessibly?
 
 These are unresolved policy choices, not settled requirements or implementation authorization.
+
+## Model provenance coordination
+
+Research handoffs and saved-report presentation preserve selected-model authority, profile/version, capability-verification reference, and actual model-use history through resume, retry, and reopen. These sanitized links remain separate from evidence/source provenance. A provider/model change is an explicit fallback or escalation event, never an inferred consequence of Research ownership.

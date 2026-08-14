@@ -1,36 +1,40 @@
 ## Why
 
-Live-browser scroll behavior is difficult to explain from automated assertions alone: a human needs to compare what was seen with the exact DOM, scroll, hydration, and streaming timeline that produced it. This change defines a deliberately manual, isolated smoke-test evidence bundle without turning production telemetry into a content archive, coupling it to the active scroll-anchoring work, or creating a deterministic replay harness.
+A screen recording shows what the human saw, while a timestamped JSON log shows the browser's message, viewport, and scroll measurements. The two artifacts are reviewed together.
 
-## Current implementation status
-
-A development implementation now exists in `agent-chat-ui`, but it is narrower than the original proposal. The capture API is installed only when the app is running in development and the URL contains `?manualScrollCapture=1`. The tester starts and stops it through the browser console; there is no visible human-facing control and no terminal launcher. The logger is local and in-memory, and stopping manually downloads a JSON event bundle and manifest. QuickTime recording remains an independent manual artifact.
-
-`threadId` is accepted in session metadata and is included in message snapshots, but the tester must provide it explicitly (or explicitly expose it through the documented URL value). The implementation does not discover a thread ID from LangGraph Studio, React/app state, or another automatic integration.
+The current browser-console workflow is unnecessarily difficult. Capture needs one visible control inside the local UI.
 
 ## What Changes
 
-- Document and maintain the implemented development-only, URL-gated manual capture API.
-- Pair the downloaded JSON event bundle and manifest with a separately created screen recording when a tester supplies recording metadata.
-- Retain rendered message content in this isolated artifact only after the browser confirmation; apply bounded, content-aware redaction and truncation before persistence in memory and again through the exposed redaction path before sharing.
-- Capture correlated timestamps, scenario/session IDs, explicit thread/message IDs where supplied, observed content, anchor IDs and geometry, viewport and scroll metrics, DOM mutation summaries, user scrolls, reversible programmatic scroll diagnostics, resize observations, and visible UI-state snapshots.
-- Keep the capability separate from `conversation-scroll-anchoring`, durable production interaction records, existing Playwright checks/artifacts, and any deterministic replay harness.
-- Record the remaining work explicitly: a visible frictionless UI, terminal launcher, automatic thread-ID discovery, robust artifact deletion/retention, and full automated browser/deletion validation.
+- Show **Start JSON Capture** for an existing active thread in the local app.
+- Start capture from the button's normal React `onClick` handler. Nothing is entered or injected through the Brave console.
+- While active, show **Capturing JSON · mm:ss** so the screen recording visibly shows the capture interval.
+- Change the control to **Stop Capture** while recording.
+- On Stop, use standard browser download APIs to download one JSON file containing metadata and events.
+- The human saves or moves that file to `logs/scroll-observations/`, which Coding sees at `/workspace/logs/scroll-observations/`.
+- Keep Playwright separate. It only verifies that the button and JSON download work.
 
-## Related change
+## Manual Sequence
 
-`../conversation-scroll-anchoring/` is the companion behavior change. That change defines the conversation scroll behavior under test; this change defines optional, human-centered evidence capture used to observe and report that behavior. Observation does not implement, alter, or prove anchoring behavior.
+1. Open an existing thread.
+2. Start the screen recording.
+3. Press **Start JSON Capture**.
+4. Exercise the conversation scrolling.
+5. Press **Stop Capture**.
+6. Stop the screen recording.
+7. Place the JSON file in `logs/scroll-observations/` for Coding to review beside the video.
 
-## Capabilities
+## Behavior Being Observed
 
-### New Capabilities
+The paired video and JSON observe whether:
 
-- `manual-scroll-observation-capture`: Human-controlled, opt-in capture bundles for diagnosing observed conversation scrolling and related rendering transitions.
+1. reopening a thread places the latest message at the top once;
+2. a new user message moves to the top once;
+3. a completed assistant response moves to the top once; and
+4. later human scrolling is not overridden.
 
-### Modified Capabilities
+The companion behavior contract remains in `../conversation-scroll-anchoring/`.
 
-- None. The active `conversation-scroll-anchoring` change is referenced as an observation subject only; its requirements are not changed.
+## Boundaries
 
-## Impact
-
-Implemented files are `agent-chat-ui/src/lib/manual-scroll-observation.ts`, `agent-chat-ui/src/components/manual-scroll-observation-activation.tsx`, `agent-chat-ui/src/app/layout.tsx`, and `agent-chat-ui/docs/manual-scroll-observation-capture.md`. The implementation is development-only and does not add production telemetry, upload, dashboard, PM workflow, or replay behavior. OpenSpec artifacts describe the current partial implementation and its uncompleted safeguards rather than claiming the originally envisioned UI or automated artifact lifecycle exists.
+No browser-console workflow, extension, userscript, custom Brave protocol, backend capture endpoint, automatic screen recording, upload service, or replay system is added.

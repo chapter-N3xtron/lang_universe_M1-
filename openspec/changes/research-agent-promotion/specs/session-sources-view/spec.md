@@ -77,3 +77,10 @@ The workspace SHALL expose semantic labeled source/report lists, discernible con
 
 - **WHEN** saved session sources or reports cannot be loaded
 - **THEN** the workspace SHALL present an accessible error alert and SHALL not display stale or fabricated metadata as current
+
+### Requirement: Session source presentation includes safe model-use context
+When a source/report view presents a Research run or saved result, it MAY show sanitized selected/actual model identity, authority/source, profile/version, verification reference, and retry/fallback status from durable model-use records. It SHALL preserve the distinction between evidence provenance and model provenance and SHALL not expose payloads, credentials, internal reasoning, or imply hidden escalation.
+
+#### Scenario: User reviews a resumed Research result
+- **WHEN** a session source/report is reopened after resume or retry
+- **THEN** the view preserves source/report provenance and presents available safe model-use continuity without treating model metadata as evidence content

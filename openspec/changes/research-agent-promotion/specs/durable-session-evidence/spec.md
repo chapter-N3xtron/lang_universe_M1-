@@ -87,3 +87,10 @@ The system SHALL permit a research-grounded visual concept map or other approved
 
 - **WHEN** a research-derived visual claim lacks a valid permitted saved evidence identifier
 - **THEN** the system SHALL not publish that visual as grounded research
+
+### Requirement: Evidence and model provenance remain separate
+Canonical reports and durable evidence SHALL retain Research/source provenance independently from selected-model authority and model-use provenance. Resume, retry, reopen, and fork references MAY retain both links, but neither provenance class SHALL be rewritten as the other or used to imply that evidence was verified merely because a model was selected.
+
+#### Scenario: Report is reopened after a model retry
+- **WHEN** a saved report is reopened after its generating run has retried or used an authorized fallback
+- **THEN** the report preserves its evidence provenance and separately identifies the relevant model-use history

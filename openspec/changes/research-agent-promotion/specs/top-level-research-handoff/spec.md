@@ -85,3 +85,14 @@ Jasper SHALL preserve Research provenance while introducing and receiving Resear
 
 - **WHEN** Jasper synthesizes a completed Research result
 - **THEN** the visible answer and visual references SHALL preserve usable Research provenance while audio omits raw URLsRLs
+
+### Requirement: Research handoff preserves selected-model authority and provenance
+Top-level handoff, resume, retry, and reopen SHALL preserve the authorized selected provider/model, approved profile/version, selection source, capability-verification reference, and actual model-use identity where available. Evidence/source provenance SHALL remain distinct from model provenance, and a Research result SHALL NOT trigger hidden provider/model escalation.
+
+#### Scenario: Research resumes or retries
+- **WHEN** a saved Research run is resumed, retried, or reopened
+- **THEN** its model-selection authority and model provenance remain linked to the run while durable evidence provenance remains separately attributable
+
+#### Scenario: A selected model is unavailable
+- **WHEN** Research cannot use the selected model
+- **THEN** the workflow reports the failure and requires the applicable explicit fallback/escalation authority rather than silently switching

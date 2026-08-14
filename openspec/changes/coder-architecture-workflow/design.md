@@ -79,3 +79,6 @@ Alternative considered:
 - Which concrete execution boundary and transport should carry synchronous and asynchronous delegation?
 - Which action classes qualify as one approval unit under the final governance decision?
 - What retention and user-access rules apply to raw Coder reports versus Jasper summaries?
+- Which approved profile and capability-verification evidence may authorize routine smaller-model routing, and which fallback/escalation decisions must remain human-facing?
+
+Model selection is not inferred from Coder role: the authority, profile/version, capability evidence, selected-versus-actual identity, and failure/escalation path must be carried as provenance.

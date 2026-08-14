@@ -23,3 +23,4 @@
 - [ ] 4.1 Add focused tests for role boundaries, tool restrictions, approval grouping, execution states, smaller-model escalation, and report provenance.
 - [ ] 4.2 Add tests proving successful and blocked Coder reports are summarized contextually without raw-report dumping.
 - [ ] 4.3 Run focused integration, authorization, and regression checks; document rollback by disabling the new delegation path if validation fails.
+- [ ] 4.4 Validate smaller-model routing against the selection authority, capability evidence, no-silent-switch, selected-versus-actual, and escalation contracts.

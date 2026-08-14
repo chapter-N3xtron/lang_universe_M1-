@@ -150,3 +150,6 @@ Every board SHALL remain associated with its durable session and SHALL preserve 
 ### Non-requirement: response/schema version
 
 The reviewed implementation and fixtures use visual response version `2`, and the generated UI type declares `Version = 2`. This change does not alter or introduce a response/schema version. Any future version change MUST be documented and coordinated with the authoritative backend schema and generated types rather than inferred from board-editing behavior.
+
+### Related model-selection boundary
+The desktop model selector is a presentation surface only. Selection authority, precedence, provider/model identity, and switching behavior belong to `../model-selection-and-stewardship/`; this change does not duplicate those requirements.

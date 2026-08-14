@@ -1,36 +1,63 @@
 ## Context
 
-See `proposal.md` for motivation and `specs/conversation-scroll-anchoring/spec.md` for the distinction between observed behavior and the proposed contract. Automated checks passed, but they did not sufficiently establish the real browser-visible scroll behavior for either message-arrival path.
+See `proposal.md` for the clarified behavior. Source inspection found the current placement calculation in `agent-chat-ui/src/components/thread/message-list.tsx` subtracts a literal `32`, while assistant markup exposes both a visible shell and an aria-hidden inner top anchor in `agent-chat-ui/src/components/thread/messages/ai.tsx`. The existing `tests/conversation-scroll-anchoring.spec.ts` records placement calls and checks an anchor near 32px, but does not assert shell/header geometry, clipping, or visible controls. Its history fixtures do not exercise a real assistant stream-to-completion transition. The supplied observation evidence therefore remains useful for investigation, not proof of completion.
 
-## Companion observation change
-
-Review `../manual-scroll-observation-capture/` whenever this change is opened or implemented. It defines the optional human-centered evidence capture for observing and reporting this change's behavior under test; it does not implement or change the scroll contract. Review of both changes is required to preserve the implementation/observation boundary.
+Review `../manual-scroll-observation-capture/` before implementation and verification. It is an observation companion only and must not be changed or treated as implementation evidence by itself.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Keep the unresolved status explicit for both user-message and assistant-answer arrival.
-- Validate the intended visual timing in a live browser after insertion and layout settlement.
-- Preserve one-shot top positioning followed by full user scroll control, with no bottom-following.
+- Establish one placement request per lifecycle event: hydrated latest completed visible message, submitted user message, and completed assistant response.
+- Compute the destination from measured viewport/layout geometry so the target shell/header top equals the usable conversation content-top edge, including actual control/header inset.
+- Target the visible message shell/header and verify the target header/top content and playback/command controls are not clipped above the viewport.
+- Make cancellation and idempotence explicit across all human movement and all non-semantic render/layout changes.
+- Provide a verification matrix that includes real assistant streaming/completion and a tall response.
 
 **Non-Goals:**
 
-- No broad application feature work is authorized; focused code and regression-test changes are limited to investigating and satisfying this scroll contract.
-- No claim is made that the current implementation already satisfies the proposed contract.
+- No durable per-thread scroll-position feature, bottom-following, stream-following, or generalized scroll restoration.
+- No change to the companion observation change, evidence files, application code, tests, `todos.json`, PM/dashboard, or governance artifacts in this planning run.
 
 ## Decisions
 
-1. Treat live-browser observation as the acceptance boundary for this visual interaction. Unit or automated checks can support the record, but cannot establish viewport positioning, layout settlement timing, or whether a later render reclaims scroll control.
+1. **Use a placement state machine keyed by thread and turn identity.** Track hydration, submitted-user, and assistant-completed events independently, with a monotonic request/generation identity. A request is consumed after its single successful scroll operation; later chunks, completion rerenders, resizes, and observer callbacks cannot create another request for the same event. Assistant completion is a new semantic event and replaces the preceding user placement exactly once.
 
-2. Investigate the user-message and assistant-answer arrival paths separately. A result for one path must not be generalized to the other because insertion timing and rendered content growth may differ.
+   **Alternative rejected:** effect-driven placement on every messages/render change; it repeats during streaming and rerenders.
 
-3. Define the desired new-arrival interaction as a one-shot top position after the new turn settles. Once that action occurs, subsequent user scrolling is authoritative and no bottom-following behavior is permitted.
+2. **Measure the usable content-top edge at placement time.** The implementation must derive the viewport's content-top boundary from the actual rendered layout/control inset (for example, the viewport/content-shell geometry or an explicit layout-owned measurement), and use the same measured coordinate system for the target shell/header. No literal `32px` fallback may define the destination. If geometry is not yet available, defer the one pending request until layout is measurable; do not guess.
 
-4. Define the desired reopen interaction separately: after a saved session/thread's hydrated message window is mounted, place a non-empty history at the bottom once so the latest saved content is visible. This is not bottom-following during processing or assistant-answer reveal and must not reinstate removed bottom-lock behavior. Empty sessions have no message target; loading/error history states do not perform a misleading placement until hydration succeeds; forked/reopened threads use the same default unless a future explicitly saved per-thread viewport position overrides it. Reduced motion changes animation (instant/no animation), not the destination or one-time/user-control semantics.
+   **Alternative rejected:** retaining `32` or another guessed constant; it fails when controls, responsive layout, browser chrome, or CSS changes alter the inset.
+
+3. **Target the visible shell/header, never an invisible anchor.** Each target exposes a stable semantic identity on the outer visible message shell and, where needed, an explicit visible header/control region. Placement computes the target shell/header top against the viewport usable top. The shell/header and playback/command controls must be within the viewport's visible bounds; controls positioned outside the shell must be included in the same geometry assertion.
+
+   **Alternative rejected:** the current aria-hidden inner anchor; its position can differ from the visible shell/header and can pass while visible controls are clipped.
+
+4. **Treat human movement as authoritative cancellation.** Wheel, touch/pointer movement, keyboard scrolling, scrollbar interaction, text selection/drag movement, and user-generated scroll events cancel a pending request. Programmatic scroll events generated by the active placement are narrowly recognized and ignored only for that operation; cancellation state is never reset by streaming, resize, rerender, reduced-motion changes, or layout mutation.
+
+5. **Separate destination from motion preference.** Reduced motion selects instant/no-animation behavior but does not alter the measured destination or one-shot semantics. A message taller than the viewport is accepted when its header and top content are visible; requiring its bottom or full response to fit is incorrect.
+
+6. **Verify in layers, with live browser as the visual boundary.** Unit-level state/geometry checks may prove request deduplication and cancellation, focused Playwright checks must assert exact shell/header/control rectangles and clipping, and a real stream fixture must prove user submission followed by assistant chunks and semantic completion. The companion observation workflow may supply correlated human evidence, but automated tests and observation capture remain distinct artifacts and neither may be silently substituted for the other.
 
 ## Risks / Trade-offs
 
-- [A passing automated check masks a browser-only timing failure] → Keep the implementation pending until both live-browser paths are observed.
-- [Assistant content growth triggers repeated repositioning] → Verify behavior after layout settlement and after the user begins scrolling.
-- [A fix for one arrival path leaves the other unresolved] → Report and investigate user-message and assistant-answer paths independently.
+- [Measured geometry is unavailable during hydration or CSS/layout settlement] → Keep the request pending, retry only until the first valid geometry is available, and consume it once; do not use a guessed inset.
+- [A target shell is visible but an absolutely positioned command/playback control is clipped] → Assert shell/header and every required control rectangle against the usable viewport bounds, including the tall-message case.
+- [Assistant completion is mistaken for another streaming render] → Drive completion from the semantic loading/completion transition and assert exactly one assistant placement after arbitrary chunk updates.
+- [A scroll event from placement is mistaken for human input] → Correlate only the active programmatic operation and test wheel, touch, keyboard, scrollbar, and selection cancellation separately.
+- [Visual observation is overclaimed] → Keep `manual-scroll-observation-capture` as an explicit companion cross-reference and report its evidence separately from deterministic browser assertions.
+
+## Migration Plan
+
+1. Audit the viewport and message-shell CSS/layout contract and identify the layout-owned usable-top measurement.
+2. Implement the state machine and measured geometry targeting in focused conversation files.
+3. Replace/extend focused browser fixtures with exact shell/header/control geometry and real stream-to-completion coverage.
+4. Run typecheck, focused tests, and the broader available checks; repeat with reduced motion, resize/mutation, and human cancellation scenarios.
+5. Perform the companion observation workflow only as separately labeled evidence, then review both change directories before reporting completion.
+
+Rollback is to revert the focused implementation/test commit; no data migration or API compatibility change is planned.
+
+## Open Questions
+
+- Which existing layout element is the authoritative owner of the usable content-top inset (viewport padding, composer/control overlay, or another shell boundary) must be confirmed during the CSS audit before implementation. The behavior is fixed—use the real measured inset—but the owner must not be guessed.
+- The exact set of playback/command controls required for each message variant must be enumerated from the rendered shell during the test design; all controls present in the target shell remain subject to the no-clipping contract.

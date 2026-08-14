@@ -31,3 +31,7 @@ visual UI workspace. If a durable binding is represented, `workspace_id` retains
 existing wire/storage meaning as a repository binding ID. Sessions may exist without
 that binding; LangGraph runtime/Store are infrastructure; and artifacts remain tied
 to the producing thread/session. See `openspec/TERMINOLOGY.md`.
+
+## Model-routing extension
+
+Bounded smaller-model routing is now explicitly subordinate to `../model-selection-and-stewardship/` authority and no-silent-switch rules and to `../model-capability-verification/` evidence. Delegation records must preserve role, scope, selected/actual identity, verification reference, failure, and escalation provenance.

@@ -79,3 +79,17 @@ The workflow SHALL preserve the relationship between the user request, Jasper’
 #### Scenario: A report contains a proposal rather than completed work
 - **WHEN** Coder’s output describes a possible design or recommendation without implementation evidence
 - **THEN** Jasper labels it as proposed or unresolved rather than reporting it as completed behavior
+
+### Requirement: Smaller-model routing follows selection and capability contracts
+Routine smaller-model routing SHALL use the authority, scope, precedence, no-silent-switch, and failure semantics proposed by `../model-selection-and-stewardship/`, and SHALL require a suitable verification reference from `../model-capability-verification/`. The smaller model’s role SHALL remain bounded to the explicitly assigned formatting, lint, or type-check task.
+
+#### Scenario: Routine verification is routed
+- **WHEN** an authorized bounded check has current capability evidence for the smaller model
+- **THEN** the workflow records the selection source, verified suitability, role/scope, selected and actual identity, and result
+
+### Requirement: Verification failure and escalation preserve provenance
+If verification is missing, stale, ambiguous, or the routine check reveals broader impact, Coder SHALL not silently escalate. It SHALL report the failure or propose an explicitly authorized escalation to Coder/Jasper, preserving the model-use and delegation provenance.
+
+#### Scenario: Smaller model cannot safely complete
+- **WHEN** a check is non-deterministic, capability evidence is insufficient, or an architectural/security issue appears
+- **THEN** the workflow marks the bounded attempt failed or escalation-proposed and requires the applicable authority before another model acts

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-13T03:55:18Z",
+  "updated_at": "2026-08-14T14:12:01Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2538,6 +2538,105 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "coder-host-repository-github-access",
+      "title": "Coder Host Repository and GitHub Access",
+      "created_at": "2026-08-13T16:47:19Z",
+      "planned_by_model": "openai/gpt-5.6-sol",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "enable-reviewed-host-repository-github-access",
+          "content": "Make human-selected repositories under /Users/chaptercaptaingeneral and /Volumes/Storage reachable by the deployed Coding agent, preserve the documented Deep Agents LocalShellBackend and LangGraph execute approval boundary, allow local Git initialization, and provide runtime-only GitHub CLI access for reviewed repository creation and first push under chapter-N3xtron with human-selected visibility. Keep GitHub and SSH credentials unavailable in autonomous mode, mount no private key files, add no custom graph nodes, tools, middleware, routing, approval mechanism, or GitHub API adapter, and validate source and deployed behavior. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Host repository reachability and local Git are deployed and verified for /Users/chaptercaptaingeneral and /Volumes/Storage. Host .ssh, .aws, .gnupg, and .config/gh directories are masked; no GitHub token, GitHub CLI, private key, or SSH-agent socket is supplied. Authenticated GitHub repository creation and push remain blocked: documented LocalShellBackend shell execution is not confined, and approval and autonomous runs share the Agent Server process, so a container-level credential can be recovered by autonomous shell execution even when its child environment is overridden. Meeting the approval-only requirement therefore needs a documented process/container isolation or credential-broker boundary that is not currently available; no custom graph or credential infrastructure was added. Focused Coding tests passed 8/8; the full suite reached 218 passed with two unrelated existing failures in a stale research fixture and a vendored live LangSmith evaluation with invalid authentication. The rebuilt deployment is healthy on ports 3002, 8000, and 8123. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "plan-approved-github-repository-publishing",
+          "content": "Create and strictly validate an OpenSpec change for autonomous long-horizon Coding plus credential-isolated, explicitly human-approved GitHub repository creation and first push under chapter-N3xtron, without expanding the existing LangGraph topology or exposing publishing credentials to autonomous execution. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-13T18:31:15Z",
+          "notes": "Created approved-github-repository-publishing with proposal.md, a new capability delta spec, design.md, and tasks.md. The design uses the existing documented Deep Agents interrupt_on and LangGraph Command resume path, keeps the Coding graph one-node, and isolates credentials in a separately confirmed host publisher. OpenSpec reports 4/4 artifacts complete and strict validation passed. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "repair-current-thread-workspace-binding",
+          "content": "Repair the current Blender investigation thread so the exact human-selected repository /Users/chaptercaptaingeneral/programatic_3d_rendering remains authoritative instead of the home directory, without changing message history. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-14T04:44:07Z",
+          "notes": "Updated deployed thread 019ffe4d-3936-7701-aa39-7897e462636b workspace state to /Users/chaptercaptaingeneral/programatic_3d_rendering and cleared its stale coding_session_id. Verified the canonical path exists, is currently empty, and is not yet a Git repository. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "plan-approved-macos-host-operations",
+          "content": "Create and strictly validate an OpenSpec change preserving autonomous containerized repository work while routing macOS-only inspection, downloads, Homebrew, DMG/application installation, and native application actions through a separate exact human-approval boundary, without changing the existing Coding graph topology. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-14T04:44:07Z",
+          "notes": "Created approved-macos-host-operations with proposal.md, a new capability delta spec, design.md, and tasks.md. It specifies exact workspace persistence, truthful host-versus-container identity, one documented interrupted tool, a finite shell-free host action catalog, native confirmation, signed receipts, adversarial tests, and separately approved canaries. OpenSpec reports 4/4 artifacts complete and strict validation passed. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "approved-macos-host-operations-implementation",
+      "title": "Approved macOS Host Operations Implementation",
+      "created_at": "2026-08-14T07:02:31Z",
+      "planned_by_model": "openai/gpt-5.6-sol",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "implement-approved-macos-host-operations",
+          "content": "Implement the approved-macos-host-operations change through exact workspace preservation, a server execution manifest, one standard interrupted host-request tool, a separate loopback-only native executor, native confirmation, signed receipt verification, specialized frontend review, deployment isolation, and non-mutating automated verification. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-14T07:02:31Z",
+          "notes": "Implemented OpenSpec tasks 1.1 through 7.5. Focused backend checks passed 65/65, executor tests passed 67/67, the eight focused host-operation/workspace Chromium tests passed, the production frontend build passed, and Ruff, JSON, diff, and zsh syntax checks passed. The available backend run reached 233 passed with two unrelated failures: missing optional document dependencies and the pre-existing stale Research MagicMock fixture; docx/torch collection modules were separately unavailable. The full browser run reached 25 passed and 17 unrelated live-runtime failures because no Agent Server was running at the test URL. Native script execution now additionally requires an operator-pinned digest, Blender embedded auto-execution is disabled, and executor child processes use isolated homes without inherited credential variables. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "run-approved-macos-host-operation-canaries-and-release-gate",
+          "content": "After separate explicit human authorization, install and configure the reviewed host executor, run the read-only physical-Mac inspection canary before any mutation, optionally run the separately approved Blender canary, and complete strict OpenSpec, deployed health, and rollback release gates. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "OpenSpec tasks 7.6 through 7.8 remain pending. The OpenSpec CLI is absent from the current bottom-locking shell environment, and no executor installation, service start, native confirmation, physical-Mac canary, Blender mutation, or deployment restart was performed. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "isolate-coder-librarian-workers",
+      "title": "Isolate Coder and Librarian Workers",
+      "created_at": "2026-08-14T14:12:01Z",
+      "planned_by_model": "openai/gpt-5.6-sol",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "plan-isolated-agent-workers-openspec",
+          "content": "Create an OpenSpec change that separates Coder and Librarian capability execution into distinct uncredentialed Docker workers, groups backend service lifecycle without grouping authority, preserves useful behavior, records a comprehensive trust-domain posture, and requires simple anti-coercive human understanding of request and feature impacts. Credential brokers and frontend containerization remain later changes. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-14T14:12:01Z",
+          "notes": "Created isolate-coder-librarian-workers with proposal.md, design.md, an isolated-agent-workers delta spec, and tasks.md. The OpenSpec CLI is not installed in the bottom-locking worktree, so strict CLI validation remains an explicit release task and no validation success is claimed. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        },
+        {
+          "id": "implement-isolated-agent-workers",
+          "content": "Implement and verify the isolate-coder-librarian-workers OpenSpec change without adding credential brokers or enabling Librarian writes; obtain separate human authorization before rebuilding or starting the backend deployment. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Implementation has not started. The current frontend is listening, while the Agent Server and both specialist backends remain unavailable because the backend deployment is stopped. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

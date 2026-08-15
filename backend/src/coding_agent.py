@@ -236,7 +236,10 @@ def _build_deep_agent(
             "application, Homebrew, DMG handling, or /Applications, call "
             "request_macos_host_operation only when the execution manifest reports "
             "that capability available; otherwise report the host operation as "
-            "unavailable and do not attempt a Linux substitute.\n\n"
+            "unavailable and do not attempt a Linux substitute. Issue exactly one "
+            "request_macos_host_operation call in an assistant turn, with no other "
+            "tool calls in that turn. Never batch Mac-host inspections or mutations; "
+            "wait for the complete review and receipt cycle before requesting another.\n\n"
             + manifest_text
             + "\n\n"
             + mutation_prompt

@@ -88,7 +88,11 @@ def get_coding_llm(model_name: str | None = None, *, num_predict: int | None = N
     if provider == "openai":
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(model=model, use_responses_api=True)
+        return ChatOpenAI(
+            model=model,
+            use_responses_api=True,
+            model_kwargs={"parallel_tool_calls": False},
+        )
 
     if provider == "huggingface":
         from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint

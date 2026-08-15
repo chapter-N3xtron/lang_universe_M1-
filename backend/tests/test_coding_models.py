@@ -47,7 +47,11 @@ def test_openai_model_uses_official_langchain_integration(monkeypatch):
 
     llm.get_coding_llm("openai/gpt-test")
 
-    assert captured == {"model": "gpt-test", "use_responses_api": True}
+    assert captured == {
+        "model": "gpt-test",
+        "use_responses_api": True,
+        "model_kwargs": {"parallel_tool_calls": False},
+    }
 
 
 def test_local_ollama_model_uses_local_endpoint_without_auth(monkeypatch):

@@ -366,7 +366,7 @@ test("terminal partial receipt presents manual-step language and resumes truthfu
   await expect(page.getByText(/partial mutation/).last()).toBeVisible();
 });
 
-test("mixed host envelopes fail closed with no bulk or generic escape path", async ({
+test("mixed host envelopes fail closed with only a reject-all escape path", async ({
   page,
 }) => {
   const mixed = interrupt(
@@ -385,7 +385,7 @@ test("mixed host envelopes fail closed with no bulk or generic escape path", asy
       },
     ],
   );
-  await prepare(page, mixed);
+  const runBodies = await prepare(page, mixed);
   await expect(
     page.getByRole("alert").getByText("Mac host operation blocked"),
   ).toBeVisible();
@@ -394,4 +394,13 @@ test("mixed host envelopes fail closed with no bulk or generic escape path", asy
       .getByRole("alert")
       .getByRole("button", { name: /Approve|Resolve|Submit|Save|Edit/i }),
   ).toHaveCount(0);
+  const initialCount = runBodies.length;
+  await page
+    .getByRole("button", { name: "Reject all interrupted actions" })
+    .click();
+  await expect.poll(() => runBodies.length).toBe(initialCount + 1);
+  expect(runBodies.at(-1)?.command.resume.decisions).toEqual([
+    { type: "reject" },
+    { type: "reject" },
+  ]);
 });

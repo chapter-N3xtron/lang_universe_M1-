@@ -307,7 +307,52 @@ function endpoint(path: string): string {
   return url.toString();
 }
 
-export function MalformedMacHostInterrupt() {
+export function MalformedMacHostInterrupt({
+  interrupt,
+}: {
+  interrupt: Interrupt<HITLRequest>;
+}) {
+  const stream = useStreamContext();
+  const lock = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const actionCount = Array.isArray(interrupt.value?.action_requests)
+    ? interrupt.value.action_requests.length
+    : 0;
+
+  const rejectAll = async () => {
+    if (lock.current || actionCount === 0) return;
+    lock.current = true;
+    setBusy(true);
+    setMessage(
+      "Rejecting every interrupted action without contacting the Mac executor…",
+    );
+    try {
+      await stream.submit(
+        {},
+        {
+          command: {
+            resume: {
+              decisions: Array.from({ length: actionCount }, () => ({
+                type: "reject" as const,
+              })),
+            },
+          },
+          multitaskStrategy: "reject",
+        },
+      );
+      setMessage(
+        "All interrupted actions were rejected. No request was sent to the Mac executor.",
+      );
+    } catch {
+      setMessage(
+        "The rejection could not be confirmed. Nothing was sent to the Mac executor; refresh the thread before taking another action.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section
       className="border-destructive/50 bg-destructive/5 rounded-lg border p-4"
@@ -318,8 +363,26 @@ export function MalformedMacHostInterrupt() {
         This interrupt is malformed or mixed with another action. A Mac-host
         request must be the sole action, have one matching approve/reject review
         configuration, and contain an exact immutable plan. Nothing was sent to
-        the Mac executor or resumed in LangGraph.
+        the Mac executor.
       </p>
+      {actionCount > 0 && (
+        <Button
+          className="mt-3"
+          variant="destructive"
+          disabled={busy}
+          onClick={rejectAll}
+        >
+          {busy ? "Rejecting…" : "Reject all interrupted actions"}
+        </Button>
+      )}
+      {message && (
+        <p
+          className="text-muted-foreground mt-2 text-sm"
+          role="status"
+        >
+          {message}
+        </p>
+      )}
     </section>
   );
 }
@@ -340,7 +403,7 @@ export function MacosHostOperationCard({
 
   const planValue = interrupt.value?.action_requests[0]?.args;
   const plan = normalizeHostOperationPlan(planValue);
-  if (!plan) return <MalformedMacHostInterrupt />;
+  if (!plan) return <MalformedMacHostInterrupt interrupt={interrupt} />;
   const correlationReady =
     typeof threadId === "string" &&
     threadId.length > 0 &&

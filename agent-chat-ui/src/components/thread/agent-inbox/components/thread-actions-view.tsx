@@ -136,7 +136,7 @@ export function ThreadActionsView(props: ThreadActionsViewProps) {
     return isExactMacHostEnvelope(props.interrupt) ? (
       <MacosHostOperationCard interrupt={props.interrupt} />
     ) : (
-      <MalformedMacHostInterrupt />
+      <MalformedMacHostInterrupt interrupt={props.interrupt} />
     );
   }
   return <GenericThreadActionsView {...props} />;

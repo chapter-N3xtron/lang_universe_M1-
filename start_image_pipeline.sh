@@ -286,8 +286,14 @@ _host_executor_installed() {
   [ -f "$HOST_EXECUTOR_RUNTIME/integrity.sha256" ]
 }
 
+_host_executor_process_executable() {
+  "$HOST_EXECUTOR_PYTHON" -B -c 'import ctypes, os; buffer = ctypes.create_string_buffer(4096); libproc = ctypes.CDLL("/usr/lib/libproc.dylib"); size = libproc.proc_pidpath(os.getpid(), buffer, len(buffer)); assert size > 0; print(os.fsdecode(buffer.value))'
+}
+
 _host_executor_command() {
-  print -r -- "$HOST_EXECUTOR_PYTHON -B -m macos_host_executor --host 127.0.0.1 --port $HOST_EXECUTOR_PORT --policy-json $HOST_EXECUTOR_POLICY --agent-server-url $HOST_EXECUTOR_AGENT_SERVER --confirmation-helper $HOST_EXECUTOR_HELPER --state-directory $HOST_EXECUTOR_STATE --public-key-output $HOST_EXECUTOR_PUBLIC_KEY"
+  local process_executable
+  process_executable=$(_host_executor_process_executable) || return 1
+  print -r -- "$process_executable -B -m macos_host_executor --host 127.0.0.1 --port $HOST_EXECUTOR_PORT --policy-json $HOST_EXECUTOR_POLICY --agent-server-url $HOST_EXECUTOR_AGENT_SERVER --confirmation-helper $HOST_EXECUTOR_HELPER --state-directory $HOST_EXECUTOR_STATE --public-key-output $HOST_EXECUTOR_PUBLIC_KEY"
 }
 
 _host_executor_pid_matches() {

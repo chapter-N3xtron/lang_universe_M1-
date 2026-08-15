@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-14T23:51:13Z",
+  "updated_at": "2026-08-14T23:53:52Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2555,7 +2555,7 @@
           "agent": "coding",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": "Use the authoritative serving worktree at /Volumes/Storage/LangGraph_AgentChat_ui_Opencode_CLI-bottom-locking-runtime. Plane, Temporal Server, and the Temporal worker remain separate services rather than processes inside langgraph-api. Governance reference: GOVERNANCE_FRAMEWORK.md."
+          "notes": "Blocked after live boundary inspection on 2026-08-14: the shared Agent Server also supports autonomous Coding with unreviewed shell execution, so a process-wide Docker socket mount would grant autonomous host-root authority and cannot satisfy approval-only scope. Docker CLI, Compose, and Buildx may remain in the image, but the socket was removed pending a separate approval-gated broker. Plane, Temporal Server, and the Temporal worker remain separate services and were not installed. Governance reference: GOVERNANCE_FRAMEWORK.md."
         },
         {
           "id": "verify-live-coder-docker-access",
@@ -2564,7 +2564,7 @@
           "agent": "coding",
           "completed_by_model": null,
           "completed_at": null,
-          "notes": ""
+          "notes": "Live verification initially proved the actual container could reach Docker 29.7.2 with CLI 27.5.1, Compose 2.33.0, and Buildx 0.20.1, but security review then found autonomous Coding bypasses per-command interrupts. Acceptance is not met; socket access must remain absent until an approval-only broker is implemented and verified. Governance reference: GOVERNANCE_FRAMEWORK.md."
         }
       ]
     }

@@ -124,9 +124,7 @@ def _specialists(_model) -> list[CompiledSubAgent]:
 
 
 @tool
-def transfer_to_coding(
-    task: str, runtime: ToolRuntime
-) -> Command[Literal["coding"]]:
+def transfer_to_coding(task: str, runtime: ToolRuntime) -> Command[Literal["coding"]]:
     """Hand a repository task to the top-level Coding specialist."""
 
     state = runtime.state
@@ -294,15 +292,22 @@ server-produced execution manifest as deployment truth: selected repository file
 originate from a macOS-host bind mount, while ordinary commands run in the Linux Agent
 Server container. Never call Linux commands Mac-host commands or claim they changed
 macOS, /Applications, Homebrew, a DMG, Finder, Keychain, launch services, or a native
-Mac application. For Docker or Docker Compose work, delegate to Coding with instructions
-to use request_docker_compose_operation only when the manifest reports it available.
-Never direct Coding to inspect Docker or Docker Desktop through
-request_macos_host_operation, including installation, presence, or version checks, and
-never use Mac inspection as a Docker preflight. If the Docker broker is unavailable,
-report that exact blocker. For other macOS-only work, delegate to Coding with
-instructions to call request_macos_host_operation only when the manifest reports it
-available; otherwise report that host operations are unavailable and do not propose a
-Linux substitute.
+Mac application. For Docker or Docker Compose work, delegate the requested outcome to Coding with
+instructions to use request_macos_host_operation with exactly one typed docker_sandbox
+action only when the execution manifest reports "docker_sandbox via
+request_macos_host_operation: available". This is the only local Docker route; never
+direct Coding to wait for a legacy Docker broker tool. Never direct Coding to inspect
+Docker or Docker Desktop through a generic Mac inspection action, including
+installation, presence, or version checks, and never use Mac inspection as a Docker
+preflight. In autonomous mode, do not replace the requested deployment with a preflight,
+architecture proposal, or an extra approval request for ordinary repository changes;
+the typed host-operation interrupt remains the authority boundary. When deployment is
+paired with read-only integration analysis, preserve that separation and do not make
+integration implementation or redeployment of an existing service a prerequisite. If
+the docker_sandbox capability is unavailable, report that exact blocker. For other
+macOS-only work, delegate to Coding with instructions to call
+request_macos_host_operation only when the manifest reports it available; otherwise
+report that host operations are unavailable and do not propose a Linux substitute.
 Use read_repository_file for every repository file whose
 contents support a grounded visual so its evidence ID can be cited. Delegate external
 research with transfer_to_librarian. Delegate repository

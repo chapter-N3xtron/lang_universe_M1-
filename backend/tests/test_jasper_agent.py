@@ -208,6 +208,18 @@ async def test_jasper_recovers_when_tool_loop_returns_empty_final_content():
     assert "unrequested next steps" in module.NO_SELF_RESPONSE_GUIDANCE
 
 
+def test_jasper_docker_handoff_uses_only_typed_sandbox_route():
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+
+    prompt = " ".join(module.SYSTEM_PROMPT.split())
+    assert "exactly one typed docker_sandbox action" in prompt
+    assert "request_docker_compose_operation" not in prompt
+    assert "do not replace the requested deployment with a preflight" in prompt
+    assert "typed host-operation interrupt remains the authority boundary" in prompt
+    assert "preserve that separation" in prompt
+
+
 @pytest.mark.asyncio
 async def test_jasper_plain_agent_executes_tools_but_exposes_only_canonical_answer():
     model = _plain_model(
@@ -576,9 +588,7 @@ def test_jasper_deep_agent_exposes_documented_tools_and_task(tmp_path):
         "transfer_to_coding",
         "transfer_to_librarian",
     }
-    assert tool_names.isdisjoint(
-        {"web_search", "read_url", "ingest_uploaded_sources"}
-    )
+    assert tool_names.isdisjoint({"web_search", "read_url", "ingest_uploaded_sources"})
 
 
 @pytest.mark.parametrize("execution_mode", [None, "read_only", "autonomous"])
@@ -725,9 +735,7 @@ def test_jasper_handoff_targets_top_level_librarian_with_bounded_context(tmp_pat
         },
     )
 
-    command = module.transfer_to_librarian.func(
-        task="Research SIFT", runtime=runtime
-    )
+    command = module.transfer_to_librarian.func(task="Research SIFT", runtime=runtime)
 
     assert command.graph == command.PARENT
     assert command.goto == "librarian"

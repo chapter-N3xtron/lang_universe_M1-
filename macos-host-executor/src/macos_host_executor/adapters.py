@@ -21,6 +21,7 @@ from urllib.parse import urljoin, urlsplit
 
 from .models import (
     ApplicationInstallAction,
+    DockerSandboxAction,
     DownloadAction,
     HomebrewAction,
     HostInspectionAction,
@@ -385,6 +386,62 @@ def _remove_owned_directory(path: Path, identity: tuple[int, int] | None) -> boo
     except OSError:
         return False
     return not os.path.lexists(path)
+
+
+class DockerSandboxAdapter:
+    """Runs only policy-derived SBX argv and never retains process output."""
+
+    def __init__(self, runner: SubprocessRunner):
+        self.runner = runner
+
+    def execute(
+        self,
+        action: DockerSandboxAction,
+        plan: ExecutionPlan,
+        *,
+        timeout: int,
+        output_limit: int,
+        cancel: threading.Event,
+    ) -> AdapterResult:
+        run = self.runner.run(
+            plan.argv,
+            cwd=None,
+            timeout_seconds=timeout,
+            output_limit_bytes=output_limit,
+            cancel=cancel,
+        )
+        process = ProcessSummary(
+            pid=run.pid,
+            exit_code=run.exit_code,
+            stdout="",
+            stderr="",
+            output_truncated=run.output_truncated,
+            timed_out=run.timed_out,
+            cancelled=run.cancelled,
+        )
+        succeeded = run.exit_code == 0
+        mutations = ()
+        if action.operation != "ps":
+            mutations = (
+                Mutation(
+                    operation="replace",
+                    path=plan.approved_paths[0],
+                    detail="Docker sandbox Compose state may have changed",
+                ),
+            )
+        return AdapterResult(
+            success=succeeded,
+            verified=succeeded,
+            process=process,
+            observed_paths=(plan.approved_paths[0],),
+            mutations=mutations,
+            partial=bool(mutations and not succeeded),
+            message=(
+                "Docker sandbox operation completed"
+                if succeeded
+                else "Docker sandbox operation did not complete successfully"
+            ),
+        )
 
 
 class HomebrewAdapter:

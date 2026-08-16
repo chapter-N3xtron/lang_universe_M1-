@@ -9,6 +9,7 @@ import uvicorn
 
 from .adapters import (
     ApplicationAdapter,
+    DockerSandboxAdapter,
     DownloadAdapter,
     HomebrewAdapter,
     InspectionAdapter,
@@ -44,6 +45,21 @@ def main() -> None:
         parser.error(str(exc))
 
     state = config.state_directory
+    policy_config = config.policy.config
+    canonical_sbx_home: Path | None = None
+    if policy_config.sbx_home:
+        sbx_home = Path(policy_config.sbx_home)
+        try:
+            canonical_sbx_home = sbx_home.resolve(strict=True)
+        except OSError as exc:
+            parser.error(f"configured SBX operator home is unavailable: {exc}")
+        if (
+            not sbx_home.is_absolute()
+            or canonical_sbx_home != sbx_home
+            or not canonical_sbx_home.is_dir()
+        ):
+            parser.error("configured SBX operator home must be a canonical directory")
+
     signer = ReceiptSigner.load_or_create(state / "receipt-signing.key")
     signer.export_public_key(
         (args.public_key_output or state / "receipt-signing.pub").expanduser()
@@ -54,7 +70,12 @@ def main() -> None:
         state / "staging" / "processes",
         trusted_environment={"HOME": str(runtime_home)},
     )
-    policy_config = config.policy.config
+    sbx_runner = runner
+    if canonical_sbx_home is not None:
+        sbx_runner = SubprocessRunner(
+            state / "staging" / "sbx-processes",
+            trusted_environment={"HOME": str(canonical_sbx_home)},
+        )
     adapters = {
         "host_inspection": InspectionAdapter(runner),
         "https_download": DownloadAdapter(
@@ -65,6 +86,7 @@ def main() -> None:
             runner, state / "staging" / "applications"
         ),
         "native_application": NativeApplicationAdapter(runner),
+        "docker_sandbox": DockerSandboxAdapter(sbx_runner),
     }
     core = ExecutorCore(
         policy=config.policy,

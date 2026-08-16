@@ -12,7 +12,7 @@ def test_runtime_identity_fails_closed_without_deployment_marker(monkeypatch):
         "command_runtime": "linux_agent_server_container",
         "native_host_operations": "unavailable_without_separate_approval",
         "host_operation_request": "unavailable",
-        "docker_broker_request": "unavailable",
+        "docker_sandbox_request": "unavailable",
     }
 
 
@@ -27,5 +27,5 @@ def test_runtime_identity_reports_docker_postgres_marker(monkeypatch):
         "command_runtime": "linux_agent_server_container",
         "native_host_operations": "unavailable_without_separate_approval",
         "host_operation_request": "unavailable",
-        "docker_broker_request": "unavailable",
+        "docker_sandbox_request": "unavailable",
     }

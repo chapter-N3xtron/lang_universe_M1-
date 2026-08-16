@@ -157,6 +157,39 @@ function ActionFields({ plan }: { plan: HostOperationPlan }) {
           />
         </>
       );
+    case "docker_sandbox":
+      return (
+        <>
+          <Field
+            label="Workspace"
+            value={action.workspace}
+          />
+          <Field
+            label="Project directory"
+            value={action.project_directory}
+          />
+          <Field
+            label="Compose file"
+            value={action.compose_file}
+          />
+          <Field
+            label="Compose file SHA-256"
+            value={action.compose_sha256}
+          />
+          <Field
+            label="Compose operation"
+            value={action.operation}
+          />
+          <Field
+            label="Services"
+            value={action.services.join(", ") || "All"}
+          />
+          <Field
+            label="Profiles"
+            value={action.profiles.join(", ") || "None"}
+          />
+        </>
+      );
     case "native_application":
       return (
         <>
@@ -224,6 +257,8 @@ function plainActionSummary(plan: HostOperationPlan): string {
       return `${action.mode === "install" ? "Install" : "Stage"} ${action.application_id} at ${action.destination}.`;
     case "native_application":
       return `Run ${action.operation.replaceAll("_", " ")} in ${action.application_id}.`;
+    case "docker_sandbox":
+      return `Run the typed Docker Compose ${action.operation} operation through SBX in ${action.workspace}.`;
   }
 }
 
@@ -344,7 +379,7 @@ function failureGuidance(error: unknown): ApprovalFailure {
     error instanceof Error ? error.message : "Unknown executor error";
   const normalized = detail.toLowerCase();
   const useAnotherRoute =
-    "Reject this Mac request. Coder will be told to continue through an allowed autonomous tool, including the Docker broker for Docker work, or report one specific blocker.";
+    "Reject this Mac request. Coder will be told not to retry it and to continue independent work or report one specific blocker.";
 
   if (
     normalized.includes("not allowlisted") ||
@@ -509,7 +544,7 @@ export function MacosHostOperationCard({
       await resume({
         type: "reject",
         message:
-          "The human rejected this Mac-host operation. Do not retry the same Mac tool call. Continue through an allowed autonomous tool, using request_docker_compose_operation for Docker work. If no allowed route can complete the task, report one specific blocker and the simplest next step. Treat any earlier Mac attempt as unverified.",
+          "The human rejected this Mac-host operation. Do not retry the same Mac tool call. Continue through an allowed autonomous tool, using request_macos_host_operation with docker_sandbox for Docker work. If no allowed route can complete the task, report one specific blocker and the simplest next step. Treat any earlier Mac attempt as unverified.",
       });
       setCoderApprovalState("finished");
       setMessage(

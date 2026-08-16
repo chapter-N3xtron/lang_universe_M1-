@@ -72,12 +72,32 @@ export interface NativeApplicationAction {
   configuration: InputHash[];
 }
 
+export interface DockerSandboxAction {
+  category: "docker_sandbox";
+  workspace: string;
+  project_directory: string;
+  compose_file: string;
+  compose_sha256: string;
+  operation:
+    | "pull"
+    | "build"
+    | "up"
+    | "start"
+    | "stop"
+    | "restart"
+    | "down"
+    | "ps";
+  services: string[];
+  profiles: string[];
+}
+
 export type HostAction =
   | HostInspectionAction
   | DownloadAction
   | HomebrewAction
   | ApplicationInstallAction
-  | NativeApplicationAction;
+  | NativeApplicationAction
+  | DockerSandboxAction;
 
 export interface HostOperationPlan {
   action: HostAction;
@@ -111,6 +131,10 @@ export type HostActionToolArgs =
       output_path?: string | null;
       script?: InputHash | null;
       configuration?: InputHash[];
+    })
+  | (Omit<DockerSandboxAction, "services" | "profiles"> & {
+      services?: string[];
+      profiles?: string[];
     });
 
 export interface HostOperationPlanToolArgs {
@@ -162,6 +186,7 @@ export interface SignedHostReceipt {
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const packagePattern = /^[a-z0-9][a-z0-9@+._-]{0,127}$/;
+const composeIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const lifecycleStates = new Set<HostLifecycleState>([
   "requested",
   "confirming",
@@ -203,6 +228,16 @@ function text(value: unknown, max = 1024): value is string {
 
 function absolutePath(value: unknown): value is string {
   return text(value, 4096) && value.startsWith("/");
+}
+
+function relativePath(value: unknown): value is string {
+  return (
+    text(value, 4096) &&
+    !value.startsWith("/") &&
+    !value.includes("\\") &&
+    !value.includes("\0") &&
+    !value.split("/").includes("..")
+  );
 }
 
 function integer(value: unknown, min: number, max: number): value is number {
@@ -409,6 +444,49 @@ function isHostAction(value: unknown): value is HostAction {
             value.script === null &&
             value.configuration.length === 0;
     }
+    case "docker_sandbox": {
+      if (
+        !exactKeys(value, [
+          "category",
+          "workspace",
+          "project_directory",
+          "compose_file",
+          "compose_sha256",
+          "operation",
+          "services",
+          "profiles",
+        ]) ||
+        !absolutePath(value.workspace) ||
+        !relativePath(value.project_directory) ||
+        !relativePath(value.compose_file) ||
+        typeof value.compose_sha256 !== "string" ||
+        !sha256Pattern.test(value.compose_sha256) ||
+        !oneOf(value.operation, [
+          "pull",
+          "build",
+          "up",
+          "start",
+          "stop",
+          "restart",
+          "down",
+          "ps",
+        ] as const) ||
+        !Array.isArray(value.services) ||
+        value.services.length > 64 ||
+        !value.services.every(
+          (item) =>
+            typeof item === "string" && composeIdentifierPattern.test(item),
+        ) ||
+        !Array.isArray(value.profiles) ||
+        value.profiles.length > 32 ||
+        !value.profiles.every(
+          (item) =>
+            typeof item === "string" && composeIdentifierPattern.test(item),
+        )
+      )
+        return false;
+      return value.operation !== "down" || value.services.length === 0;
+    }
     default:
       return false;
   }
@@ -484,6 +562,8 @@ export function normalizeHostOperationPlan(
       configuration: [],
       ...action,
     };
+  } else if (category === "docker_sandbox") {
+    action = { services: [], profiles: [], ...action };
   }
 
   const candidate = {

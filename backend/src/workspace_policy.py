@@ -19,7 +19,7 @@ class ExecutionManifest(TypedDict):
     command_runtime: Literal["linux_agent_server_container"]
     native_host_operations: Literal["unavailable_without_separate_approval"]
     host_operation_request: Literal["available", "unavailable"]
-    docker_broker_request: Literal["available", "unavailable"]
+    docker_sandbox_request: Literal["available", "unavailable"]
 
 
 # These are the host-path-preserving bind-mount roots supported by the macOS
@@ -79,14 +79,10 @@ def host_operation_request_available() -> bool:
     return available()
 
 
-def docker_broker_request_available() -> bool:
-    """Report Docker broker availability only for a validated fixed endpoint."""
+def docker_sandbox_request_available() -> bool:
+    """Report typed SBX requests from the validated host-executor configuration."""
 
-    from src.docker_broker_operations import (
-        docker_broker_request_available as available,
-    )
-
-    return available()
+    return host_operation_request_available()
 
 
 def execution_manifest(workspace: Path) -> ExecutionManifest:
@@ -101,8 +97,8 @@ def execution_manifest(workspace: Path) -> ExecutionManifest:
         "host_operation_request": (
             "available" if host_operation_request_available() else "unavailable"
         ),
-        "docker_broker_request": (
-            "available" if docker_broker_request_available() else "unavailable"
+        "docker_sandbox_request": (
+            "available" if docker_sandbox_request_available() else "unavailable"
         ),
     }
 
@@ -118,6 +114,6 @@ def format_execution_manifest(manifest: ExecutionManifest) -> str:
             f"- command runtime: {manifest['command_runtime']}",
             f"- native host operations: {manifest['native_host_operations']}",
             f"- request_macos_host_operation: {manifest['host_operation_request']}",
-            f"- request_docker_compose_operation: {manifest['docker_broker_request']}",
+            f"- docker_sandbox via request_macos_host_operation: {manifest['docker_sandbox_request']}",
         )
     )

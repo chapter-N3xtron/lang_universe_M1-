@@ -112,6 +112,41 @@ def test_direct_agent_server_check_is_fixed_get_without_credentials(
     assert "cookie" not in headers
 
 
+def test_docker_sandbox_pending_authority_matches_selected_workspace() -> None:
+    workspace = "/Users/operator/repository"
+    plan = HostOperationPlan.model_validate(
+        {
+            "action": {
+                "category": "docker_sandbox",
+                "workspace": workspace,
+                "project_directory": ".",
+                "compose_file": "compose.yaml",
+                "compose_sha256": "0" * 64,
+                "operation": "ps",
+                "services": (),
+                "profiles": (),
+            },
+            "expected_mutations": (),
+            "timeout_seconds": 60,
+            "rollback": {
+                "strategy": "none",
+                "may_require_human_inspection": False,
+            },
+            "expiry_seconds": 300,
+        }
+    )
+    state = pending_state(plan)
+    state["values"] = {"workspace": workspace}
+    with agent_server(state) as (url, _):
+        checker = AgentServerPendingInterruptChecker(url)
+        assert checker.is_pending("thread/actual", "interrupt:one", plan.digest)
+
+    state["values"] = {"workspace": "/Users/operator/other-repository"}
+    with agent_server(state) as (url, _):
+        checker = AgentServerPendingInterruptChecker(url)
+        assert not checker.is_pending("thread/actual", "interrupt:one", plan.digest)
+
+
 @pytest.mark.parametrize(
     ("mutation", "digest"),
     [

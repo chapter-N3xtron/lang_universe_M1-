@@ -22,10 +22,6 @@ from langgraph.graph.ui import (
 )
 
 from src.coding_persistence import coding_session_id, export_coding_session
-from src.docker_broker_operations import (
-    create_request_docker_compose_operation_tool,
-    load_docker_broker_config,
-)
 from src.llm import get_coding_llm
 from src.macos_host_operations import (
     create_request_macos_host_operation_tool,
@@ -71,7 +67,7 @@ _SENSITIVE_VIRTUAL_PATHS = [
 ]
 logger = logging.getLogger(__name__)
 
-_SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str, str, str], Any] = OrderedDict()
+_SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str, str], Any] = OrderedDict()
 _SESSION_AGENT_CACHE_SIZE = 8
 _CODING_TOOL_PATHS = ("/opt/coding-tools/node/bin", "/opt/coding-tools/pnpm")
 _CODING_PROGRESS_INTERVAL_SECONDS = 15 * 60
@@ -83,14 +79,6 @@ _HOST_OPERATION_INTERRUPT = {
         "verification; host execution is independently confirmed outside Coding."
     ),
 }
-_DOCKER_OPERATION_INTERRUPT = {
-    "allowed_decisions": ["approve", "reject"],
-    "description": (
-        "Review this exact Docker Compose operation plan. Approval only resumes "
-        "terminal-result retrieval; the broker controls host Docker independently."
-    ),
-}
-
 _LOCAL_APPROVAL_INTERRUPT_ON = {
     "write_file": {
         "allowed_decisions": ["approve", "edit", "reject"],
@@ -196,31 +184,16 @@ def _build_deep_agent(
     else:
         backend = filesystem_backend_type(root_dir=workspace, virtual_mode=True)
     operator_config = load_operator_config()
-    docker_broker_config = load_docker_broker_config()
     mutable_mode = approval_mode or autonomous_mode
     host_tool_enabled = operator_config is not None and mutable_mode
-    docker_tool_enabled = docker_broker_config is not None and mutable_mode
     tools = []
     if host_tool_enabled and operator_config is not None:
         tools.append(create_request_macos_host_operation_tool(operator_config))
-    if docker_tool_enabled and docker_broker_config is not None:
-        tools.append(
-            create_request_docker_compose_operation_tool(
-                docker_broker_config, str(workspace)
-            )
-        )
-    broker_interrupts = {
-        **(
-            {"request_macos_host_operation": _HOST_OPERATION_INTERRUPT}
-            if host_tool_enabled
-            else {}
-        ),
-        **(
-            {"request_docker_compose_operation": _DOCKER_OPERATION_INTERRUPT}
-            if docker_tool_enabled
-            else {}
-        ),
-    }
+    broker_interrupts = (
+        {"request_macos_host_operation": _HOST_OPERATION_INTERRUPT}
+        if host_tool_enabled
+        else {}
+    )
     if approval_mode:
         interrupt_on = {**_LOCAL_APPROVAL_INTERRUPT_ON, **broker_interrupts}
     elif autonomous_mode and broker_interrupts:
@@ -243,7 +216,9 @@ def _build_deep_agent(
             "or edit .git files directly."
         )
     else:
-        mutation_prompt = "This deployment is read-only: never write, edit, delete, or execute files."
+        mutation_prompt = (
+            "This deployment is read-only: never write, edit, delete, or execute files."
+        )
     memory = ["/AGENTS.md"] if (workspace / "AGENTS.md").is_file() else None
     skills = (
         ["/.agents/skills/"] if (workspace / ".agents" / "skills").is_dir() else None
@@ -261,13 +236,14 @@ def _build_deep_agent(
             "home directory, current working directory, /workspace, or another "
             "checkout. Use absolute virtual paths rooted at /, which maps only to "
             "the selected repository. The shell is container-only. For every Docker "
-            "or Docker Compose task, use request_docker_compose_operation only when the "
-            "execution manifest reports that capability available; if it is unavailable, "
-            "report that exact blocker. Never call request_macos_host_operation to inspect "
-            "Docker or Docker Desktop, including its installation, presence, or version, "
-            "and never use Mac inspection as a Docker preflight. Issue one Docker "
-            "request alone per assistant turn, with no other tool calls in that turn, "
-            "and wait for its complete review and terminal result before another. "
+            "or Docker Compose task, use request_macos_host_operation with exactly one "
+            "typed docker_sandbox action only when the execution manifest reports that "
+            "capability available; if it is unavailable, report that exact blocker. "
+            "Bind each request to the current Compose file with its SHA-256 digest. "
+            "Never request Docker inspection, logs, exec, raw commands, names, argv, "
+            "environment, or secrets. Issue one Docker sandbox host-operation request "
+            "alone per assistant turn, with no other tool calls in that turn, and wait "
+            "for its complete native confirmation and signed receipt before another. "
             "Commands execute in the Linux Agent Server container; repository files "
             "originate from the macOS-host bind mount. Never describe container "
             "commands as Mac-host commands or infer a macOS mutation from Linux "
@@ -316,19 +292,7 @@ async def _session_agent(
         if operator_config is not None
         else "unavailable"
     )
-    docker_broker_config = load_docker_broker_config()
-    docker_config_identity = (
-        docker_broker_config.identity
-        if docker_broker_config is not None
-        else "unavailable"
-    )
-    key = (
-        str(workspace),
-        model_name or "",
-        mode,
-        host_config_identity,
-        docker_config_identity,
-    )
+    key = (str(workspace), model_name or "", mode, host_config_identity)
     if key in _SESSION_AGENT_CACHE:
         app = _SESSION_AGENT_CACHE.pop(key)
         _SESSION_AGENT_CACHE[key] = app
@@ -565,9 +529,7 @@ async def _stream_session(
     try:
         while True:
             wait_seconds = max(0.0, next_report_at - loop.time())
-            done, _pending = await asyncio.wait(
-                {next_values}, timeout=wait_seconds
-            )
+            done, _pending = await asyncio.wait({next_values}, timeout=wait_seconds)
             if next_values in done:
                 try:
                     values = next_values.result()
@@ -583,9 +545,7 @@ async def _stream_session(
             try:
                 event = push_ui_message(
                     "coder_progress_report",
-                    _progress_report_props(
-                        latest_values.get("todos"), report_number
-                    ),
+                    _progress_report_props(latest_values.get("todos"), report_number),
                     id=report_id,
                     state_key="ui",
                 )
@@ -637,7 +597,9 @@ async def deep_agents_coding_node(
         raw_todos = result.get("todos", [])
         new_messages = _current_turn_output(all_messages)
         if not _has_final_assistant_message(new_messages):
-            error_messages = [AIMessage(content=_failure_report("missing_final_result"))]
+            error_messages = [
+                AIMessage(content=_failure_report("missing_final_result"))
+            ]
             return {
                 "messages": _format_coding_result(error_messages, manifest),
                 "workspace": str(workspace),

@@ -138,8 +138,13 @@ roots and download domains, allows only the Homebrew cask `blender`, pins Blende
 application executable, and intentionally leaves `allowed_application_team_ids` and
 `allowed_native_script_hashes` empty. Consequently typed application copy/install and
 agent-authored native scripts remain denied until an operator separately verifies and
-pins the required identity or digest. Do not broaden roots to the home folder, Keychains,
-credential directories, Docker, or SSH locations.
+pins the required identity or digest. Typed SBX Compose is also denied by default. To
+enable it, the operator pins each exact repository root in `sandbox_workspace_roots`,
+the exact installed SBX executable in `sbx_executable`, and the operator account home in
+`sbx_home` so SBX can read its credential-binding configuration; do not use a
+home-directory-wide workspace root. `sbx secret set` is operator-only. Secrets never appear in a host-operation request
+or receipt. Do not broaden other roots to the home folder, Keychains, credential
+directories, Docker internals, or SSH locations.
 
 ### Start, status, stop, and failure behavior
 
@@ -188,8 +193,9 @@ persisted policy.
 ### No GitHub overlap
 
 This executor cannot run `gh`, authenticated remote Git/push, SSH, credential helpers,
-or Docker control, and no such credential is mounted or inherited. macOS operation
-approval cannot authorize GitHub publication. Any future approved GitHub publisher is a
+or arbitrary Docker control. Its only Docker authority is the typed, policy-derived SBX
+Compose action described above. SBX may use operator-configured Keychain proxy bindings,
+but no raw credential is mounted into or inherited by the sandbox. macOS operation approval cannot authorize GitHub publication. Any future approved GitHub publisher is a
 separate security domain, policy, confirmation, credential, and receipt lifecycle.
 
 ## Development checks

@@ -30,5 +30,8 @@
   },
   "allowed_application_team_ids": {},
   "allowed_native_script_hashes": [],
-  "homebrew_executable": "/opt/homebrew/bin/brew"
+  "homebrew_executable": "/opt/homebrew/bin/brew",
+  "sandbox_workspace_roots": [],
+  "sbx_executable": null,
+  "sbx_home": null
 }

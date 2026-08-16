@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
+import shlex
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -10,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .errors import PolicyDeniedError
 from .models import (
     ApplicationInstallAction,
+    DockerSandboxAction,
     DownloadAction,
     HomebrewAction,
     HostInspectionAction,
@@ -43,6 +47,9 @@ class PolicyConfig(BaseModel):
     allowed_application_team_ids: dict[str, str] = Field(default_factory=dict)
     allowed_native_script_hashes: tuple[Sha256, ...] = ()
     homebrew_executable: str | None = None
+    sandbox_workspace_roots: tuple[str, ...] = ()
+    sbx_executable: str | None = None
+    sbx_home: str | None = None
 
 
 class ExecutionPlan(BaseModel):
@@ -71,6 +78,8 @@ class ActionPolicy:
             plan = self._application(action)
         elif isinstance(action, NativeApplicationAction):
             plan = self._native(action)
+        elif isinstance(action, DockerSandboxAction):
+            plan = self._docker_sandbox(action)
         else:
             raise PolicyDeniedError("unknown action category")
         self._validate_mutations_and_rollback(operation, plan)
@@ -83,6 +92,32 @@ class ActionPolicy:
         operation: HostOperationPlan, plan: ExecutionPlan
     ) -> None:
         action = operation.action
+        if isinstance(action, DockerSandboxAction):
+            workspace = plan.approved_paths[0]
+            if operation.rollback.strategy != "none":
+                raise PolicyDeniedError(
+                    "Docker sandbox operations have no claimed rollback"
+                )
+            if action.operation == "ps":
+                if any(
+                    mutation.operation != "inspect" or mutation.path != workspace
+                    for mutation in operation.expected_mutations
+                ):
+                    raise PolicyDeniedError("ps may declare only workspace inspection")
+            else:
+                declared = tuple(
+                    (mutation.operation, mutation.path)
+                    for mutation in operation.expected_mutations
+                )
+                if declared != (("replace", workspace),):
+                    raise PolicyDeniedError(
+                        "mutating Compose operations must declare exactly one workspace replacement"
+                    )
+                if not operation.rollback.may_require_human_inspection:
+                    raise PolicyDeniedError(
+                        "mutating Compose operations require human-inspection acknowledgement"
+                    )
+            return
         required_path: str | None = None
         if isinstance(action, (DownloadAction, ApplicationInstallAction)) or (
             isinstance(action, NativeApplicationAction)
@@ -125,6 +160,8 @@ class ActionPolicy:
                 action.artifact_path, self.config.artifact_roots, regular_file=True
             )
             verify_hash(artifact, action.artifact_sha256)
+        if isinstance(action, DockerSandboxAction):
+            self._docker_sandbox(action)
         if isinstance(action, NativeApplicationAction):
             if action.operation == "blender_background_render":
                 canonical_existing(
@@ -254,6 +291,78 @@ class ActionPolicy:
             approved_paths=(str(artifact), str(destination)),
         )
 
+    def _docker_sandbox(self, action: DockerSandboxAction) -> ExecutionPlan:
+        if not self.config.sbx_executable:
+            raise PolicyDeniedError("SBX executable is not configured")
+        if not self.config.sbx_home:
+            raise PolicyDeniedError("SBX operator home is not configured")
+        sbx_home = canonical_existing(self.config.sbx_home, (self.config.sbx_home,))
+        if str(sbx_home) != self.config.sbx_home or not sbx_home.is_dir():
+            raise PolicyDeniedError("SBX operator home must be a canonical directory")
+        executable = str(
+            canonical_configured_executable(
+                self.config.sbx_executable, (self.config.sbx_executable,)
+            )
+        )
+        workspace = canonical_existing(
+            action.workspace, self.config.sandbox_workspace_roots
+        )
+        if str(workspace) != action.workspace:
+            raise PolicyDeniedError("sandbox workspace must be canonical")
+        if not workspace.is_dir():
+            raise PolicyDeniedError("sandbox workspace must be a directory")
+        project = canonical_existing(
+            str(workspace / action.project_directory), (str(workspace),)
+        )
+        if not project.is_dir():
+            raise PolicyDeniedError("Compose project directory must be a directory")
+        compose_file = canonical_existing(
+            str(project / action.compose_file), (str(project),), regular_file=True
+        )
+        try:
+            if compose_file.stat().st_size > 1_048_576:
+                raise PolicyDeniedError("Compose file exceeds the 1 MiB policy limit")
+        except OSError as exc:
+            raise PolicyDeniedError("Compose file could not be inspected") from exc
+        verify_hash(compose_file, action.compose_sha256)
+
+        slug = re.sub(r"[^a-z0-9]+", "-", workspace.name.lower()).strip("-")
+        slug = (slug or "workspace")[:40]
+        digest = hashlib.sha256(str(workspace).encode()).hexdigest()[:12]
+        sandbox_name = f"{slug}-{digest}"
+
+        compose_argv = [
+            "docker",
+            "compose",
+            "--project-directory",
+            str(project),
+            "--file",
+            str(compose_file),
+        ]
+        for profile in action.profiles:
+            compose_argv.extend(("--profile", profile))
+        compose_argv.append(action.operation)
+        if action.operation == "up":
+            compose_argv.append("--detach")
+        compose_argv.extend(action.services)
+        inner_command = shlex.join(compose_argv)
+        return ExecutionPlan(
+            category=action.category,
+            executable=executable,
+            argv=(
+                executable,
+                "run",
+                "shell",
+                "--name",
+                sandbox_name,
+                str(workspace),
+                "--",
+                "-c",
+                inner_command,
+            ),
+            approved_paths=(str(workspace), str(project), str(compose_file)),
+        )
+
     def _native(self, action: NativeApplicationAction) -> ExecutionPlan:
         configured = self.config.allowed_applications.get(action.application_id)
         if not configured:
@@ -287,7 +396,9 @@ class ActionPolicy:
                 )
                 verify_hash(script, action.script.sha256)
                 if action.script.sha256 not in self.config.allowed_native_script_hashes:
-                    raise PolicyDeniedError("native script hash is not operator-allowlisted")
+                    raise PolicyDeniedError(
+                        "native script hash is not operator-allowlisted"
+                    )
                 if script.suffix != ".py":
                     raise PolicyDeniedError(
                         "Blender script must be an approval-bound .py file"

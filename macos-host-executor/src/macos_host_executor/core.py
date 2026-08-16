@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .adapters import ActionAdapter, AdapterResult
 from .confirmation import ConfirmationProvider, PendingInterruptChecker
@@ -12,6 +13,7 @@ from .errors import ExecutorError, StateConflictError
 from .models import (
     ApplicationInstallAction,
     ConfirmationAttempt,
+    DockerSandboxAction,
     DownloadAction,
     HostOperationRequest,
     InputHash,
@@ -258,6 +260,11 @@ class ExecutorCore:
             return (
                 InputHash(path=action.artifact_path, sha256=action.artifact_sha256),
             )
+        if isinstance(action, DockerSandboxAction):
+            compose_path = (
+                Path(action.workspace) / action.project_directory / action.compose_file
+            )
+            return (InputHash(path=str(compose_path), sha256=action.compose_sha256),)
         if isinstance(action, NativeApplicationAction):
             values = list(action.configuration)
             if action.script:

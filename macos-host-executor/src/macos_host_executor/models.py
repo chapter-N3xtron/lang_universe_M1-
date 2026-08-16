@@ -7,6 +7,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -170,12 +171,49 @@ class NativeApplicationAction(StrictModel):
         return self
 
 
+ComposeIdentifier = Annotated[
+    str,
+    StringConstraints(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    ),
+]
+RelativePath = Annotated[str, StringConstraints(min_length=1, max_length=4096)]
+
+
+class DockerSandboxAction(StrictModel):
+    category: Literal["docker_sandbox"]
+    workspace: AbsolutePath
+    project_directory: RelativePath
+    compose_file: RelativePath
+    compose_sha256: Sha256
+    operation: Literal["pull", "build", "up", "start", "stop", "restart", "down", "ps"]
+    services: tuple[ComposeIdentifier, ...] = Field(default=(), max_length=64)
+    profiles: tuple[ComposeIdentifier, ...] = Field(default=(), max_length=32)
+
+    @field_validator("project_directory", "compose_file")
+    @classmethod
+    def safe_relative_path(cls, value: str) -> str:
+        if "\x00" in value or "\\" in value:
+            raise ValueError("relative path contains a prohibited character")
+        path = PurePosixPath(value)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("path must be relative and may not traverse parents")
+        return value
+
+    @model_validator(mode="after")
+    def operation_constraints(self) -> DockerSandboxAction:
+        if self.operation == "down" and self.services:
+            raise ValueError("down does not accept services")
+        return self
+
+
 HostAction = Annotated[
     HostInspectionAction
     | DownloadAction
     | HomebrewAction
     | ApplicationInstallAction
-    | NativeApplicationAction,
+    | NativeApplicationAction
+    | DockerSandboxAction,
     Field(discriminator="category"),
 ]
 

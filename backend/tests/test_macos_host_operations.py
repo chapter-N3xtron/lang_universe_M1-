@@ -133,6 +133,54 @@ def test_strict_mirrored_schema_rejects_extra_and_coerced_values(plan):
         host.HostOperationPlan.model_validate(data)
 
 
+def test_docker_sandbox_tool_schema_is_typed_and_rejects_raw_authority():
+    action = {
+        "category": "docker_sandbox",
+        "workspace": "/Users/operator/repository",
+        "project_directory": ".",
+        "compose_file": "compose.yaml",
+        "compose_sha256": "0" * 64,
+        "operation": "up",
+        "services": ["web"],
+        "profiles": ["dev"],
+    }
+    plan = {
+        "action": action,
+        "expected_mutations": [
+            {
+                "operation": "replace",
+                "path": "/Users/operator/repository",
+                "detail": "Compose runtime state may change",
+            }
+        ],
+        "timeout_seconds": 60,
+        "rollback": {
+            "strategy": "none",
+            "may_require_human_inspection": True,
+        },
+        "expiry_seconds": 300,
+    }
+    parsed = host.HostOperationPlan.model_validate_json(json.dumps(plan))
+    assert isinstance(parsed.action, host.DockerSandboxAction)
+    schema = host.create_request_macos_host_operation_tool(
+        host.HostOperatorConfig(
+            endpoint="http://127.0.0.1:8765", public_key=b"x" * 32, key_id="key"
+        )
+    ).args_schema.model_json_schema()
+    assert "docker_sandbox" in json.dumps(schema)
+    for key, value in (
+        ("command", "docker compose logs"),
+        ("name", "caller-name"),
+        ("environment", {"TOKEN": "x"}),
+        ("argv", ["docker", "ps"]),
+        ("executable", "/tmp/sbx"),
+    ):
+        with pytest.raises(ValidationError):
+            host.HostOperationPlan.model_validate_json(
+                json.dumps({**plan, "action": {**action, key: value}})
+            )
+
+
 def test_digest_matches_executor_golden_vector(plan):
     assert plan.canonical_bytes() == (
         b'{"action":{"application_id":null,"category":"host_inspection",'
@@ -142,12 +190,13 @@ def test_digest_matches_executor_golden_vector(plan):
         b'"removes_only_request_created_paths":true,"strategy":"none"},'
         b'"timeout_seconds":10}'
     )
-    assert plan.digest == "832c6db37962a817139f5593a5d2e3aa5b85e8586f3d9b922a2924722b0f4313"
+    assert (
+        plan.digest
+        == "832c6db37962a817139f5593a5d2e3aa5b85e8586f3d9b922a2924722b0f4313"
+    )
 
 
-def test_operator_config_requires_complete_read_only_public_key(
-    tmp_path, monkeypatch
-):
+def test_operator_config_requires_complete_read_only_public_key(tmp_path, monkeypatch):
     monkeypatch.setenv("MACOS_HOST_EXECUTOR_URL", "http://127.0.0.1:8765")
     assert host.load_operator_config() is None
     key = tmp_path / "key"
@@ -291,7 +340,9 @@ def test_receipt_client_uses_only_fixed_get_route(monkeypatch):
 
     class Opener:
         def open(self, request, timeout):
-            captured.update(url=request.full_url, method=request.method, timeout=timeout)
+            captured.update(
+                url=request.full_url, method=request.method, timeout=timeout
+            )
             return Response()
 
     client = host.ReceiptClient("http://127.0.0.1:8765")

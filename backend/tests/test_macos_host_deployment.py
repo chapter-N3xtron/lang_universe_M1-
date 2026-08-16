@@ -53,9 +53,11 @@ def test_launcher_has_explicit_isolated_fail_closed_lifecycle() -> None:
     assert "xcrun swift build -c release" in executor
     assert "integrity.sha256" in executor
     assert "-exec /usr/bin/shasum -a 256 {} +" in executor
-    assert executor.index('chmod u+w "$staged"') < executor.index(
-        'mv "$staged" "$HOST_EXECUTOR_RUNTIME"'
-    ) < executor.index('chmod a-w "$HOST_EXECUTOR_RUNTIME"')
+    assert (
+        executor.index('chmod u+w "$staged"')
+        < executor.index('mv "$staged" "$HOST_EXECUTOR_RUNTIME"')
+        < executor.index('chmod a-w "$HOST_EXECUTOR_RUNTIME"')
+    )
     assert 'chmod 700 "$HOST_EXECUTOR_ROOT"' in executor
     assert 'chmod 600 "$HOST_EXECUTOR_POLICY"' in executor
     assert 'chmod 755 "$HOST_EXECUTOR_PUBLIC"' in executor
@@ -95,24 +97,28 @@ def test_launcher_has_isolated_docker_broker_lifecycle() -> None:
         "# ── langgraph",
     )
 
-    assert 'DOCKER_BROKER_PORT=8766' in launcher
+    assert "DOCKER_BROKER_PORT=8766" in launcher
     assert 'DOCKER_BROKER_ROOT="$HOME/.jasper/docker-broker"' in launcher
     assert 'DOCKER_BROKER_RUNTIME="$DOCKER_BROKER_ROOT/runtime"' in launcher
     assert 'DOCKER_BROKER_PRIVATE="$DOCKER_BROKER_ROOT/private"' in launcher
     assert 'DOCKER_BROKER_DOCKER="/usr/local/bin/docker"' in launcher
-    assert 'DOCKER_BROKER_ALLOWED_ROOT="${DOCKER_BROKER_ALLOWED_ROOT:-$ROOT}"' in launcher
+    assert (
+        'DOCKER_BROKER_ALLOWED_ROOT="${DOCKER_BROKER_ALLOWED_ROOT:-$ROOT}"' in launcher
+    )
     assert 'DOCKER_BROKER_AGENT_SERVER="http://127.0.0.1:8123"' in launcher
     assert 'DOCKER_BROKER_OWNER="local-owner-v1"' in launcher
-    assert 'DOCKER_BROKER_LEASE_SECONDS=14400' in launcher
+    assert "DOCKER_BROKER_LEASE_SECONDS=14400" in launcher
     assert "install-docker-broker)" in launcher
     assert "Type INSTALL to continue" in broker
     assert 'ditto --noqtn "$ROOT/docker-broker"' in broker
     assert '"$DOCKER_BROKER_BOOTSTRAP_PYTHON" -m venv "$staged/venv"' in broker
     assert "integrity.sha256" in broker
     assert "-exec /usr/bin/shasum -a 256 {} +" in broker
-    assert broker.index('chmod u+w "$staged"') < broker.index(
-        'mv "$staged" "$DOCKER_BROKER_RUNTIME"'
-    ) < broker.rindex('chmod a-w "$DOCKER_BROKER_RUNTIME"')
+    assert (
+        broker.index('chmod u+w "$staged"')
+        < broker.index('mv "$staged" "$DOCKER_BROKER_RUNTIME"')
+        < broker.rindex('chmod a-w "$DOCKER_BROKER_RUNTIME"')
+    )
     assert 'chmod u+w "$DOCKER_BROKER_RUNTIME"' in broker
     assert "runtime swap failed; restoring the previous snapshot" in broker
     assert 'chmod 700 "$DOCKER_BROKER_ROOT" "$DOCKER_BROKER_PRIVATE"' in broker
@@ -139,25 +145,33 @@ def test_launcher_has_isolated_docker_broker_lifecycle() -> None:
         assert forbidden not in broker
 
     start_case = _section(launcher, "  start)", "  stop)")
-    assert start_case.index("start_langgraph") < start_case.index(
-        "start_docker_broker"
-    ) < start_case.index("start_host_executor")
+    assert (
+        start_case.index("start_langgraph")
+        < start_case.index("start_docker_broker")
+        < start_case.index("start_host_executor")
+    )
     assert "if ! start_docker_broker" in start_case
     assert "stop_docker_broker" in start_case
 
     stop_case = _section(launcher, "  stop)", "  status)")
-    assert stop_case.index("stop_host_executor") < stop_case.index(
-        "stop_docker_broker"
-    ) < stop_case.index("stop_langgraph")
+    assert (
+        stop_case.index("stop_host_executor")
+        < stop_case.index("stop_docker_broker")
+        < stop_case.index("stop_langgraph")
+    )
     assert "status_docker_broker || true" in launcher
 
     restart_core = _section(launcher, "  restart-core)", "  install-host-executor)")
-    assert restart_core.index("stop_host_executor") < restart_core.index(
-        "stop_docker_broker"
-    ) < restart_core.index("stop_langgraph")
-    assert restart_core.index("start_langgraph") < restart_core.index(
-        "start_docker_broker"
-    ) < restart_core.index("start_host_executor")
+    assert (
+        restart_core.index("stop_host_executor")
+        < restart_core.index("stop_docker_broker")
+        < restart_core.index("stop_langgraph")
+    )
+    assert (
+        restart_core.index("start_langgraph")
+        < restart_core.index("start_docker_broker")
+        < restart_core.index("start_host_executor")
+    )
 
     assert (
         'frontend_docker_broker_url="http://127.0.0.1:'
@@ -180,17 +194,19 @@ def test_bottom_locking_hands_original_workspace_to_broker() -> None:
     assert launcher.index('export DOCKER_BROKER_ALLOWED_ROOT="$ROOT"') < launcher.index(
         '"$RUNTIME_ROOT/start_image_pipeline.sh" restart-core'
     )
-    assert launcher.count(
-        'NEXT_PUBLIC_DOCKER_BROKER_URL="http://127.0.0.1:8766/v1/coder/confirmations"'
-    ) == 2
+    assert (
+        launcher.count(
+            'NEXT_PUBLIC_DOCKER_BROKER_URL="http://127.0.0.1:8766/v1/coder/confirmations"'
+        )
+        == 2
+    )
 
 
 def test_compose_exposes_receipt_verification_only_and_masks_credentials() -> None:
     compose = _text(COMPOSE)
 
     assert (
-        "${HOME}/.jasper/macos-host-executor/public:"
-        "/run/macos-host-executor:ro"
+        "${HOME}/.jasper/macos-host-executor/public:/run/macos-host-executor:ro"
     ) in compose
     assert "MACOS_HOST_EXECUTOR_URL=http://host.docker.internal:8765" in compose
     assert (
@@ -261,9 +277,14 @@ def test_example_policy_is_explicit_and_denies_unpinned_app_install() -> None:
     # Application copy/install and native scripts require separate operator pins.
     assert policy["allowed_application_team_ids"] == {}
     assert policy["allowed_native_script_hashes"] == []
+    assert policy["sandbox_workspace_roots"] == []
+    assert policy["sbx_executable"] is None
+    assert policy["sbx_home"] is None
 
 
-def test_executor_policy_has_no_github_shell_persistence_or_privilege_route() -> None:
+def test_executor_policy_has_no_arbitrary_github_shell_docker_or_privilege_route() -> (
+    None
+):
     policy_source = _text(EXECUTOR_POLICY)
     runner_source = _text(EXECUTOR_RUNNER)
 
@@ -277,7 +298,6 @@ def test_executor_policy_has_no_github_shell_persistence_or_privilege_route() ->
         '"gh"',
         '"git"',
         '"ssh"',
-        '"docker"',
         '"launchctl"',
         '"osascript"',
         '"security"',
@@ -289,6 +309,13 @@ def test_executor_policy_has_no_github_shell_persistence_or_privilege_route() ->
     assert '"/usr/bin/uname"' in policy_source
     assert '"builtin:https"' in policy_source
     assert '"builtin:application_installer"' in policy_source
+    # The sole Docker spelling is the policy-built inner Compose argv; callers
+    # cannot provide a command, executable, argv, environment, or sandbox name.
+    assert policy_source.count('            "docker",') == 1
+    assert '            "compose",' in policy_source
+    assert (
+        '"run",\n                "shell",\n                "--name",' in policy_source
+    )
     assert "shell=False" in runner_source
     assert "start_new_session=True" in runner_source
     assert "close_fds=True" in runner_source

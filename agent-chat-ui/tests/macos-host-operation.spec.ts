@@ -204,6 +204,57 @@ test("renders immutable Mac-host fields, runtime boundary, and no generic contro
   }
 });
 
+test("normalizes and renders the strict docker_sandbox action without new controls", async ({
+  page,
+}) => {
+  const sandboxPlan = {
+    action: {
+      category: "docker_sandbox",
+      workspace: "/Users/test/repository",
+      project_directory: ".",
+      compose_file: "compose.yaml",
+      compose_sha256:
+        "0000000000000000000000000000000000000000000000000000000000000000",
+      operation: "up",
+    },
+    expected_mutations: [
+      {
+        operation: "replace",
+        path: "/Users/test/repository",
+        detail: "Compose runtime state may change",
+      },
+    ],
+    timeout_seconds: 600,
+    rollback: {
+      strategy: "none",
+      may_require_human_inspection: true,
+    },
+    expiry_seconds: 300,
+  };
+  await prepare(
+    page,
+    interrupt([
+      {
+        name: "request_macos_host_operation",
+        args: sandboxPlan,
+        description: "Run one typed SBX Compose operation",
+      },
+    ]),
+  );
+  const card = page.getByLabel("Mac host operation approval");
+  await expect(
+    card.getByText("typed Docker Compose up", { exact: false }),
+  ).toBeVisible();
+  await card.getByText("Technical plan details", { exact: true }).click();
+  await expect(card.getByText("docker_sandbox", { exact: true })).toBeVisible();
+  await expect(card.getByText("compose.yaml", { exact: true })).toBeVisible();
+  await expect(card.getByText("All", { exact: true })).toBeVisible();
+  await expect(card.getByText("None", { exact: true })).toBeVisible();
+  await expect(
+    card.getByRole("button", { name: /Edit|Save|Approve All/i }),
+  ).toHaveCount(0);
+});
+
 test("coordinates executor receipt before exactly one ordinary approve and locks duplicate clicks", async ({
   page,
 }) => {
@@ -272,7 +323,9 @@ test("ordinary rejection sends one reject decision and never calls the executor"
   const rejection = runBodies.at(-1)?.command.resume.decisions[0];
   expect(rejection.type).toBe("reject");
   expect(rejection.message).toContain("Do not retry the same Mac tool call");
-  expect(rejection.message).toContain("request_docker_compose_operation");
+  expect(rejection.message).toContain(
+    "request_macos_host_operation with docker_sandbox",
+  );
   expect(executorCalls).toBe(0);
 });
 
@@ -363,7 +416,7 @@ test("permanent HTTP 409 explains the policy denial and disables futile retry", 
     page.getByText(/Repeating approval will not change this policy decision/),
   ).toBeVisible();
   await expect(
-    page.getByText(/including the Docker broker for Docker work/),
+    page.getByText(/told not to retry it and to continue independent work/),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Mac approval unavailable" }),

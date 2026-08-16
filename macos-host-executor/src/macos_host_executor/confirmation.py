@@ -12,7 +12,7 @@ from urllib.parse import quote, urlsplit
 
 from pydantic import ValidationError
 
-from .models import HostOperationPlan, HostOperationRequest
+from .models import DockerSandboxAction, HostOperationPlan, HostOperationRequest
 from .policy import ExecutionPlan
 
 
@@ -173,6 +173,13 @@ def _state_has_plan(
         args, ensure_ascii=False, allow_nan=False, separators=(",", ":")
     )
     plan = HostOperationPlan.model_validate_json(encoded_args)
+    if isinstance(plan.action, DockerSandboxAction):
+        values = state.get("values")
+        if (
+            not isinstance(values, dict)
+            or values.get("workspace") != plan.action.workspace
+        ):
+            return False
     return plan.digest == plan_digest
 
 

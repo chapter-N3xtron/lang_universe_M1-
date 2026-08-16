@@ -118,11 +118,18 @@ async function prepare(
 }
 
 async function fulfillCors(route: Route, body: unknown, status = 200) {
+  const origin = route.request().headers()["origin"];
+  if (
+    origin !== "http://127.0.0.1:3101" &&
+    origin !== "http://127.0.0.1:3002"
+  ) {
+    throw new Error(`Unexpected browser origin: ${origin ?? "missing"}`);
+  }
   if (route.request().method() === "OPTIONS") {
     await route.fulfill({
       status: 204,
       headers: {
-        "Access-Control-Allow-Origin": "http://127.0.0.1:3101",
+        "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Headers": "Content-Type",
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
       },
@@ -132,7 +139,7 @@ async function fulfillCors(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     status,
     contentType: "application/json",
-    headers: { "Access-Control-Allow-Origin": "http://127.0.0.1:3101" },
+    headers: { "Access-Control-Allow-Origin": origin },
     body: JSON.stringify(body),
   });
 }

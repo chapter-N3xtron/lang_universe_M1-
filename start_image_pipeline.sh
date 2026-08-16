@@ -406,7 +406,10 @@ install_host_executor() {
 
   local previous="$HOST_EXECUTOR_ROOT/.runtime-previous"
   rm -rf "$previous"
-  [ ! -d "$HOST_EXECUTOR_RUNTIME" ] || mv "$HOST_EXECUTOR_RUNTIME" "$previous"
+  if [ -d "$HOST_EXECUTOR_RUNTIME" ]; then
+    chmod -R u+w "$HOST_EXECUTOR_RUNTIME"
+    mv "$HOST_EXECUTOR_RUNTIME" "$previous"
+  fi
   mv "$staged" "$HOST_EXECUTOR_RUNTIME"
   chmod a-w "$HOST_EXECUTOR_RUNTIME"
   rm -rf "$previous"

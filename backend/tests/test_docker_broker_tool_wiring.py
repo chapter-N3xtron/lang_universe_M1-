@@ -49,9 +49,7 @@ def test_docker_sandbox_uses_only_host_tool_by_execution_mode(monkeypatch, tmp_p
 
     coding_agent._build_deep_agent(tmp_path, None, execution_mode="approval")
     approval = captured[-1]
-    assert [tool.name for tool in approval["tools"]] == [
-        "request_macos_host_operation"
-    ]
+    assert [tool.name for tool in approval["tools"]] == ["request_macos_host_operation"]
     assert set(approval["interrupt_on"]) >= {"request_macos_host_operation"}
     assert "request_docker_compose_operation" not in approval["interrupt_on"]
 
@@ -64,6 +62,12 @@ def test_docker_sandbox_uses_only_host_tool_by_execution_mode(monkeypatch, tmp_p
     prompt = autonomous["system_prompt"]
     assert "typed docker_sandbox action" in prompt
     assert "one Docker sandbox host-operation request" in prompt
+    assert f"selected repository host path {tmp_path}" in prompt
+    assert "never use a virtual path such as /local-deployment-sandbox" in prompt
+    assert "project_directory local-deployment-sandbox" in prompt
+    assert "exactly one replace mutation" in prompt
+    assert "rollback.may_require_human_inspection must be true" in prompt
+    assert "one inspect mutation at action.workspace" in prompt
     assert "request_docker_compose_operation" not in prompt
     assert "logs, exec, raw commands, names, argv" in prompt
 
@@ -73,8 +77,10 @@ def test_docker_sandbox_uses_only_host_tool_by_execution_mode(monkeypatch, tmp_p
 
 
 def _host_config(monkeypatch, tmp_path):
-    public = Ed25519PrivateKey.generate().public_key().public_bytes(
-        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    public = (
+        Ed25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     )
     key = tmp_path / "receipt-signing.pub"
     key.write_bytes(public)

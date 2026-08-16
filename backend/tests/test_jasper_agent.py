@@ -100,6 +100,8 @@ def test_jasper_prompt_contains_versioned_interaction_governance():
     assert "Never search a parent, child, or sibling" in prompt
     assert "Linux Agent Server container" in prompt
     assert "request_macos_host_operation" in prompt
+    assert "For Docker or Docker Compose work" in prompt
+    assert "never use Mac inspection as a Docker preflight" in prompt
 
 
 @pytest.mark.asyncio

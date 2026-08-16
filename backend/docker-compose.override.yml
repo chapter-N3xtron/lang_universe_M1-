@@ -29,6 +29,7 @@ services:
       - SESSION_RUNTIME_ID=backend-postgres-v1
       - MACOS_HOST_EXECUTOR_URL=http://host.docker.internal:8765
       - MACOS_HOST_EXECUTOR_PUBLIC_KEY_FILE=/run/macos-host-executor/receipt-signing.pub
+      - DOCKER_BROKER_URL=http://host.docker.internal:8766
       - NPM_CONFIG_PREFIX=/opt/coding-tools/node
       - PNPM_HOME=/opt/coding-tools/pnpm
 

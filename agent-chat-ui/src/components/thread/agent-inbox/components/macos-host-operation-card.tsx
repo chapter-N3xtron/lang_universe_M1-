@@ -20,6 +20,23 @@ const confirmationUrl =
 const pollDelayMs = 500;
 const executorRequestTimeoutMs = 10_000;
 
+type CoderApprovalState =
+  | "awaiting_decision"
+  | "waiting_for_mac"
+  | "resuming"
+  | "blocked"
+  | "finished";
+
+const coderStatusLanguage: Record<CoderApprovalState, string> = {
+  awaiting_decision: "Paused — waiting for your approval decision.",
+  waiting_for_mac:
+    "Paused — waiting for Mac confirmation and a verified receipt. Coder has not resumed.",
+  resuming: "Resuming — your decision is being sent to Coder.",
+  blocked:
+    "Paused — approval did not complete. Coder is not working on this task.",
+  finished: "Finished — this approval card no longer blocks Coder.",
+};
+
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="grid gap-1 border-b py-2 last:border-b-0 sm:grid-cols-[12rem_1fr]">
@@ -192,6 +209,24 @@ function ActionFields({ plan }: { plan: HostOperationPlan }) {
   }
 }
 
+function plainActionSummary(plan: HostOperationPlan): string {
+  const action = plan.action;
+  switch (action.category) {
+    case "host_inspection": {
+      const subject = action.application_id ?? action.target_path ?? "the Mac";
+      return `Read ${action.query.replaceAll("_", " ")} information for ${subject}. This request declares no Mac changes.`;
+    }
+    case "https_download":
+      return `Download one verified file to ${action.destination}.`;
+    case "homebrew":
+      return `${action.operation === "install" ? "Install" : "Uninstall"} the Homebrew ${action.package_kind} ${action.package}.`;
+    case "application_install":
+      return `${action.mode === "install" ? "Install" : "Stage"} ${action.application_id} at ${action.destination}.`;
+    case "native_application":
+      return `Run ${action.operation.replaceAll("_", " ")} in ${action.application_id}.`;
+  }
+}
+
 function PlanDetails({
   plan,
   digest,
@@ -289,13 +324,111 @@ const statusLanguage: Record<HostLifecycleState, string> = {
     "The final Mac-host state or rollback is uncertain. Human inspection is required before claiming success.",
 };
 
+type ApprovalFailure = {
+  detail: string;
+  nextStep: string;
+  retryAllowed: boolean;
+};
+
+class ExecutorHttpError extends Error {
+  constructor(
+    readonly status: number,
+    detail: string,
+  ) {
+    super(`Mac executor returned HTTP ${status}${detail ? `: ${detail}` : ""}`);
+  }
+}
+
+function failureGuidance(error: unknown): ApprovalFailure {
+  const detail =
+    error instanceof Error ? error.message : "Unknown executor error";
+  const normalized = detail.toLowerCase();
+  const useAnotherRoute =
+    "Reject this Mac request. Coder will be told to continue through an allowed autonomous tool, including the Docker broker for Docker work, or report one specific blocker.";
+
+  if (
+    normalized.includes("not allowlisted") ||
+    normalized.includes("policy denied") ||
+    normalized.includes("not permitted")
+  ) {
+    return {
+      detail,
+      nextStep: `Repeating approval will not change this policy decision. ${useAnotherRoute}`,
+      retryAllowed: false,
+    };
+  }
+  if (
+    normalized.includes("not pending") ||
+    normalized.includes("bound to another interrupt")
+  ) {
+    return {
+      detail,
+      nextStep: `This approval is stale and must not be retried. ${useAnotherRoute}`,
+      retryAllowed: false,
+    };
+  }
+  if (
+    normalized.includes("signed receipt") ||
+    normalized.includes("receipt unavailable") ||
+    normalized.includes("digest changed") ||
+    normalized.includes("malformed")
+  ) {
+    return {
+      detail,
+      nextStep: `The result could not be verified safely. ${useAnotherRoute}`,
+      retryAllowed: false,
+    };
+  }
+  if (
+    normalized.includes("in progress") ||
+    normalized.includes("operation is active") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("timeout") ||
+    normalized.includes("timed out") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("polling ended") ||
+    (error instanceof ExecutorHttpError && error.status >= 500)
+  ) {
+    return {
+      detail,
+      nextStep:
+        "This may be temporary. Wait for the current Mac operation or connection to settle, then choose Try approval again. The same reviewed request will be used.",
+      retryAllowed: true,
+    };
+  }
+  return {
+    detail,
+    nextStep: useAnotherRoute,
+    retryAllowed: false,
+  };
+}
+
 async function executorJson(url: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(url, {
     ...init,
     signal: AbortSignal.timeout(executorRequestTimeoutMs),
   });
-  if (!response.ok)
-    throw new Error(`Mac executor returned HTTP ${response.status}`);
+  if (!response.ok) {
+    const rawBody = (await response.text()).trim().slice(0, 1_024);
+    let detail = rawBody;
+    try {
+      const parsed: unknown = JSON.parse(rawBody);
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        "detail" in parsed &&
+        typeof parsed.detail === "string"
+      ) {
+        detail = parsed.detail;
+      }
+    } catch {
+      detail = rawBody;
+    }
+    throw new ExecutorHttpError(
+      response.status,
+      detail.replaceAll(/\s+/g, " ").slice(0, 512),
+    );
+  }
   return response.json();
 }
 
@@ -315,10 +448,10 @@ export function MalformedMacHostInterrupt() {
     >
       <h2 className="font-semibold">Mac host operation blocked</h2>
       <p className="text-muted-foreground mt-2 text-sm">
-        This interrupt is malformed or mixed with another action. A Mac-host
-        request must be the sole action, have one matching approve/reject review
-        configuration, and contain an exact immutable plan. Nothing was sent to
-        the Mac executor or resumed in LangGraph.
+        This request cannot be reviewed safely because it is malformed or mixed
+        with another action. Nothing was sent to the Mac executor. Next step:
+        start a new thread with the same task so Coder can create one valid
+        request or choose an autonomous route.
       </p>
     </section>
   );
@@ -337,51 +470,72 @@ export function MacosHostOperationCard({
   const [state, setState] = useState<HostLifecycleState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [manualStep, setManualStep] = useState<string | null>(null);
+  const [retryAllowed, setRetryAllowed] = useState(true);
+  const [coderApprovalState, setCoderApprovalState] =
+    useState<CoderApprovalState>("awaiting_decision");
 
-  const planValue = interrupt.value?.action_requests[0]?.args;
-  const plan = normalizeHostOperationPlan(planValue);
+  const actionRequest = interrupt.value?.action_requests[0];
+  const plan = normalizeHostOperationPlan(actionRequest?.args);
   if (!plan) return <MalformedMacHostInterrupt />;
+  const requestDescription =
+    typeof actionRequest?.description === "string" &&
+    actionRequest.description.trim()
+      ? actionRequest.description.trim()
+      : "Coder requested an operation that cannot run inside its Linux container.";
   const correlationReady =
     typeof threadId === "string" &&
     threadId.length > 0 &&
     typeof interrupt.id === "string" &&
     interrupt.id.length > 0;
 
-  const resume = async (decision: { type: "approve" } | { type: "reject" }) => {
-    await stream.submit(
-      {},
-      {
-        command: { resume: { decisions: [decision] } },
-        multitaskStrategy: "reject",
-      },
-    );
+  const resume = async (
+    decision: { type: "approve" } | { type: "reject"; message: string },
+  ) => {
+    await stream.submit(null, {
+      command: { resume: { decisions: [decision] } },
+      multitaskStrategy: "reject",
+    });
   };
 
   const reject = async () => {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
-    setMessage("Rejecting without contacting or executing on the Mac host…");
+    setCoderApprovalState("resuming");
+    setMessage(
+      "Sending your rejection to Coder. No new Mac operation will start.",
+    );
     try {
-      await resume({ type: "reject" });
+      await resume({
+        type: "reject",
+        message:
+          "The human rejected this Mac-host operation. Do not retry the same Mac tool call. Continue through an allowed autonomous tool, using request_docker_compose_operation for Docker work. If no allowed route can complete the task, report one specific blocker and the simplest next step. Treat any earlier Mac attempt as unverified.",
+      });
+      setCoderApprovalState("finished");
       setMessage(
-        "Rejected. No executor request was made and no Mac-host success is claimed.",
+        "Rejected. Coder received instructions not to retry this Mac request and to continue through an allowed autonomous route. This rejection makes no claim about any earlier Mac attempt.",
       );
-    } catch {
+    } catch (error) {
+      const detail =
+        error instanceof Error ? error.message : "Unknown LangGraph error";
+      setCoderApprovalState("blocked");
       setMessage(
-        "The reject resume could not be confirmed. No executor request was made; refresh the thread before taking another action.",
+        `The rejection did not reach Coder: ${detail}. No new Mac operation was started. Next step: try Reject again; if it still fails, refresh this thread to restore its saved interrupt.`,
       );
     } finally {
+      lock.current = false;
       setBusy(false);
     }
   };
 
   const reviewAndApprove = async () => {
-    if (lock.current || !correlationReady) return;
+    if (lock.current || !correlationReady || !retryAllowed) return;
     lock.current = true;
     setBusy(true);
+    setCoderApprovalState("waiting_for_mac");
+    const maximumWaitSeconds = plan.expiry_seconds + plan.timeout_seconds + 30;
     setMessage(
-      "Opening native macOS confirmation while the LangGraph interrupt remains pending…",
+      `Opening native macOS confirmation. Use Reject in the native prompt to stop. This card will wait for at most ${maximumWaitSeconds.toLocaleString()} seconds before reporting a blocker.`,
     );
     try {
       const initialStatus = await executorJson(confirmationUrl, {
@@ -421,12 +575,14 @@ export function MacosHostOperationCard({
             );
           }
           setManualStep(receiptValue.receipt.remaining_human_step);
+          setCoderApprovalState("resuming");
           setMessage(
             `${statusLanguage[statusValue.state]} Resuming Coding with the matching signed terminal receipt so it can report the truth.`,
           );
           await resume({ type: "approve" });
+          setCoderApprovalState("finished");
           setMessage(
-            `${statusLanguage[statusValue.state]} Coding received the ordinary approve decision for this receipt; approval alone is not a success claim.${receiptValue.receipt.message ? ` ${receiptValue.receipt.message}` : ""}`,
+            `${statusLanguage[statusValue.state]} Coder received the verified receipt, and this card no longer blocks the task. Approval alone is not a success claim.${receiptValue.receipt.message ? ` ${receiptValue.receipt.message}` : ""}`,
           );
           return;
         }
@@ -448,12 +604,14 @@ export function MacosHostOperationCard({
         "Bounded receipt polling ended before a matching signed terminal receipt was available",
       );
     } catch (error) {
-      const detail =
-        error instanceof Error ? error.message : "Unknown executor error";
+      const failure = failureGuidance(error);
+      setRetryAllowed(failure.retryAllowed);
+      setCoderApprovalState("blocked");
       setMessage(
-        `Blocked without LangGraph approval: ${detail}. No matching signed terminal receipt was available, so the tool was not resumed. Refresh to inspect durable status; do not assume the Mac changed.`,
+        `Approval did not complete: ${failure.detail}. Coder remains paused, and no Mac outcome is being claimed. Next step: ${failure.nextStep}`,
       );
     } finally {
+      lock.current = false;
       setBusy(false);
     }
   };
@@ -467,72 +625,105 @@ export function MacosHostOperationCard({
         <p className="text-xs font-semibold tracking-wider text-amber-800 uppercase dark:text-amber-200">
           Physical Mac host — separate explicit approval
         </p>
-        <h2 className="mt-1 text-lg font-semibold">
-          Review immutable macOS operation
-        </h2>
-        <p className="text-muted-foreground mt-2 text-sm">
-          Ordinary Coding work runs in the <strong>Linux container</strong>{" "}
-          against the selected Mac-host repository mount. This card is
-          different: it may affect the <strong>physical Mac host</strong>{" "}
-          through a separate non-agent executor. Approval grants one attempt
-          only and never verifies success by itself.
+        <h2 className="mt-1 text-lg font-semibold">Mac approval needed</h2>
+        <p className="mt-3 text-sm font-medium">Requested action</p>
+        <p className="text-muted-foreground mt-1 text-sm">
+          {plainActionSummary(plan)}
+        </p>
+        <p className="mt-3 text-sm font-medium">Why approval is needed</p>
+        <p className="text-muted-foreground mt-1 text-sm">
+          {requestDescription} This reaches the physical Mac rather than Coder's
+          Linux container. Approval grants one attempt and is not proof of
+          success.
+        </p>
+        <p className="mt-3 text-sm font-medium">If you reject</p>
+        <p className="text-muted-foreground mt-1 text-sm">
+          The Mac action will not start from this decision. Coder will be told
+          not to retry it and to continue through an allowed autonomous tool or
+          report one specific blocker.
         </p>
       </header>
 
-      <PlanDetails
-        plan={plan}
-        digest={digest}
-      />
-
-      {(state || message || manualStep) && (
-        <div
-          className="bg-muted/50 rounded-lg border p-3"
-          aria-live="polite"
-        >
-          {state && <p className="font-medium">Executor status: {state}</p>}
-          {message && (
-            <p className="text-muted-foreground mt-1 text-sm">{message}</p>
-          )}
-          {manualStep && (
-            <p className="mt-2 text-sm font-medium">
-              Required manual Mac step: {manualStep}. Complete it yourself; this
-              UI will not automate or capture authorization, passwords, Touch
-              ID, Gatekeeper, license acceptance, or GUI consent.
-            </p>
-          )}
+      <details className="rounded-lg border p-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          Technical plan details
+        </summary>
+        <div className="mt-3">
+          <PlanDetails
+            plan={plan}
+            digest={digest}
+          />
         </div>
-      )}
+      </details>
+
+      <div
+        className="bg-muted/50 rounded-lg border p-3"
+        aria-atomic="true"
+        aria-live="polite"
+        role="status"
+      >
+        <p className="font-medium">Coder status</p>
+        <p className="mt-1 text-sm">
+          {coderStatusLanguage[coderApprovalState]}
+        </p>
+        {state && (
+          <p className="text-muted-foreground mt-2 text-sm">
+            Mac executor status: {state}
+          </p>
+        )}
+        {message && (
+          <p className="text-muted-foreground mt-1 text-sm">{message}</p>
+        )}
+        {manualStep && (
+          <p className="mt-2 text-sm font-medium">
+            Required manual Mac step: {manualStep}. Complete it yourself; this
+            UI will not automate or capture authorization, passwords, Touch ID,
+            Gatekeeper, license acceptance, or GUI consent.
+          </p>
+        )}
+      </div>
 
       {!correlationReady && (
         <p
           className="text-destructive text-sm"
           role="alert"
         >
-          Approval is blocked because the exact thread ID or interrupt ID is
-          unavailable.
+          Approval cannot start because this saved request is missing its thread
+          or interrupt identity. Next step: reject it so Coder can create a
+          valid request or continue another way.
         </p>
       )}
       <div className="flex flex-wrap gap-2">
         <Button
           variant="brand"
           onClick={reviewAndApprove}
-          disabled={busy || !correlationReady}
+          disabled={
+            busy ||
+            !correlationReady ||
+            !retryAllowed ||
+            coderApprovalState === "finished"
+          }
         >
-          {busy ? "Confirmation in progress…" : "Review on Mac and approve"}
+          {busy
+            ? "Confirmation in progress…"
+            : coderApprovalState === "blocked" && retryAllowed
+              ? "Try approval again"
+              : retryAllowed
+                ? "Review on Mac and approve"
+                : "Mac approval unavailable"}
         </Button>
         <Button
           variant="destructive"
           onClick={reject}
-          disabled={busy}
+          disabled={busy || coderApprovalState === "finished"}
         >
-          Reject without Mac execution
+          Reject Mac action and return to Coder
         </Button>
       </div>
       <p className="text-muted-foreground text-xs">
-        Cancellation, expiry, timeout, failure, partial mutation, and uncertain
-        rollback are not success. They resume Coding only when the executor
-        provides a matching signed terminal receipt, allowing the resumed tool
-        to report the exact known state and any manual step.
+        Failure, cancellation, expiry, partial change, or uncertain rollback is
+        not success. Coder receives only a verified receipt or your explicit
+        rejection.
       </p>
     </section>
   );

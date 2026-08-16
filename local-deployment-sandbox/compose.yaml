@@ -1,0 +1,140 @@
+name: langgraph-local-topology
+
+# Prepared only; not executed in this run because no container runtime is installed.
+# Replace image tags with verified immutable digests before starting.
+services:
+  plane-db:
+    image: postgres:15.7-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PLANE_DB_USER:-plane}
+      POSTGRES_PASSWORD: ${PLANE_DB_PASSWORD:?copy .env.example to .env and set a local value}
+      POSTGRES_DB: ${PLANE_DB_NAME:-plane}
+    volumes:
+      - plane-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PLANE_DB_USER:-plane} -d ${PLANE_DB_NAME:-plane}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  plane-redis:
+    image: redis:7.2.5-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - plane-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  # Plane application images are official makeplane images. Their complete
+  # environment/migration topology must be reconciled with the selected Plane
+  # release's self-hosted compose before activation.
+  plane-api:
+    image: makeplane/plane-backend:${PLANE_VERSION:-v1.26.0}
+    restart: unless-stopped
+    depends_on:
+      plane-db: {condition: service_healthy}
+      plane-redis: {condition: service_healthy}
+    env_file: [.env]
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/api/health/\")'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  plane-web:
+    image: makeplane/plane-frontend:${PLANE_VERSION:-v1.26.0}
+    restart: unless-stopped
+    depends_on: [plane-api]
+    environment:
+      API_BASE_URL: http://plane-api:8000
+    ports:
+      - "127.0.0.1:${PLANE_UI_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  temporal-db:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:?copy .env.example to .env and set a local value}
+      POSTGRES_DB: ${TEMPORAL_DB_NAME:-temporal}
+    volumes:
+      - temporal-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_DB_USER:-temporal} -d ${TEMPORAL_DB_NAME:-temporal}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [temporal]
+
+  temporal:
+    image: temporalio/auto-setup:1.27.2
+    restart: unless-stopped
+    depends_on:
+      temporal-db: {condition: service_healthy}
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:?set in .env}
+      POSTGRES_SEEDS: temporal-db
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development.yaml
+    ports:
+      - "127.0.0.1:${TEMPORAL_GRPC_PORT:-7233}:7233"
+    healthcheck:
+      test: ["CMD-SHELL", "temporal operator cluster health --address 127.0.0.1:7233"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    networks: [temporal]
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    depends_on: [temporal]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:${TEMPORAL_UI_PORT:-8088}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [temporal]
+
+  placeholder-ui:
+    build: {context: ./frontend}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PLACEHOLDER_UI_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [frontend]
+
+volumes:
+  plane-postgres:
+  plane-redis:
+  temporal-postgres:
+
+networks:
+  plane: {internal: true}
+  temporal: {internal: true}
+  frontend: {internal: true}

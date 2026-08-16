@@ -7,7 +7,10 @@ import os
 from fastapi import FastAPI
 
 from src.session_catalog_routes import router as session_catalog_router
-from src.workspace_policy import host_operation_request_available
+from src.workspace_policy import (
+    docker_broker_request_available,
+    host_operation_request_available,
+)
 
 app = FastAPI()
 app.include_router(session_catalog_router)
@@ -27,5 +30,8 @@ def runtime_identity() -> dict[str, object]:
         "native_host_operations": "unavailable_without_separate_approval",
         "host_operation_request": (
             "available" if host_operation_request_available() else "unavailable"
+        ),
+        "docker_broker_request": (
+            "available" if docker_broker_request_available() else "unavailable"
         ),
     }

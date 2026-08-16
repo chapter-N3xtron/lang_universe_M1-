@@ -50,7 +50,8 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
     )
 
     assert result["messages"][:2] == output[:2]
-    assert result["messages"][-1].content.startswith("Repository summary")
+    assert result["messages"][-1].content.startswith("Completion report")
+    assert "Repository summary" in result["messages"][-1].content
     assert "linux_agent_server_container" in result["messages"][-1].content
     assert result["execution_manifest"]["selected_repository"] == str(
         tmp_path.resolve()
@@ -284,6 +285,9 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
     assert "Never search parent, child, or sibling" in system_prompt
     assert "linux_agent_server_container" in system_prompt
     assert "request_macos_host_operation: unavailable" in system_prompt
+    assert "write_todos" in system_prompt
+    assert "15-minute report" in system_prompt
+    assert "Completion report" in system_prompt
 
     coding_agent._build_deep_agent(
         tmp_path.resolve(),
@@ -300,3 +304,86 @@ def test_coding_graph_uses_deep_agents_node():
 
     graph = coding_agent.create_coding_agent_graph()
     assert "coding_agent" in graph.get_graph().nodes
+
+
+def test_stream_session_reports_every_interval_and_clears_final_card(monkeypatch):
+    from src import coding_agent
+
+    class StreamingApp:
+        async def astream(self, _payload, config=None, stream_mode=None):
+            yield {
+                "todos": [
+                    {"content": "Inspect the change", "status": "in_progress"}
+                ]
+            }
+            await asyncio.sleep(0.025)
+            yield {
+                "todos": [
+                    {"content": "Inspect the change", "status": "completed"}
+                ]
+            }
+
+    published = []
+    deleted = []
+
+    def push(name, props, *, id=None, state_key=None):
+        event = {"id": id or "progress-1", "name": name, "props": props}
+        published.append((event, state_key))
+        return event
+
+    def delete(message_id, *, state_key):
+        deleted.append((message_id, state_key))
+
+    monkeypatch.setattr(coding_agent, "push_ui_message", push)
+    monkeypatch.setattr(coding_agent, "delete_ui_message", delete)
+
+    result = asyncio.run(
+        coding_agent._stream_session(
+            StreamingApp(),
+            {"messages": []},
+            {},
+            report_interval_seconds=0.01,
+        )
+    )
+
+    assert len(published) == 2
+    assert published[0][0]["name"] == "coder_progress_report"
+    assert published[0][0]["props"]["elapsed_minutes"] == 15
+    assert published[0][0]["props"]["tasks"][0]["status"] == "in_progress"
+    assert published[1][0]["id"] == published[0][0]["id"]
+    assert deleted == [("progress-1", "ui")]
+    assert result["todos"][0]["status"] == "completed"
+
+
+def test_completion_report_lists_each_task_with_a_note():
+    from src import coding_agent
+
+    report = coding_agent._completion_report_text(
+        "Changed the requested file and ran its test.",
+        [
+            {"content": "Change the file", "status": "completed"},
+            {"content": "Run the live check", "status": "pending"},
+        ],
+    )
+
+    assert report.startswith("Completion report")
+    assert "Completed: Change the file. Note:" in report
+    assert "Not completed: Run the live check. Note:" in report
+    assert "Coder notes" in report
+
+
+def test_progress_report_includes_declared_blockers():
+    from src import coding_agent
+
+    report = coding_agent._progress_report_props(
+        [
+            {
+                "content": "BLOCKER: Waiting for the required approval",
+                "status": "pending",
+            }
+        ],
+        report_number=3,
+    )
+
+    assert report["elapsed_minutes"] == 45
+    assert report["blockers"] == ["Waiting for the required approval"]

@@ -6,12 +6,14 @@
 #   ComfyUI    :8188    image renderer (optional)
 #   Element    GUI      VST/AU plugin host (Rare → LALA → reverb/delay)
 #   Host exec  :8765    optional, separately installed macOS executor (loopback only)
+#   Docker brk :8766    optional, separately installed Docker broker (loopback only)
 #   LangGraph  :8123    supervisor graph server (core — UI talks to this)
 #   Backend    :8000    FastAPI sidecar (TTS/STT/models list)
 #   Frontend   :3001    Next.js chat UI (production build, served by next start)
 #
-# The host executor is never installed or updated by start/restart. An operator must
-# explicitly run `install-host-executor`; this launcher performs no canary actions.
+# The host executor and Docker broker are never installed or updated by ordinary
+# start/restart/restart-core. An operator must explicitly run the corresponding
+# install command; this launcher performs no canary actions.
 #
 # Audio chain (macOS only):
 #   System output → BlackHole 2ch → Element → Built-in speakers
@@ -24,6 +26,7 @@
 #   ./start_image_pipeline.sh restart    Stop then start
 #   ./start_image_pipeline.sh restart-core  Restart host executor and core services
 #   ./start_image_pipeline.sh install-host-executor  Explicit operator-only install
+#   ./start_image_pipeline.sh install-docker-broker  Explicit operator-only install
 
 set -e
 umask 077
@@ -43,6 +46,7 @@ LANGGRAPH_PORT=8123
 BACKEND_PORT=8000
 FRONTEND_PORT=3001
 HOST_EXECUTOR_PORT=8765
+DOCKER_BROKER_PORT=8766
 
 # This installation is deliberately outside every writable repository. Runtime
 # startup only consumes this integrity-checked snapshot; it never imports from ROOT.
@@ -59,6 +63,22 @@ HOST_EXECUTOR_HELPER="$HOST_EXECUTOR_RUNTIME/bin/macos-host-confirmation"
 HOST_EXECUTOR_PUBLIC_KEY="$HOST_EXECUTOR_PUBLIC/receipt-signing.pub"
 HOST_EXECUTOR_AGENT_SERVER="http://127.0.0.1:8123"
 HOST_EXECUTOR_BOOTSTRAP_PYTHON="${HOST_EXECUTOR_BOOTSTRAP_PYTHON:-$(command -v python3 2>/dev/null || true)}"
+
+# Like the host executor, the broker runs only from an operator-installed,
+# integrity-checked snapshot outside the writable repository.
+DOCKER_BROKER_ROOT="$HOME/.jasper/docker-broker"
+DOCKER_BROKER_RUNTIME="$DOCKER_BROKER_ROOT/runtime"
+DOCKER_BROKER_PRIVATE="$DOCKER_BROKER_ROOT/private"
+DOCKER_BROKER_STATE="$DOCKER_BROKER_PRIVATE/state"
+DOCKER_BROKER_PIDFILE="$DOCKER_BROKER_PRIVATE/run/broker.pid"
+DOCKER_BROKER_LOG="$DOCKER_BROKER_PRIVATE/logs/broker.log"
+DOCKER_BROKER_PYTHON="$DOCKER_BROKER_RUNTIME/venv/bin/python"
+DOCKER_BROKER_AGENT_SERVER="http://127.0.0.1:8123"
+DOCKER_BROKER_OWNER="local-owner-v1"
+DOCKER_BROKER_LEASE_SECONDS=14400
+DOCKER_BROKER_DOCKER="/usr/local/bin/docker"
+DOCKER_BROKER_ALLOWED_ROOT="${DOCKER_BROKER_ALLOWED_ROOT:-$ROOT}"
+DOCKER_BROKER_BOOTSTRAP_PYTHON="${DOCKER_BROKER_BOOTSTRAP_PYTHON:-$(command -v python3 2>/dev/null || true)}"
 
 COMFYUI_DIR="$HOME/fun-multi-character-chats/ComfyUI"
 COMFYUI_PYTHON="$HOME/fun-multi-character-chats/.venv/bin/python"
@@ -526,6 +546,245 @@ status_host_executor() {
   fi
 }
 
+# ── optional Docker broker ─────────────────────────────────────────────
+
+_docker_broker_installed() {
+  [ -f "$DOCKER_BROKER_RUNTIME/integrity.sha256" ]
+}
+
+_docker_broker_process_executable() {
+  "$DOCKER_BROKER_PYTHON" -B -c 'import ctypes, os; buffer = ctypes.create_string_buffer(4096); libproc = ctypes.CDLL("/usr/lib/libproc.dylib"); size = libproc.proc_pidpath(os.getpid(), buffer, len(buffer)); assert size > 0; print(os.fsdecode(buffer.value))'
+}
+
+_docker_broker_command() {
+  local process_executable
+  process_executable=$(_docker_broker_process_executable) || return 1
+  print -r -- "$process_executable -B -m docker_broker --host 127.0.0.1 --port $DOCKER_BROKER_PORT --allowed-root $DOCKER_BROKER_ALLOWED_ROOT --state-directory $DOCKER_BROKER_STATE --docker-path $DOCKER_BROKER_DOCKER --agent-server-url $DOCKER_BROKER_AGENT_SERVER --owner-id $DOCKER_BROKER_OWNER --lease-seconds $DOCKER_BROKER_LEASE_SECONDS --allow-builds"
+}
+
+_docker_broker_pid_matches() {
+  local pid="$1" expected actual
+  [[ "$pid" == <-> ]] || return 1
+  _pid_alive "$pid" || return 1
+  expected=$(_docker_broker_command) || return 1
+  actual=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+  [ "$actual" = "$expected" ]
+}
+
+_verify_docker_broker_integrity() {
+  _docker_broker_installed || return 1
+  (cd "$DOCKER_BROKER_RUNTIME" && /usr/bin/shasum -a 256 -c integrity.sha256 >/dev/null 2>&1)
+}
+
+_docker_broker_healthy() {
+  local body
+  body=$(curl -fsS --connect-timeout 1 --max-time 2 \
+    "http://127.0.0.1:$DOCKER_BROKER_PORT/health" 2>/dev/null) || return 1
+  print -r -- "$body" | grep -Eq '"service"[[:space:]]*:[[:space:]]*"docker-broker"'
+}
+
+install_docker_broker() {
+  if [ ! -t 0 ]; then
+    echo "  Refusing non-interactive Docker-broker installation."
+    return 1
+  fi
+  if [ ! -x "$DOCKER_BROKER_BOOTSTRAP_PYTHON" ] || \
+    ! "$DOCKER_BROKER_BOOTSTRAP_PYTHON" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))'; then
+    echo "  Python 3.11 or newer is required; set DOCKER_BROKER_BOOTSTRAP_PYTHON."
+    return 1
+  fi
+  echo "This operator-only action snapshots the current Docker broker outside the repo."
+  printf "Type INSTALL to continue: "
+  local answer
+  read -r answer
+  [ "$answer" = "INSTALL" ] || { echo "  Installation cancelled."; return 1; }
+
+  if [ -f "$DOCKER_BROKER_PIDFILE" ]; then
+    local running_pid
+    running_pid=$(cat "$DOCKER_BROKER_PIDFILE" 2>/dev/null || true)
+    if _docker_broker_pid_matches "$running_pid" || \
+      { [[ "$running_pid" == <-> ]] && _pid_alive "$running_pid"; }; then
+      echo "  Stop the exact Docker-broker process before replacing its runtime snapshot."
+      return 1
+    fi
+    rm -f "$DOCKER_BROKER_PIDFILE"
+  fi
+
+  umask 077
+  mkdir -p "$DOCKER_BROKER_ROOT" "$DOCKER_BROKER_PRIVATE/state" \
+    "$DOCKER_BROKER_PRIVATE/run" "$DOCKER_BROKER_PRIVATE/logs" \
+    "$DOCKER_BROKER_PRIVATE/tmp" "$DOCKER_BROKER_PRIVATE/home"
+  chmod 700 "$DOCKER_BROKER_ROOT" "$DOCKER_BROKER_PRIVATE" \
+    "$DOCKER_BROKER_PRIVATE/state" "$DOCKER_BROKER_PRIVATE/run" \
+    "$DOCKER_BROKER_PRIVATE/logs" "$DOCKER_BROKER_PRIVATE/tmp" \
+    "$DOCKER_BROKER_PRIVATE/home"
+
+  local staged="$DOCKER_BROKER_ROOT/.runtime-new-$$"
+  rm -rf "$staged"
+  mkdir -p "$staged/snapshot"
+  /usr/bin/ditto --noqtn "$ROOT/docker-broker" "$staged/snapshot"
+  rm -rf "$staged/snapshot/.pytest_cache" "$staged/snapshot/.ruff_cache" \
+    "$staged/snapshot/.venv"
+  echo "  Creating isolated Docker-broker Python environment..."
+  "$DOCKER_BROKER_BOOTSTRAP_PYTHON" -m venv "$staged/venv"
+  "$staged/venv/bin/python" -m pip install --disable-pip-version-check \
+    "$staged/snapshot"
+  (cd "$staged" && find snapshot venv -type f \
+    -exec /usr/bin/shasum -a 256 {} + | LC_ALL=C sort > integrity.sha256)
+  chmod -R a-w "$staged"
+  find "$staged" -type d -exec chmod a+rx {} +
+  chmod u+w "$staged"
+
+  local previous="$DOCKER_BROKER_ROOT/.runtime-previous"
+  if [ -d "$previous" ]; then
+    chmod -R u+w "$previous" || return 1
+    rm -rf "$previous" || return 1
+  fi
+  if [ -d "$DOCKER_BROKER_RUNTIME" ]; then
+    chmod u+w "$DOCKER_BROKER_RUNTIME" || return 1
+    if ! mv "$DOCKER_BROKER_RUNTIME" "$previous"; then
+      chmod a-w "$DOCKER_BROKER_RUNTIME"
+      return 1
+    fi
+  fi
+  if ! mv "$staged" "$DOCKER_BROKER_RUNTIME"; then
+    echo "  Docker-broker runtime swap failed; restoring the previous snapshot."
+    if [ -d "$previous" ]; then
+      mv "$previous" "$DOCKER_BROKER_RUNTIME"
+      chmod a-w "$DOCKER_BROKER_RUNTIME"
+    fi
+    return 1
+  fi
+  chmod a-w "$DOCKER_BROKER_RUNTIME"
+  if [ -d "$previous" ]; then
+    chmod -R u+w "$previous" || return 1
+    rm -rf "$previous" || return 1
+  fi
+  echo "  Installed integrity-isolated Docker broker at $DOCKER_BROKER_RUNTIME"
+  echo "  No Docker operation or canary was run."
+}
+
+start_docker_broker() {
+  if ! _docker_broker_installed; then
+    echo "  Docker broker unavailable (operator has not installed it)"
+    return 0
+  fi
+  if ! _verify_docker_broker_integrity; then
+    echo "  Docker broker integrity check failed; refusing core startup"
+    return 1
+  fi
+
+  local pid=""
+  [ ! -f "$DOCKER_BROKER_PIDFILE" ] || pid=$(cat "$DOCKER_BROKER_PIDFILE" 2>/dev/null || true)
+  if _docker_broker_pid_matches "$pid"; then
+    if _docker_broker_healthy; then
+      echo "  Docker broker already healthy on 127.0.0.1:$DOCKER_BROKER_PORT (pid $pid)"
+      return 0
+    fi
+    echo "  Installed Docker broker has matching process identity but is unhealthy"
+    return 1
+  elif [[ "$pid" == <-> ]] && _pid_alive "$pid"; then
+    echo "  Refusing live foreign Docker-broker PID identity in $DOCKER_BROKER_PIDFILE"
+    return 1
+  elif [ -n "$pid" ]; then
+    rm -f "$DOCKER_BROKER_PIDFILE"
+  fi
+
+  umask 077
+  mkdir -p "$DOCKER_BROKER_STATE" "$DOCKER_BROKER_PRIVATE/run" \
+    "$DOCKER_BROKER_PRIVATE/logs" "$DOCKER_BROKER_PRIVATE/tmp" \
+    "$DOCKER_BROKER_PRIVATE/home"
+  chmod 700 "$DOCKER_BROKER_ROOT" "$DOCKER_BROKER_PRIVATE" \
+    "$DOCKER_BROKER_STATE" "$DOCKER_BROKER_PRIVATE/run" \
+    "$DOCKER_BROKER_PRIVATE/logs" "$DOCKER_BROKER_PRIVATE/tmp" \
+    "$DOCKER_BROKER_PRIVATE/home"
+  touch "$DOCKER_BROKER_LOG"
+  chmod 600 "$DOCKER_BROKER_LOG"
+
+  echo "  Starting optional Docker broker..."
+  nohup env -i HOME="$DOCKER_BROKER_PRIVATE/home" \
+    PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    TMPDIR="$DOCKER_BROKER_PRIVATE/tmp" PYTHONDONTWRITEBYTECODE=1 \
+    "$DOCKER_BROKER_PYTHON" -B -m docker_broker \
+    --host 127.0.0.1 --port "$DOCKER_BROKER_PORT" \
+    --allowed-root "$DOCKER_BROKER_ALLOWED_ROOT" --state-directory "$DOCKER_BROKER_STATE" \
+    --docker-path "$DOCKER_BROKER_DOCKER" \
+    --agent-server-url "$DOCKER_BROKER_AGENT_SERVER" \
+    --owner-id "$DOCKER_BROKER_OWNER" \
+    --lease-seconds "$DOCKER_BROKER_LEASE_SECONDS" --allow-builds \
+    >> "$DOCKER_BROKER_LOG" 2>&1 &
+  pid=$!
+  print -r -- "$pid" > "$DOCKER_BROKER_PIDFILE"
+  disown
+
+  local attempt
+  for attempt in {1..30}; do
+    if ! _docker_broker_pid_matches "$pid"; then
+      echo "  Docker broker exited or changed identity; refusing core startup"
+      rm -f "$DOCKER_BROKER_PIDFILE"
+      return 1
+    fi
+    if _docker_broker_healthy; then
+      echo "  Docker broker healthy on http://127.0.0.1:$DOCKER_BROKER_PORT"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "  Installed Docker broker failed health checks; refusing core startup"
+  return 1
+}
+
+stop_docker_broker() {
+  if [ ! -f "$DOCKER_BROKER_PIDFILE" ]; then
+    echo "  Docker broker not running"
+    return 0
+  fi
+  local pid
+  pid=$(cat "$DOCKER_BROKER_PIDFILE" 2>/dev/null || true)
+  if ! _docker_broker_pid_matches "$pid"; then
+    if [[ "$pid" == <-> ]] && _pid_alive "$pid"; then
+      echo "  Refusing to signal live foreign Docker-broker PID '$pid'"
+      return 1
+    fi
+    rm -f "$DOCKER_BROKER_PIDFILE"
+    echo "  Removed stale Docker-broker PID state without signaling a process"
+    return 0
+  fi
+  kill -TERM "$pid"
+  local attempt
+  for attempt in {1..50}; do
+    _pid_alive "$pid" || break
+    sleep 0.1
+  done
+  if _pid_alive "$pid"; then
+    if ! _docker_broker_pid_matches "$pid"; then
+      echo "  Docker-broker identity changed during stop; refusing further signals"
+      return 1
+    fi
+    kill -KILL "$pid"
+  fi
+  rm -f "$DOCKER_BROKER_PIDFILE"
+  echo "  Docker broker (pid $pid) stopped"
+}
+
+status_docker_broker() {
+  if ! _docker_broker_installed; then
+    echo "  Docker brk :$DOCKER_BROKER_PORT  –  unavailable (not installed)"
+    return 0
+  fi
+  local pid=""
+  [ ! -f "$DOCKER_BROKER_PIDFILE" ] || pid=$(cat "$DOCKER_BROKER_PIDFILE" 2>/dev/null || true)
+  if _docker_broker_pid_matches "$pid" && _docker_broker_healthy; then
+    echo "  Docker brk :$DOCKER_BROKER_PORT  ✓  healthy (pid $pid)"
+  elif [ -n "$pid" ]; then
+    echo "  Docker brk :$DOCKER_BROKER_PORT  !  installed but unhealthy/identity mismatch"
+    return 1
+  else
+    echo "  Docker brk :$DOCKER_BROKER_PORT  ✗  installed but stopped"
+    return 1
+  fi
+}
+
 # ── langgraph ──────────────────────────────────────────────────────────
 
 start_langgraph() {
@@ -669,7 +928,8 @@ start_frontend() {
   local needs_build=0
   local frontend_api_url="http://127.0.0.1:$LANGGRAPH_PORT"
   local frontend_assistant_id="agent"
-  local frontend_build_config="api=$frontend_api_url assistant=$frontend_assistant_id"
+  local frontend_docker_broker_url="http://127.0.0.1:$DOCKER_BROKER_PORT/v1/coder/confirmations"
+  local frontend_build_config="api=$frontend_api_url assistant=$frontend_assistant_id docker_broker=$frontend_docker_broker_url"
   if [ ! -f ".next/BUILD_ID" ] || [ ! -f ".next/prerender-manifest.json" ]; then
     needs_build=1
   else
@@ -697,6 +957,7 @@ start_frontend() {
     echo "  Building frontend (production)..."
     NEXT_PUBLIC_API_URL="$frontend_api_url" \
       NEXT_PUBLIC_ASSISTANT_ID="$frontend_assistant_id" \
+      NEXT_PUBLIC_DOCKER_BROKER_URL="$frontend_docker_broker_url" \
       ./node_modules/.bin/next build >> "$LOGDIR/frontend-build.log" 2>&1 || {
       echo "  Frontend build failed — check $LOGDIR/frontend-build.log"
       return 1
@@ -757,10 +1018,20 @@ case "${1:-}" in
     start_langgraph
     echo ""
 
-    # Pending-interrupt verification requires Agent Server first. An installed
-    # executor that cannot become healthy closes the whole core boundary.
+    # Both isolated host services require Agent Server first. An installed
+    # service that cannot become healthy closes the whole core boundary.
+    echo "── Docker broker (optional, port $DOCKER_BROKER_PORT) ──"
+    if ! start_docker_broker; then
+      stop_docker_broker || true
+      stop_langgraph
+      echo "  Core startup refused: installed Docker broker is unavailable."
+      exit 1
+    fi
+    echo ""
+
     echo "── macOS host executor (optional, port $HOST_EXECUTOR_PORT) ──"
     if ! start_host_executor; then
+      stop_docker_broker
       stop_langgraph
       echo "  Core startup refused: installed host executor is unavailable."
       exit 1
@@ -832,6 +1103,9 @@ case "${1:-}" in
     echo "── macOS host executor ──"
     stop_host_executor
 
+    echo "── Docker broker ──"
+    stop_docker_broker
+
     echo "── LangGraph ──"
     stop_langgraph
 
@@ -861,6 +1135,7 @@ case "${1:-}" in
     echo ""
     echo "── Core services ──"
     status_langgraph
+    status_docker_broker || true
     status_host_executor || true
     status_backend
     status_frontend
@@ -884,10 +1159,18 @@ case "${1:-}" in
     stop_frontend
     stop_backend
     stop_host_executor
+    stop_docker_broker
     stop_langgraph
     echo ""
     start_langgraph
+    if ! start_docker_broker; then
+      stop_docker_broker || true
+      stop_langgraph
+      echo "  Core restart refused: installed Docker broker is unavailable."
+      exit 1
+    fi
     if ! start_host_executor; then
+      stop_docker_broker
       stop_langgraph
       echo "  Core restart refused: installed host executor is unavailable."
       exit 1
@@ -902,8 +1185,12 @@ case "${1:-}" in
     install_host_executor
     ;;
 
+  install-docker-broker)
+    install_docker_broker
+    ;;
+
   *)
-    echo "Usage: $0 {start|stop|status|restart|restart-core|install-host-executor}"
+    echo "Usage: $0 {start|stop|status|restart|restart-core|install-host-executor|install-docker-broker}"
     exit 1
     ;;
 esac

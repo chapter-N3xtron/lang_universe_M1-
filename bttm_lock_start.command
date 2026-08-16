@@ -78,6 +78,7 @@ cd "$UI_DIR"
 pnpm install --frozen-lockfile >> "$LOGDIR/bottom-locking-dependencies.log" 2>&1
 
 export SIDECAR_ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002"
+export DOCKER_BROKER_ALLOWED_ROOT="$ROOT"
 
 if ! "$RUNTIME_ROOT/start_image_pipeline.sh" restart-core; then
   echo "Committed bottom-locking core services did not become ready; the UI was not started." >&2
@@ -86,6 +87,7 @@ fi
 
 NEXT_PUBLIC_API_URL="http://127.0.0.1:8123" \
 NEXT_PUBLIC_ASSISTANT_ID="chat_ui" \
+NEXT_PUBLIC_DOCKER_BROKER_URL="http://127.0.0.1:8766/v1/coder/confirmations" \
   ./node_modules/.bin/next build >> "$LOGDIR/bottom-locking-frontend-build.log" 2>&1
 
 if [ -f "$PIDDIR/frontend.pid" ]; then
@@ -109,6 +111,7 @@ lsof -nP -tiTCP:"$UI_PORT" -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || 
 nohup env \
   NEXT_PUBLIC_API_URL="http://127.0.0.1:8123" \
   NEXT_PUBLIC_ASSISTANT_ID="chat_ui" \
+  NEXT_PUBLIC_DOCKER_BROKER_URL="http://127.0.0.1:8766/v1/coder/confirmations" \
   ./node_modules/.bin/next start -p "$UI_PORT" \
   >> "$LOGDIR/bottom-locking-frontend.log" 2>&1 &
 echo $! > "$PIDDIR/bottom-locking-frontend.pid"

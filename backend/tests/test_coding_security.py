@@ -498,7 +498,8 @@ def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_directly(
     assert jasper_inputs == []
     assert result["messages"][-1]["name"] == "coding"
     content = result["messages"][-1]["content"]
-    assert content.startswith("OpenSpec installation was rejected and was not completed.")
+    assert content.startswith("Completion report")
+    assert "OpenSpec installation was rejected and was not completed." in content
     assert "command runtime: linux_agent_server_container" in content
     assert f"selected repository: {tmp_path}" in content
     assert result["coding_status"] == "completed"
@@ -583,15 +584,18 @@ def test_coding_node_propagates_cancellation(monkeypatch, tmp_path):
     asyncio.run(cancel())
 
 
-def test_coding_node_returns_sanitized_timeout(monkeypatch, tmp_path):
+def test_coding_node_ignores_removed_whole_run_timeout_setting(monkeypatch, tmp_path):
     from src import coding_agent
 
     class SlowApp:
-        async def aget_state(self, _config):
-            return type("Snapshot", (), {"values": {}, "tasks": ()})()
-
-        async def ainvoke(self, _payload, config=None):
-            await asyncio.sleep(10)
+        async def ainvoke(self, payload, config=None):
+            await asyncio.sleep(0.01)
+            return {
+                "messages": [
+                    *payload["messages"],
+                    AIMessage(content="Finished after the former cutoff."),
+                ]
+            }
 
     monkeypatch.setenv("CODING_AGENT_TIMEOUT_SECONDS", "0")
 
@@ -609,4 +613,5 @@ def test_coding_node_returns_sanitized_timeout(monkeypatch, tmp_path):
         )
     )
 
-    assert result["coding_status"] == "error"
+    assert result["coding_status"] == "completed"
+    assert "Completion report" in result["messages"][0].content

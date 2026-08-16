@@ -7,6 +7,7 @@ import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import { useTTS } from "@/hooks/useTTS";
 import type { ConceptMapArtifact } from "@/lib/visual/jasper-response.generated";
+import { CoderProgressReport } from "./coder-progress-report";
 
 interface MessageListProps {
   isLoading: boolean;
@@ -189,6 +190,12 @@ function MessageListImpl({
       ),
     [stream.values?.ui],
   );
+  const coderProgressReport = useMemo(() => {
+    const reports = (stream.values?.ui ?? []).filter(
+      (component) => component.name === "coder_progress_report",
+    );
+    return reports[reports.length - 1];
+  }, [stream.values?.ui]);
   let windowStart = Math.max(0, renderableMessages.length - visibleLimit);
   while (windowStart > 0 && renderableMessages[windowStart]?.type === "tool") {
     windowStart -= 1;
@@ -263,6 +270,9 @@ function MessageListImpl({
           threadInterrupt={stream.interrupt}
           hasCustomComponent={false}
         />
+      )}
+      {coderProgressReport && (
+        <CoderProgressReport props={coderProgressReport.props} />
       )}
       {isLoading && !firstTokenReceived && <AssistantMessageLoading />}
     </>

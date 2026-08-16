@@ -116,7 +116,7 @@ async function prepare(page: Page, currentInterrupt = interrupt()) {
   await page.locator("textarea").press("Enter");
   await expect(
     page
-      .getByRole("heading", { name: "Review immutable macOS operation" })
+      .getByRole("heading", { name: "Mac approval needed" })
       .or(page.getByRole("alert").getByText("Mac host operation blocked")),
   ).toBeVisible();
   return runBodies;
@@ -157,11 +157,23 @@ test("renders immutable Mac-host fields, runtime boundary, and no generic contro
   await prepare(page);
   const card = page.getByLabel("Mac host operation approval");
   await expect(
+    card
+      .getByRole("status")
+      .getByText("Paused — waiting for your approval decision."),
+  ).toBeVisible();
+  await expect(
     card.getByText("Physical Mac host", { exact: false }).first(),
   ).toBeVisible();
   await expect(
     card.getByText("Linux container", { exact: false }),
   ).toBeVisible();
+  await expect(
+    card.getByText("Download one verified file to", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    card.getByText("Download Blender on the physical Mac", { exact: false }),
+  ).toBeVisible();
+  await card.getByText("Technical plan details", { exact: true }).click();
   await expect(card.getByText("https_download", { exact: true })).toBeVisible();
   await expect(card.getByText(plan.action.url, { exact: true })).toBeVisible();
   await expect(card.getByText(sha, { exact: true })).toBeVisible();
@@ -238,7 +250,7 @@ test("coordinates executor receipt before exactly one ordinary approve and locks
   expect(runBodies.at(-1)?.command.resume.decisions).toEqual([
     { type: "approve" },
   ]);
-  await expect(page.getByText(digest, { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Mac host operation approval")).toHaveCount(0);
 });
 
 test("ordinary rejection sends one reject decision and never calls the executor", async ({
@@ -252,12 +264,15 @@ test("ordinary rejection sends one reject decision and never calls the executor"
   const runBodies = await prepare(page);
   const initialCount = runBodies.length;
   await page
-    .getByRole("button", { name: "Reject without Mac execution" })
+    .getByRole("button", {
+      name: "Reject Mac action and return to Coder",
+    })
     .dblclick();
   await expect.poll(() => runBodies.length).toBe(initialCount + 1);
-  expect(runBodies.at(-1)?.command.resume.decisions).toEqual([
-    { type: "reject" },
-  ]);
+  const rejection = runBodies.at(-1)?.command.resume.decisions[0];
+  expect(rejection.type).toBe("reject");
+  expect(rejection.message).toContain("Do not retry the same Mac tool call");
+  expect(rejection.message).toContain("request_docker_compose_operation");
   expect(executorCalls).toBe(0);
 });
 
@@ -289,13 +304,14 @@ test("digest mismatch or absent receipt fails closed without resume", async ({
   const runBodies = await prepare(page);
   const initialCount = runBodies.length;
   await page.getByRole("button", { name: "Review on Mac and approve" }).click();
-  await expect(
-    page.getByText(/Blocked without LangGraph approval/),
-  ).toBeVisible();
+  await expect(page.getByText(/Approval did not complete/)).toBeVisible();
   expect(runBodies).toHaveLength(initialCount);
   await expect(
-    page.getByText(/No matching signed terminal receipt was available/),
+    page.getByText(/The result could not be verified safely/),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Mac approval unavailable" }),
+  ).toBeDisabled();
 });
 
 test("terminal status without a receipt fails closed and does not resume", async ({
@@ -317,11 +333,76 @@ test("terminal status without a receipt fails closed and does not resume", async
   const runBodies = await prepare(page);
   const initialCount = runBodies.length;
   await page.getByRole("button", { name: "Review on Mac and approve" }).click();
-  await expect(
-    page.getByText(/Blocked without LangGraph approval/),
-  ).toBeVisible();
+  await expect(page.getByText(/Approval did not complete/)).toBeVisible();
   expect(runBodies).toHaveLength(initialCount);
   await expect(page.getByText(/HTTP 404/)).toBeVisible();
+});
+
+test("permanent HTTP 409 explains the policy denial and disables futile retry", async ({
+  page,
+}) => {
+  let executorAttempts = 0;
+  await page.route("http://127.0.0.1:8765/v1/confirmations", (route) => {
+    executorAttempts += 1;
+    return route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "application is not allowlisted" }),
+    });
+  });
+  const runBodies = await prepare(page);
+  const initialCount = runBodies.length;
+
+  await page.getByRole("button", { name: "Review on Mac and approve" }).click();
+
+  await expect(
+    page.getByRole("status").getByText(/Coder is not working on this task/),
+  ).toBeVisible();
+  await expect(page.getByText(/application is not allowlisted/)).toBeVisible();
+  await expect(
+    page.getByText(/Repeating approval will not change this policy decision/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/including the Docker broker for Docker work/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Mac approval unavailable" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", {
+      name: "Reject Mac action and return to Coder",
+    }),
+  ).toBeEnabled();
+  expect(executorAttempts).toBe(1);
+  expect(runBodies).toHaveLength(initialCount);
+});
+
+test("temporary executor conflict offers a deliberate retry with the same request", async ({
+  page,
+}) => {
+  let executorAttempts = 0;
+  await page.route("http://127.0.0.1:8765/v1/confirmations", (route) => {
+    executorAttempts += 1;
+    return route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "operation is active" }),
+    });
+  });
+  const runBodies = await prepare(page);
+  const initialCount = runBodies.length;
+
+  await page.getByRole("button", { name: "Review on Mac and approve" }).click();
+  const retryButton = page.getByRole("button", { name: "Try approval again" });
+  await expect(retryButton).toBeEnabled();
+  await expect(
+    page.getByText(/This may be temporary.*same reviewed request will be used/),
+  ).toBeVisible();
+  expect(runBodies).toHaveLength(initialCount);
+
+  await retryButton.click();
+  await expect.poll(() => executorAttempts).toBe(2);
+  expect(runBodies).toHaveLength(initialCount);
 });
 
 test("terminal partial receipt presents manual-step language and resumes truthfully", async ({
@@ -352,7 +433,7 @@ test("terminal partial receipt presents manual-step language and resumes truthfu
   expect(runBodies.at(-1)?.command.resume.decisions).toEqual([
     { type: "approve" },
   ]);
-  await expect(page.getByText("Executor status: partial")).toBeVisible();
+  await expect(page.getByText("Mac executor status: partial")).toBeVisible();
   await expect(
     page.getByText(
       /Required manual Mac step: Remove the staged artifact in Finder/,

@@ -67,6 +67,7 @@ def test_manifest_distinguishes_filesystem_runtime_and_host_capability(
         "command_runtime": "linux_agent_server_container",
         "native_host_operations": "unavailable_without_separate_approval",
         "host_operation_request": "unavailable",
+        "docker_broker_request": "unavailable",
     }
     rendered = format_execution_manifest(manifest)
     assert str(selected.resolve()) in rendered

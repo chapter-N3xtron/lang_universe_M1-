@@ -8,6 +8,7 @@ from typing import Annotated, Literal, TypedDict
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.ui import AnyUIMessage, ui_message_reducer
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
@@ -55,6 +56,7 @@ class State(TypedDict):
     session_opening_version: str
     librarian_task: str
     session_evidence: Annotated[list[dict], operator.add]
+    ui: Annotated[list[AnyUIMessage], ui_message_reducer]
 
 
 TODOS_FILE = os.getenv(

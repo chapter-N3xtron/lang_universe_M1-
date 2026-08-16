@@ -18,6 +18,14 @@ import {
   MacosHostOperationCard,
   MalformedMacHostInterrupt,
 } from "./macos-host-operation-card";
+import {
+  DOCKER_BROKER_ACTION_NAME,
+  normalizeDockerComposeOperationPlan,
+} from "@/lib/docker-broker-operation";
+import {
+  DockerBrokerOperationCard,
+  MalformedDockerBrokerInterrupt,
+} from "./docker-broker-operation-card";
 
 interface ThreadActionsViewProps {
   interrupt: Interrupt<HITLRequest>;
@@ -131,12 +139,61 @@ function isExactMacHostEnvelope(interrupt: Interrupt<HITLRequest>): boolean {
   );
 }
 
+function isDockerBrokerCandidate(interrupt: Interrupt<HITLRequest>): boolean {
+  const value = interrupt.value;
+  return (
+    !!value &&
+    ((Array.isArray(value.action_requests) &&
+      value.action_requests.some(
+        (action) => action?.name === DOCKER_BROKER_ACTION_NAME,
+      )) ||
+      (Array.isArray(value.review_configs) &&
+        value.review_configs.some(
+          (config) => config?.action_name === DOCKER_BROKER_ACTION_NAME,
+        )))
+  );
+}
+
+function isExactDockerBrokerEnvelope(
+  interrupt: Interrupt<HITLRequest>,
+): boolean {
+  const value = interrupt.value;
+  if (
+    !value ||
+    !Array.isArray(value.action_requests) ||
+    !Array.isArray(value.review_configs) ||
+    value.action_requests.length !== 1 ||
+    value.review_configs.length !== 1
+  ) {
+    return false;
+  }
+  const action = value.action_requests[0];
+  const config = value.review_configs[0];
+  if (!Array.isArray(config.allowed_decisions)) return false;
+  const decisions = [...config.allowed_decisions].sort();
+  return (
+    action.name === DOCKER_BROKER_ACTION_NAME &&
+    config.action_name === DOCKER_BROKER_ACTION_NAME &&
+    decisions.length === 2 &&
+    decisions[0] === "approve" &&
+    decisions[1] === "reject" &&
+    normalizeDockerComposeOperationPlan(action.args) !== null
+  );
+}
+
 export function ThreadActionsView(props: ThreadActionsViewProps) {
   if (isMacHostCandidate(props.interrupt)) {
     return isExactMacHostEnvelope(props.interrupt) ? (
       <MacosHostOperationCard interrupt={props.interrupt} />
     ) : (
       <MalformedMacHostInterrupt />
+    );
+  }
+  if (isDockerBrokerCandidate(props.interrupt)) {
+    return isExactDockerBrokerEnvelope(props.interrupt) ? (
+      <DockerBrokerOperationCard interrupt={props.interrupt} />
+    ) : (
+      <MalformedDockerBrokerInterrupt />
     );
   }
   return <GenericThreadActionsView {...props} />;

@@ -11,6 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = ROOT / "start_image_pipeline.sh"
+BOTTOM_LOCK_LAUNCHER = ROOT / "bttm_lock_start.command"
+BROKER_MODELS = ROOT / "docker-broker" / "src" / "docker_broker" / "models.py"
+BROKER_API = ROOT / "docker-broker" / "src" / "docker_broker" / "api.py"
 COMPOSE = ROOT / "backend" / "docker-compose.override.yml"
 POLICY = ROOT / "macos-host-executor" / "policy.example.json"
 EXECUTOR_POLICY = (
@@ -84,6 +87,104 @@ def test_launcher_has_explicit_isolated_fail_closed_lifecycle() -> None:
     assert "if ! start_host_executor" in restart_core
 
 
+def test_launcher_has_isolated_docker_broker_lifecycle() -> None:
+    launcher = _text(LAUNCHER)
+    broker = _section(
+        launcher,
+        "# ── optional Docker broker",
+        "# ── langgraph",
+    )
+
+    assert 'DOCKER_BROKER_PORT=8766' in launcher
+    assert 'DOCKER_BROKER_ROOT="$HOME/.jasper/docker-broker"' in launcher
+    assert 'DOCKER_BROKER_RUNTIME="$DOCKER_BROKER_ROOT/runtime"' in launcher
+    assert 'DOCKER_BROKER_PRIVATE="$DOCKER_BROKER_ROOT/private"' in launcher
+    assert 'DOCKER_BROKER_DOCKER="/usr/local/bin/docker"' in launcher
+    assert 'DOCKER_BROKER_ALLOWED_ROOT="${DOCKER_BROKER_ALLOWED_ROOT:-$ROOT}"' in launcher
+    assert 'DOCKER_BROKER_AGENT_SERVER="http://127.0.0.1:8123"' in launcher
+    assert 'DOCKER_BROKER_OWNER="local-owner-v1"' in launcher
+    assert 'DOCKER_BROKER_LEASE_SECONDS=14400' in launcher
+    assert "install-docker-broker)" in launcher
+    assert "Type INSTALL to continue" in broker
+    assert 'ditto --noqtn "$ROOT/docker-broker"' in broker
+    assert '"$DOCKER_BROKER_BOOTSTRAP_PYTHON" -m venv "$staged/venv"' in broker
+    assert "integrity.sha256" in broker
+    assert "-exec /usr/bin/shasum -a 256 {} +" in broker
+    assert broker.index('chmod u+w "$staged"') < broker.index(
+        'mv "$staged" "$DOCKER_BROKER_RUNTIME"'
+    ) < broker.rindex('chmod a-w "$DOCKER_BROKER_RUNTIME"')
+    assert 'chmod u+w "$DOCKER_BROKER_RUNTIME"' in broker
+    assert "runtime swap failed; restoring the previous snapshot" in broker
+    assert 'chmod 700 "$DOCKER_BROKER_ROOT" "$DOCKER_BROKER_PRIVATE"' in broker
+    assert 'chmod 600 "$DOCKER_BROKER_LOG"' in broker
+    for private_dir in ("state", "run", "logs", "tmp", "home"):
+        assert f'"$DOCKER_BROKER_PRIVATE/{private_dir}"' in broker
+    assert "env -i" in broker
+    assert 'HOME="$DOCKER_BROKER_PRIVATE/home"' in broker
+    assert "--host 127.0.0.1 --port" in broker
+    assert '--allowed-root "$DOCKER_BROKER_ALLOWED_ROOT"' in broker
+    assert "--allowed-root $DOCKER_BROKER_ALLOWED_ROOT" in broker
+    assert '--state-directory "$DOCKER_BROKER_STATE"' in broker
+    assert '--docker-path "$DOCKER_BROKER_DOCKER"' in broker
+    assert '--agent-server-url "$DOCKER_BROKER_AGENT_SERVER"' in broker
+    assert '--owner-id "$DOCKER_BROKER_OWNER"' in broker
+    assert '--lease-seconds "$DOCKER_BROKER_LEASE_SECONDS" --allow-builds' in broker
+    assert 'ps -p "$pid" -o command=' in broker
+    assert '"http://127.0.0.1:$DOCKER_BROKER_PORT/health"' in broker
+    assert '"service"[[:space:]]*:[[:space:]]*"docker-broker"' in broker
+    assert "Installed Docker broker failed health checks" in broker
+
+    # Broker lifecycle must only signal the PID whose complete command matches.
+    for forbidden in ("pkill", "killall", "xargs kill", "lsof -ti"):
+        assert forbidden not in broker
+
+    start_case = _section(launcher, "  start)", "  stop)")
+    assert start_case.index("start_langgraph") < start_case.index(
+        "start_docker_broker"
+    ) < start_case.index("start_host_executor")
+    assert "if ! start_docker_broker" in start_case
+    assert "stop_docker_broker" in start_case
+
+    stop_case = _section(launcher, "  stop)", "  status)")
+    assert stop_case.index("stop_host_executor") < stop_case.index(
+        "stop_docker_broker"
+    ) < stop_case.index("stop_langgraph")
+    assert "status_docker_broker || true" in launcher
+
+    restart_core = _section(launcher, "  restart-core)", "  install-host-executor)")
+    assert restart_core.index("stop_host_executor") < restart_core.index(
+        "stop_docker_broker"
+    ) < restart_core.index("stop_langgraph")
+    assert restart_core.index("start_langgraph") < restart_core.index(
+        "start_docker_broker"
+    ) < restart_core.index("start_host_executor")
+
+    assert (
+        'frontend_docker_broker_url="http://127.0.0.1:'
+        '$DOCKER_BROKER_PORT/v1/coder/confirmations"'
+    ) in launcher
+    assert 'NEXT_PUBLIC_DOCKER_BROKER_URL="$frontend_docker_broker_url"' in launcher
+    assert "docker_broker=$frontend_docker_broker_url" in launcher
+    assert "install-docker-broker}" in launcher
+
+    broker_models = _text(BROKER_MODELS)
+    broker_api = _text(BROKER_API)
+    assert 'service: Literal["docker-broker"]' in broker_models
+    assert 'service="docker-broker"' in broker_api
+
+
+def test_bottom_locking_hands_original_workspace_to_broker() -> None:
+    launcher = _text(BOTTOM_LOCK_LAUNCHER)
+    assert 'RUNTIME_ROOT="${ROOT}-bottom-locking-runtime"' in launcher
+    assert 'export DOCKER_BROKER_ALLOWED_ROOT="$ROOT"' in launcher
+    assert launcher.index('export DOCKER_BROKER_ALLOWED_ROOT="$ROOT"') < launcher.index(
+        '"$RUNTIME_ROOT/start_image_pipeline.sh" restart-core'
+    )
+    assert launcher.count(
+        'NEXT_PUBLIC_DOCKER_BROKER_URL="http://127.0.0.1:8766/v1/coder/confirmations"'
+    ) == 2
+
+
 def test_compose_exposes_receipt_verification_only_and_masks_credentials() -> None:
     compose = _text(COMPOSE)
 
@@ -96,6 +197,9 @@ def test_compose_exposes_receipt_verification_only_and_masks_credentials() -> No
         "MACOS_HOST_EXECUTOR_PUBLIC_KEY_FILE="
         "/run/macos-host-executor/receipt-signing.pub"
     ) in compose
+    # The container receives only the broker's non-secret HTTP location. Broker
+    # credentials, lease material, private state, and Docker authority stay native.
+    assert "DOCKER_BROKER_URL=http://host.docker.internal:8766" in compose
 
     for masked in (
         "${HOME}/.jasper",
@@ -119,6 +223,13 @@ def test_compose_exposes_receipt_verification_only_and_masks_credentials() -> No
         "signing.key",
         "control.sock",
         "docker.sock",
+        "docker-broker/private",
+        "docker-broker/state",
+        "DOCKER_BROKER_CLIENT_SECRET",
+        "DOCKER_BROKER_TOKEN",
+        "DOCKER_BROKER_LEASE",
+        "X-Broker-Client-Secret",
+        "Authorization: Bearer",
         "SSH_AUTH_SOCK",
         "GITHUB_TOKEN",
         "GH_TOKEN",

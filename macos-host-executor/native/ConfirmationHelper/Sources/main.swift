@@ -1,4 +1,5 @@
 import AppKit
+import AppKit
 import Foundation
 
 // Fixed interface: one <=256 KiB server-produced JSON object on stdin, no
@@ -58,14 +59,52 @@ Expires: \(expires)
 Rollback limits:\n\(pretty(rollback))
 """
 
+let actionCategory = action["category"] as? String ?? "unknown"
+let actionOperation = (action["operation"] as? String) ?? (action["query"] as? String)
+let actionSummary = actionOperation.map { "\(actionCategory) — \($0)" } ?? actionCategory
+let visibleFrame = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+    ?? NSRect(x: 0, y: 0, width: 1024, height: 768)
+let detailSize = NSSize(
+    width: max(1, min(720, visibleFrame.width * 0.68)),
+    height: max(1, min(420, visibleFrame.height * 0.48))
+)
+let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: detailSize))
+scrollView.borderType = .bezelBorder
+scrollView.hasVerticalScroller = true
+scrollView.hasHorizontalScroller = false
+scrollView.autohidesScrollers = true
+let textView = NSTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+textView.string = details
+textView.isEditable = false
+textView.isSelectable = true
+textView.drawsBackground = false
+textView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+textView.textContainerInset = NSSize(width: 8, height: 8)
+textView.isHorizontallyResizable = false
+textView.isVerticallyResizable = true
+textView.autoresizingMask = [.width]
+textView.textContainer?.widthTracksTextView = true
+textView.textContainer?.containerSize = NSSize(
+    width: scrollView.contentSize.width,
+    height: .greatestFiniteMagnitude
+)
+scrollView.documentView = textView
+
 NSApplication.shared.setActivationPolicy(.accessory)
 NSApplication.shared.activate(ignoringOtherApps: true)
 let alert = NSAlert()
 alert.alertStyle = .critical
-alert.messageText = "Approve exact macOS host operation?"
-alert.informativeText = details
-alert.addButton(withTitle: "Approve Once")
-alert.addButton(withTitle: "Reject")
+alert.messageText = "Approve one macOS host operation?"
+alert.informativeText = """
+Coder is paused and waiting for your decision.
+Requested: \(actionSummary)
+Approve Once permits only the exact plan below. Reject or Escape runs nothing.
+"""
+alert.accessoryView = scrollView
+let approveButton = alert.addButton(withTitle: "Approve Once")
+approveButton.keyEquivalent = ""
+let rejectButton = alert.addButton(withTitle: "Reject — Run Nothing")
+rejectButton.keyEquivalent = "\u{1b}"
 let decision = alert.runModal() == .alertFirstButtonReturn ? "approve" : "reject"
 let response = ["decision": decision, "plan_digest": digest]
 let output = try JSONSerialization.data(withJSONObject: response, options: [.sortedKeys])

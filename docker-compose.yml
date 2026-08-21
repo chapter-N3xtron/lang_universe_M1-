@@ -1,0 +1,86 @@
+name: jasper-runtime
+
+services:
+  backend:
+    image: jasper-langgraph:current
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8123:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      PORT: "8000"
+      POSTGRES_URI: postgresql://postgres:postgres@postgres:5432/langgraph
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/langgraph
+      REDIS_URI: redis://redis:6379
+      REDIS_URL: redis://redis:6379
+      AGENT_WORKSPACE: /workspace
+      TODOS_FILE: /workspace/todos.json
+      SESSION_RUNTIME_MODE: durable
+      SESSION_RUNTIME_ID: backend-postgres-v1
+      CODING_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      MACOS_HOST_EXECUTOR_URL: http://host.docker.internal:8765
+      MACOS_HOST_EXECUTOR_PUBLIC_KEY_FILE: /run/macos-host-executor/receipt-signing.pub
+    volumes:
+      - .:/workspace
+      - ${HOME}/.jasper/macos-host-executor/public:/run/macos-host-executor:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/info')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    build:
+      context: ./agent-chat-ui
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:8123
+        NEXT_PUBLIC_ASSISTANT_ID: chat_ui
+        NEXT_PUBLIC_DOCKER_BROKER_URL: http://127.0.0.1:8766/v1/coder/confirmations
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3002:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: langgraph
+    volumes:
+      - jasper-runtime-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d langgraph"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:6
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  jasper-runtime-postgres:

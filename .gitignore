@@ -74,6 +74,7 @@ image_orders/
 *.sqlite-wal
 
 # runtime data
+/data/
 backend/data/
 backend/logs/
 frontend/logs/

@@ -27,6 +27,7 @@ services:
       PNPM_HOME: /opt/coding-tools/pnpm
     volumes:
       - .:/workspace
+      - ./data/coding-checkpoints:/deps/backend/data
       - /Volumes/Storage:/Volumes/Storage
       - ${HOME}:${HOME}
       - ${HOME}/.jasper/macos-host-executor/public:/run/macos-host-executor:ro
@@ -63,7 +64,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     volumes:
-      - jasper-runtime-postgres:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 10s
@@ -75,6 +76,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379"
+    volumes:
+      - ./data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -82,6 +85,7 @@ services:
       retries: 12
 
   frontend:
+    image: jasper-runtime-frontend:latest
     build:
       context: ./agent-chat-ui
       dockerfile: Dockerfile

@@ -14,9 +14,6 @@ case "${1:-}" in
   restart-frontend)
     "${COMPOSE[@]}" restart frontend
     ;;
-  restart-backend)
-    "${COMPOSE[@]}" restart backend
-    ;;
   status)
     "${COMPOSE[@]}" ps
     ;;
@@ -24,7 +21,7 @@ case "${1:-}" in
     "${COMPOSE[@]}" logs -f "${2:-frontend}"
     ;;
   *)
-    print "Usage: $0 {start|stop|restart-frontend|restart-backend|status|logs [service]}"
+    print "Usage: $0 {start|stop|restart-frontend|status|logs [service]}"
     exit 1
     ;;
 esac

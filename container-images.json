@@ -1,0 +1,28 @@
+{
+  "images": [
+    {
+      "source": "jasper-langgraph:current",
+      "digest": "sha256:1b6a57b5b83f372990f4e9dc028a0fb8b0a3a42500fec76cc1ac53417e5b4ac3",
+      "created": "2026-08-17T16:30:52.015480502Z",
+      "archive": "jasper-langgraph-current.tar"
+    },
+    {
+      "source": "jasper-runtime-frontend:latest",
+      "digest": "sha256:ba99058c7bb1eb7417579d87c3549163c10a24640514427445dcddf43edad590",
+      "created": "2026-08-21T21:57:11.434593251Z",
+      "archive": "jasper-runtime-frontend-latest.tar"
+    },
+    {
+      "source": "pgvector/pgvector:pg16",
+      "digest": "sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b",
+      "created": "2026-08-13T21:25:06.877289053Z",
+      "archive": "pgvector-pg16.tar"
+    },
+    {
+      "source": "redis:6",
+      "digest": "sha256:a873de27e877d8ea401f530a4c7571bae34882a7178a0a0f3df12263bfba14a5",
+      "created": "2026-08-05T00:40:55.147123676Z",
+      "archive": "redis-6.tar"
+    }
+  ]
+}

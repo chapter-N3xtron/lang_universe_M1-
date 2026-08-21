@@ -1,1 +1,4 @@
 jasper-langgraph-current.tar filter=lfs diff=lfs merge=lfs -text
+jasper-runtime-frontend-latest.tar filter=lfs diff=lfs merge=lfs -text
+pgvector-pg16.tar filter=lfs diff=lfs merge=lfs -text
+redis-6.tar filter=lfs diff=lfs merge=lfs -text

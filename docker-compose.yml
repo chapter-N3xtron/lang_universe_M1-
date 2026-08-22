@@ -106,6 +106,28 @@ services:
       timeout: 5s
       retries: 12
 
+  custodian-worker:
+    image: python:3.11-slim
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - .:/workspace
+    command: ["python", "/workspace/backend/custodian_worker.py"]
+
+  custodian-orchestrator:
+    image: python:3.11-slim
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8767:8767"
+    env_file:
+      - ./backend/.env
+    environment:
+      WORKER_URL: http://host.docker.internal:8765
+    volumes:
+      - .:/workspace
+    command: ["python", "/workspace/backend/custodian_orchestrator.py"]
+
 volumes:
   jasper-runtime-postgres:
   coding-tools:

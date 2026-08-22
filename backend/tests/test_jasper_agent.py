@@ -566,6 +566,7 @@ def test_jasper_delegates_web_access_to_librarian_without_direct_web_tools():
         "draw_concept_map",
         "transfer_to_coding",
         "transfer_to_librarian",
+        "transfer_to_ocr",
     ]
 
 
@@ -587,6 +588,7 @@ def test_jasper_deep_agent_exposes_documented_tools_and_task(tmp_path):
         "task",
         "transfer_to_coding",
         "transfer_to_librarian",
+        "transfer_to_ocr",
     }
     assert tool_names.isdisjoint({"web_search", "read_url", "ingest_uploaded_sources"})
 

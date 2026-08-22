@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-14T14:12:01Z",
+  "updated_at": "2026-08-22T20:04:30.926265Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2637,6 +2637,141 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": "Implementation has not started. The current frontend is listening, while the Agent Server and both specialist backends remain unavailable because the backend deployment is stopped. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "coder-architecture-delivery-board",
+      "title": "Coder Architecture Delivery Board",
+      "created_at": "2026-08-22T18:18:42Z",
+      "planned_by_model": "openai/gpt-5.6-sol",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "inspect-coder-board-conventions",
+          "content": "Inspect the repository OpenSpec conventions, related Coder/session/visualization changes, requirements document, and configuration before drafting the documentation-only change.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-22T18:18:42Z",
+          "notes": "Reviewed OpenSpec config, established artifact structure, Coder workflow, visualization board, durable records, session anatomy, worker isolation, and board requirements."
+        },
+        {
+          "id": "draft-coder-delivery-board-change",
+          "content": "Create proposal.md, design.md, tasks.md, .openspec.yaml, and the required capability delta spec for the Coder architecture delivery board. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-22T18:19:35Z",
+          "notes": "Created the complete documentation-only OpenSpec change with proposal, design, tasks, metadata, and capability specification. No runtime code, schemas, application behavior, Docker, or host operations were changed."
+        },
+        {
+          "id": "validate-coder-delivery-board-change",
+          "content": "Run the repository's documented safe OpenSpec validation/check commands if available and record any genuine validation blocker.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-22T18:19:23Z",
+          "notes": "Attempted the documented strict validation command; the openspec command-line interface is not installed (command not found), so validation is unavailable."
+        },
+        {
+          "id": "BLOCKER-openspec-cli-unavailable",
+          "content": "BLOCKER: OpenSpec command-line validation is unavailable because the openspec executable is not installed in the repository environment.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "No validation success is claimed; the created artifacts remain reviewable documentation."
+        }
+      ]
+    },
+    {
+      "id": "governance-layer-boundary-spec-update",
+      "title": "Governance-Layer Boundary Specification Update",
+      "created_at": "2026-08-22T20:00:00Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "inspect-governance-and-target-artifacts",
+          "content": "Inspect the requested capability specifications, related proposal/design artifacts, and governance/intention references before editing. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-22T20:05:00Z",
+          "notes": "Inspected the requested Coder and Librarian specifications, related proposal/design documents, GOVERNANCE_FRAMEWORK.md, and user-intent-enforcement proposal."
+        },
+        {
+          "id": "update-governance-boundaries",
+          "content": "Update Coder and Librarian inquiry specifications and necessary related proposal/design artifacts with the confirmed governance-layer boundary. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-22T20:05:00Z",
+          "notes": "Updated the Coder capability specification plus proposal/design, and all three Librarian inquiry specifications plus proposal/design with normative governance, human-resonance, support, agency, provenance-label, acceptance, and non-goal boundaries."
+        },
+        {
+          "id": "validate-governance-documents",
+          "content": "Validate changed OpenSpec documents safely and report exact files, results, and blockers. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-22T20:05:00Z",
+          "notes": "Manual specification review completed; no runtime, dependency, Docker, or host operations were performed. The openspec executable was unavailable for CLI validation."
+        },
+        {
+          "id": "BLOCKER-governance-openspec-cli-unavailable",
+          "content": "BLOCKER: OpenSpec command-line validation is unavailable because the openspec executable is not installed in the repository environment.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Manual review and targeted document inspection completed; no CLI validation success is claimed."
+        }
+      ]
+    },
+    {
+      "id": "librarian-inquiry-experience",
+      "title": "Librarian Inquiry Experience OpenSpec Change",
+      "created_at": "2026-08-22T19:40:37.159955Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "inspect-inquiry-conventions",
+          "content": "Inspect OpenSpec conventions, named existing changes, and Librarian/Tavily/evidence/session/board requirements.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-22T19:41:44.764903Z",
+          "notes": "Reviewed schema-driven OpenSpec conventions, named changes, Librarian/Tavily evidence path, session persistence, and React Flow board context."
+        },
+        {
+          "id": "create-inquiry-artifacts",
+          "content": "Create the complete librarian-inquiry-experience OpenSpec proposal, design, capability specifications, and tasks with normative boundaries.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-22T19:41:44.764903Z",
+          "notes": "Created proposal, design, tasks, metadata, and three capability delta specifications; documentation only."
+        },
+        {
+          "id": "validate-inquiry-change",
+          "content": "Validate the new librarian-inquiry-experience OpenSpec change using the documented repository-compatible command if safely available.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-22T19:41:44.764903Z",
+          "notes": "Attempted documented openspec CLI workflow; executable is unavailable (command not found)."
+        },
+        {
+          "id": "BLOCKER-openspec-cli-unavailable",
+          "content": "BLOCKER: OpenSpec command-line validation is unavailable because the openspec executable is not installed in the repository environment.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "No validation success is claimed; artifacts were created manually following the repository schema-driven structure."
         }
       ]
     }

@@ -1,0 +1,18 @@
+{
+  "image_name": "jasper-langgraph:current",
+  "image_sha": "sha256:1b6a57b5b83f372990f4e9dc028a0fb8b0a3a42500fec76cc1ac53417e5b4ac3",
+  "build_source": "langgraph build",
+  "build_inputs": [
+    "backend/langgraph.json",
+    "backend/pyproject.toml",
+    "backend/uv.lock",
+    "backend/src/**"
+  ],
+  "build_command": "./.venv/bin/langgraph build --no-pull -t jasper-langgraph:current",
+  "built_at": "2026-08-17T16:31:35Z",
+  "base_images": [
+    "langchain/langgraph-api:3.12",
+    "node:22-bookworm-slim"
+  ],
+  "size_mb": 2120
+}

@@ -5,7 +5,9 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import posixpath
+import uuid
 import zipfile
 from collections.abc import Iterator
 from email import policy
@@ -33,6 +35,26 @@ MAX_ARCHIVE_ENTRIES = 5_000
 MAX_EXPANDED_BYTES = 150 * 1024 * 1024
 MAX_SEGMENT_CHARACTERS = 100_000
 MAX_TOTAL_CHARACTERS = 300_000
+OCR_UPLOAD_DIR = Path(
+    os.getenv(
+        "OCR_UPLOAD_DIR",
+        str(Path(__file__).resolve().parents[2] / "data" / "ocr" / "uploads"),
+    )
+).resolve()
+
+
+def preserve_ocr_upload(data: bytes, filename: str) -> dict:
+    """Persist an explicitly uploaded document and return a non-guessable reference."""
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise DocumentAttachmentError("The selected file exceeds the 25 MB limit")
+    safe_name = PurePosixPath(filename).name or "attachment"
+    # Validate bytes and format before making the file available to OCR.
+    SelectedFileLoader(data, safe_name)
+    OCR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    path = (OCR_UPLOAD_DIR / f"{uuid.uuid4().hex}-{safe_name}").resolve()
+    path.write_bytes(data)
+    return {"reference": f"upload:{path.name}", "path": str(path), "filename": safe_name}
+
 
 TEXT_EXTENSIONS = {
     ".txt",

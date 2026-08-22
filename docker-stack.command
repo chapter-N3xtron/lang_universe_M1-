@@ -59,6 +59,7 @@ start_sidecar() {
     cd "$ROOT/backend"
     SIDECAR_ALLOWED_ORIGINS="http://localhost:3002,http://127.0.0.1:3002" \
       TODOS_FILE="$ROOT/todos.json" \
+      OCR_UPLOAD_DIR="$ROOT/data/ocr/uploads" \
       nohup ./.venv/bin/python -m src.web_server >> "$SIDECAR_LOG" 2>&1 &
     echo $! > "$SIDECAR_PID"
   )

@@ -29,6 +29,7 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command
+from pydantic import BaseModel, Field
 
 from src.agent_utils import get_user_query
 from src.jasper_tools import (
@@ -114,7 +115,65 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     execution_manifest: ExecutionManifest
     coding_task: str
     librarian_task: str
+    ocr_task: str
+    ocr_document_ref: str
+    ocr_output_format: str
     session_evidence: list[dict]
+
+
+OCR_OUTPUT_FORMATS = Literal["markdown", "json", "structured"]
+
+
+class TransferOCRInput(BaseModel):
+    task: str = Field(description="The OCR task to perform")
+    document_ref: str = Field(description="Approved upload reference or workspace path")
+    output_format: OCR_OUTPUT_FORMATS = Field(default="markdown")
+
+
+def _last_ai_message(runtime: ToolRuntime) -> AIMessage:
+    return next(
+        message
+        for message in reversed(runtime.state.get("messages", []))
+        if isinstance(message, AIMessage)
+    )
+
+
+@tool(args_schema=TransferOCRInput)
+def transfer_to_ocr(
+    task: str,
+    document_ref: str,
+    output_format: OCR_OUTPUT_FORMATS = "markdown",
+    *,
+    runtime: ToolRuntime,
+) -> Command[Literal["ocr"]]:
+    """Hand an approved document to the top-level OCR specialist.
+
+    ``document_ref`` must be an approved upload reference or a path inside the
+    selected workspace; the specialist performs the final fail-closed check.
+    """
+    if output_format not in {"markdown", "json", "structured"}:
+        raise ValueError("output_format must be markdown, json, or structured")
+    if not task.strip() or not document_ref.strip():
+        raise ValueError("task and document_ref are required")
+    state = runtime.state
+    return Command(
+        goto="ocr",
+        update={
+            "ocr_task": task,
+            "ocr_document_ref": document_ref,
+            "ocr_output_format": output_format,
+            "workspace": state.get("workspace", ""),
+            "model": state.get("model"),
+            "messages": [
+                _last_ai_message(runtime),
+                ToolMessage(
+                    content=f"OCR task: {task}\nDocument: {document_ref}",
+                    tool_call_id=runtime.tool_call_id,
+                ),
+            ],
+        },
+        graph=Command.PARENT,
+    )
 
 
 def _specialists(_model) -> list[CompiledSubAgent]:
@@ -200,6 +259,7 @@ ACTIVE_TOOLS = [
     draw_concept_map,
     transfer_to_coding,
     transfer_to_librarian,
+    transfer_to_ocr,
 ]
 
 
@@ -282,7 +342,8 @@ OPERATIONAL GUIDANCE
 Use tools when they materially improve correctness. Use list_todos for project task
 status and attribution. Use draw_concept_map when the user asks for a diagram or a
 visual map would materially improve understanding. Do not create a visual merely to
-decorate a simple answer.
+decorate a simple answer. For explicit document OCR, delegate with transfer_to_ocr
+and set output_format to markdown, json, or structured.
 
 Use Deep Agents filesystem tools ls, glob, grep, and read_file to inspect only the
 exact selected repository. An existing empty selected directory is valid. Never search

@@ -17,6 +17,7 @@ from src.coding_agent import create_coding_agent_graph
 from src.jasper_agent import STANDARD_SESSION_GREETING, call_jasper
 from src.librarian_agent import librarian_agent
 from src.llm import get_llm
+from src.ocr_agent import run_ocr, specialist_message
 from src.magic_coder_graph import create_magic_coder_graph
 from src.session_catalog import record_session_projection
 from src.workspace_policy import (
@@ -55,6 +56,9 @@ class State(TypedDict):
     session_opened: bool
     session_opening_version: str
     librarian_task: str
+    ocr_task: str
+    ocr_document_ref: str
+    ocr_output_format: str
     session_evidence: Annotated[list[dict], operator.add]
     ui: Annotated[list[AnyUIMessage], ui_message_reducer]
 
@@ -107,6 +111,7 @@ AGENT_ROUTING = {
     "jasper": "jasper",
     "magic-coder": "magic-coder",
     "magic_coder": "magic-coder",
+    "ocr": "ocr",
     "uncensored-coder": "magic-coder",
 }
 
@@ -117,6 +122,7 @@ Available specialists:
 - coding: repository analysis and coding work through Deep Agents
 - librarian: web research, essay analysis, structured Q&A, document breakdown
 - magic-coder: image generation, ComfyUI workflows, creative work, character creation
+- ocr: Docling layout parsing and verified document OCR
 
 Rules:
 1. If the user explicitly asks for a specific agent, route to that agent.
@@ -126,7 +132,7 @@ Rules:
 5. For general conversation, questions, or assistance, route to jasper.
 6. If the task appears complete and no further specialist work is needed, reply with "done".
 
-Reply with ONLY the specialist name (jasper, coding, librarian, magic-coder) or "done". No other text."""
+Reply with ONLY the specialist name (jasper, coding, librarian, magic-coder, ocr) or "done". No other text."""
 
 
 def supervisor_node(
@@ -272,7 +278,7 @@ def _is_approved(resume_value) -> bool:
 def approval_node(
     state: State,
 ) -> (
-    Command[Literal["jasper", "coding", "librarian", "magic-coder"]] | dict
+    Command[Literal["jasper", "coding", "librarian", "magic-coder", "ocr"]] | dict
 ):
     agent = state.get("pending_agent", "")
     approved = interrupt(
@@ -516,6 +522,20 @@ def create_chat_ui():
             },
         )
 
+    async def run_ocr_node(state) -> Command[Literal["jasper", "record_session"]]:
+        try:
+            result = await asyncio.to_thread(
+                run_ocr,
+                state.get("ocr_task", ""),
+                state.get("ocr_document_ref", ""),
+                state.get("workspace"),
+                state.get("ocr_output_format", "markdown"),
+            )
+            message = {"role": "assistant", "name": "ocr", "content": specialist_message(result, state.get("ocr_output_format", "markdown"))}
+        except Exception as exc:
+            message = {"role": "assistant", "name": "ocr", "content": f"OCR failed: {exc}"}
+        return Command(goto="jasper", update={"messages": [message], "ocr_task": "", "ocr_document_ref": ""})
+
     async def run_magic_coder_node(state):
         input_count = len(state["messages"])
         result = await magic_coder_app.ainvoke(
@@ -566,6 +586,7 @@ def create_chat_ui():
     graph.add_node("jasper", run_jasper)
     graph.add_node("coding", run_coding)
     graph.add_node("librarian", run_librarian)
+    graph.add_node("ocr", run_ocr_node)
     graph.add_node("magic-coder", run_magic_coder_node)
     graph.add_node("record_session", record_session)
 

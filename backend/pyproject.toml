@@ -26,6 +26,8 @@ dependencies = [
     "langchain-openai>=1.4,<2",
     "open-deep-research",
     "cryptography>=49.0.0",
+    "docling>=2.30.0,<3",
+    "requests>=2.32.0,<3",
 ]
 
 [project.optional-dependencies]

@@ -123,16 +123,26 @@ export async function fileToContentBlock(
       text?: string;
       segments?: Array<Record<string, unknown>>;
       truncated?: boolean;
+      ocr_upload?: {
+        reference?: string;
+        filename?: string;
+      };
     };
     if (!response.ok) {
       const message = result.detail || "The document could not be read safely.";
       toast.error(message);
       throw new Error(message);
     }
+
     const title = result.filename || file.name;
+    const ocrReference = result.ocr_upload?.reference;
+    const ocrContext = ocrReference
+      ? ` OCR reference: ${ocrReference}.`
+      : "";
     const limitation = result.truncated
       ? " The extracted text was truncated at the attachment safety limit."
       : "";
+
     // LangChain's documented PlainText block uses `text` without a second
     // base64 copy. The installed declaration still inherits a DataRecord
     // requirement, so keep the standards-compliant runtime shape explicit.
@@ -140,7 +150,7 @@ export async function fileToContentBlock(
       type: "text-plain",
       text: result.text || "",
       title,
-      context: `Selected ${result.format || "document"} file ${title}.${limitation}`,
+      context: `Selected ${result.format || "document"} file ${title}.${limitation}${ocrContext}`,
       mimeType: "text/markdown",
       metadata: {
         filename: result.filename || file.name,
@@ -148,6 +158,7 @@ export async function fileToContentBlock(
         format: result.format || "document",
         segments: result.segments || [],
         truncated: Boolean(result.truncated),
+        ...(ocrReference ? { ocrReference } : {}),
       },
     } as unknown as ContentBlock.Multimodal.PlainText;
   }
@@ -197,8 +208,10 @@ export async function fileToBase64(file: File): Promise<string> {
 export function isBase64ContentBlock(
   block: unknown,
 ): block is ContentBlock.Multimodal.Data {
-  if (typeof block !== "object" || block === null || !("type" in block))
+  if (typeof block !== "object" || block === null || !("type" in block)) {
     return false;
+  }
+
   // file type (legacy)
   if (
     (block as { type: unknown }).type === "file" &&
@@ -209,14 +222,12 @@ export function isBase64ContentBlock(
   ) {
     return true;
   }
+
   // image type (new)
-  if (
+  return (
     (block as { type: unknown }).type === "image" &&
     "mimeType" in block &&
     typeof (block as { mimeType?: unknown }).mimeType === "string" &&
     (block as { mimeType: string }).mimeType.startsWith("image/")
-  ) {
-    return true;
-  }
-  return false;
+  );
 }

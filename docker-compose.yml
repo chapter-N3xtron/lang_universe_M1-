@@ -16,6 +16,7 @@ services:
       REDIS_URL: redis://redis:6379
       AGENT_WORKSPACE: /workspace
       TODOS_FILE: /workspace/todos.json
+      OCR_UPLOAD_DIR: /workspace/data/ocr/uploads
       SESSION_RUNTIME_MODE: durable
       SESSION_RUNTIME_ID: backend-postgres-v1
       CODING_OLLAMA_BASE_URL: http://host.docker.internal:11434

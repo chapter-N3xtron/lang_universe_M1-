@@ -2696,8 +2696,10 @@ name = "langgraph-agent-chat-deep-agents"
 version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "beautifulsoup4" },
     { name = "cryptography" },
     { name = "deepagents" },
+    { name = "defusedxml" },
     { name = "docling" },
     { name = "fastapi" },
     { name = "firecrawl-py" },
@@ -2714,10 +2716,16 @@ dependencies = [
     { name = "langgraph-prebuilt" },
     { name = "langgraph-sdk" },
     { name = "langsmith" },
+    { name = "odfpy" },
     { name = "open-deep-research" },
+    { name = "openpyxl" },
     { name = "psycopg", extra = ["binary", "pool"] },
+    { name = "pypdf" },
+    { name = "python-docx" },
     { name = "python-dotenv" },
+    { name = "python-pptx" },
     { name = "requests" },
+    { name = "striprtf" },
     { name = "tavily-python" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -2729,19 +2737,12 @@ dev = [
     { name = "ruff" },
 ]
 sidecar = [
-    { name = "beautifulsoup4" },
     { name = "faster-whisper" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "odfpy" },
-    { name = "openpyxl" },
     { name = "pocket-tts" },
-    { name = "pypdf" },
-    { name = "python-docx" },
     { name = "python-multipart" },
-    { name = "python-pptx" },
     { name = "soundfile" },
-    { name = "striprtf" },
 ]
 
 [package.dev-dependencies]
@@ -2752,9 +2753,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "beautifulsoup4", marker = "extra == 'sidecar'", specifier = ">=4.14,<5" },
+    { name = "beautifulsoup4", specifier = ">=4.14,<5" },
     { name = "cryptography", specifier = ">=49.0.0" },
     { name = "deepagents", specifier = "==0.7.0b2" },
+    { name = "defusedxml" },
     { name = "docling", specifier = ">=2.30.0,<3" },
     { name = "fastapi", specifier = ">=0.115.0,<1" },
     { name = "faster-whisper", marker = "extra == 'sidecar'", specifier = ">=1.0.0" },
@@ -2773,22 +2775,22 @@ requires-dist = [
     { name = "langgraph-sdk", specifier = ">=0.3.5" },
     { name = "langsmith", specifier = ">=0.7.31" },
     { name = "numpy", marker = "extra == 'sidecar'", specifier = ">=1.26.0,<3" },
-    { name = "odfpy", marker = "extra == 'sidecar'", specifier = ">=1.4,<2" },
+    { name = "odfpy", specifier = ">=1.4,<2" },
     { name = "open-deep-research", directory = "vendor/open_deep_research" },
-    { name = "openpyxl", marker = "extra == 'sidecar'", specifier = ">=3.1,<4" },
+    { name = "openpyxl", specifier = ">=3.1,<4" },
     { name = "pocket-tts", marker = "extra == 'sidecar'", specifier = "==2.1.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3,<4" },
-    { name = "pypdf", marker = "extra == 'sidecar'", specifier = ">=6,<7" },
+    { name = "pypdf", specifier = ">=6,<7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "python-docx", marker = "extra == 'sidecar'", specifier = ">=1.2,<2" },
+    { name = "python-docx", specifier = ">=1.2,<2" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-multipart", marker = "extra == 'sidecar'", specifier = ">=0.0.20" },
-    { name = "python-pptx", marker = "extra == 'sidecar'", specifier = ">=1,<2" },
+    { name = "python-pptx", specifier = ">=1,<2" },
     { name = "requests", specifier = ">=2.32.0,<3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "soundfile", marker = "extra == 'sidecar'", specifier = ">=0.12.0" },
-    { name = "striprtf", marker = "extra == 'sidecar'", specifier = ">=0.0.29,<1" },
+    { name = "striprtf", specifier = ">=0.0.29,<1" },
     { name = "tavily-python", specifier = ">=0.3.0,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0,<1" },
 ]

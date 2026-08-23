@@ -52,7 +52,7 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
     assert result["messages"][:2] == output[:2]
     assert result["messages"][-1].content.startswith("Completion report")
     assert "Repository summary" in result["messages"][-1].content
-    assert "linux_agent_server_container" in result["messages"][-1].content
+    assert "native_custodian_host" in result["messages"][-1].content
     assert result["execution_manifest"]["selected_repository"] == str(
         tmp_path.resolve()
     )
@@ -116,23 +116,12 @@ def test_deep_agents_node_rejects_relative_workspace(monkeypatch):
     assert "relative/path" not in result["messages"][0].content
 
 
-def test_deep_agents_node_classifies_missing_workspace(monkeypatch, tmp_path):
+def test_host_only_workspace_is_forwarded_without_container_probe(monkeypatch, tmp_path):
     from src import coding_agent
 
-    build = MagicMock()
-    monkeypatch.setattr(coding_agent, "_build_deep_agent", build)
-    result = asyncio.run(
-        coding_agent.deep_agents_coding_node(
-            {
-                "messages": [{"role": "user", "content": "Inspect"}],
-                "workspace": str(tmp_path / "missing"),
-                "thread_identity": "thread-missing",
-            }
-        )
-    )
-
-    build.assert_not_called()
-    assert result["coding_status"] == "error"
+    host_only = tmp_path / "missing-in-agent-container"
+    monkeypatch.setenv("WORKSPACE_AUTHORIZED_ROOTS", str(tmp_path))
+    assert coding_agent._validated_workspace(str(host_only)) == host_only
 
 
 def test_deep_agents_node_sanitizes_agent_failure(monkeypatch, tmp_path):
@@ -174,13 +163,12 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
             self.paths = kwargs["paths"]
             self.mode = kwargs["mode"]
 
-    class FilesystemBackend:
-        def __init__(self, **kwargs):
-            captured["filesystem_backend"] = kwargs
-
-    class LocalShellBackend:
-        def __init__(self, **kwargs):
-            captured["local_shell_backend"] = kwargs
+    class Backend:
+        def __init__(self, workspace, *, read_only):
+            captured["custodian_backend"] = {
+                "workspace": workspace,
+                "read_only": read_only,
+            }
 
     def create_agent(**kwargs):
         captured["agent"] = kwargs
@@ -190,15 +178,17 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
     monkeypatch.setattr(
         coding_agent,
         "_deep_agent_components",
-        lambda: (Permission, FilesystemBackend, LocalShellBackend, create_agent),
+        lambda: (Permission, create_agent),
     )
     monkeypatch.setattr(coding_agent, "get_coding_llm", lambda _name: model)
+    monkeypatch.setattr(coding_agent, "CustodianBackend", Backend)
+    monkeypatch.setattr("src.workspace_policy.host_worker_available", lambda: True)
 
     coding_agent._build_deep_agent(tmp_path.resolve(), "ollama/qwen3.5:27b")
 
-    assert captured["filesystem_backend"] == {
-        "root_dir": tmp_path.resolve(),
-        "virtual_mode": True,
+    assert captured["custodian_backend"] == {
+        "workspace": str(tmp_path.resolve()),
+        "read_only": True,
     }
     assert captured["agent"]["model"] is model
     assert captured["agent"]["checkpointer"] is None
@@ -220,7 +210,7 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
     )
 
 
-def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp_path):
+def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, tmp_path):
     from src import coding_agent
 
     (tmp_path / ".agents" / "skills").mkdir(parents=True)
@@ -232,13 +222,12 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
             self.paths = kwargs["paths"]
             self.mode = kwargs["mode"]
 
-    class FilesystemBackend:
-        def __init__(self, **kwargs):
-            captured["filesystem_backend"] = kwargs
-
-    class LocalShellBackend:
-        def __init__(self, **kwargs):
-            captured["local_shell_backend"] = kwargs
+    class Backend:
+        def __init__(self, workspace, *, read_only):
+            captured["custodian_backend"] = {
+                "workspace": workspace,
+                "read_only": read_only,
+            }
 
     def create_agent(**kwargs):
         captured["agent"] = kwargs
@@ -247,9 +236,11 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
     monkeypatch.setattr(
         coding_agent,
         "_deep_agent_components",
-        lambda: (Permission, FilesystemBackend, LocalShellBackend, create_agent),
+        lambda: (Permission, create_agent),
     )
     monkeypatch.setattr(coding_agent, "get_coding_llm", lambda _name: SimpleNamespace())
+    monkeypatch.setattr(coding_agent, "CustodianBackend", Backend)
+    monkeypatch.setattr("src.workspace_policy.host_worker_available", lambda: True)
 
     coding_agent._build_deep_agent(
         tmp_path.resolve(),
@@ -257,34 +248,33 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
         execution_mode="approval",
     )
 
-    assert captured["local_shell_backend"] == {
-        "root_dir": tmp_path.resolve(),
-        "virtual_mode": True,
-        "timeout": 120,
-        "max_output_bytes": 100_000,
-        "env": {
-            "PATH": (
-                "/opt/coding-tools/node/bin:/opt/coding-tools/pnpm:"
-                + coding_agent.os.environ.get("PATH", "")
-            ),
-            "NPM_CONFIG_PREFIX": "/opt/coding-tools/node",
-            "PNPM_HOME": "/opt/coding-tools/pnpm",
-        },
-        "inherit_env": True,
+    assert captured["custodian_backend"] == {
+        "workspace": str(tmp_path.resolve()),
+        "read_only": False,
     }
-    assert captured["agent"]["tools"] == []
+    assert [tool.name for tool in captured["agent"]["tools"]] == [
+        "custodian_command",
+        "custodian_git",
+        "custodian_compose_read",
+        "custodian_compose_change",
+    ]
     assert set(captured["agent"]["interrupt_on"]) == {
         "write_file",
         "edit_file",
         "delete",
-        "execute",
+        "custodian_command",
+        "custodian_git",
+        "custodian_compose_read",
+        "custodian_compose_change",
     }
     assert captured["agent"]["permissions"] is None
-    assert captured["agent"]["skills"] == ["/.agents/skills/"]
+    assert captured["agent"]["skills"] is None
     system_prompt = captured["agent"]["system_prompt"]
     assert "Never search parent, child, or sibling" in system_prompt
-    assert "linux_agent_server_container" in system_prompt
-    assert "request_macos_host_operation: unavailable" in system_prompt
+    assert "native_custodian_host" in system_prompt
+    assert "direct Custodian worker: available" in system_prompt
+    assert "request_macos_host_operation interfaces" in system_prompt
+    assert "/opt/coding-tools" in system_prompt
     assert "write_todos" in system_prompt
     assert "15-minute report" in system_prompt
     assert "Completion report" in system_prompt
@@ -296,7 +286,9 @@ def test_build_deep_agent_approval_mode_uses_native_local_shell(monkeypatch, tmp
     )
 
     assert captured["agent"]["permissions"] is None
-    assert captured["agent"]["interrupt_on"] is None
+    assert set(captured["agent"]["interrupt_on"]) == {
+        "custodian_compose_change"
+    }
 
 
 def test_coding_graph_uses_deep_agents_node():

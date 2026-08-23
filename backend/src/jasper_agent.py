@@ -15,7 +15,6 @@ from deepagents import (
     FilesystemPermission,
     create_deep_agent,
 )
-from deepagents.backends import FilesystemBackend
 from deepagents.middleware import FilesystemMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -28,9 +27,11 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolM
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.graph.ui import AnyUIMessage, push_ui_message, ui_message_reducer
 from langgraph.types import Command
 
 from src.agent_utils import get_user_query
+from src.custodian_backend import CustodianBackend, CustodianClient, CustodianError
 from src.jasper_tools import (
     agent_evidence,
     agent_workspace,
@@ -115,6 +116,7 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     coding_task: str
     librarian_task: str
     session_evidence: list[dict]
+    ui: Annotated[list[AnyUIMessage], ui_message_reducer]
 
 
 def _specialists(_model) -> list[CompiledSubAgent]:
@@ -194,9 +196,74 @@ def transfer_to_librarian(
     )
 
 
+def _host_file_client() -> CustodianClient:
+    return CustodianClient(
+        "/",
+        base_url=os.getenv(
+            "CUSTODIAN_WORKER_URL", "http://host.docker.internal:8765"
+        ).rstrip("/"),
+    )
+
+
+@tool
+def announce_host_file_read(path: str, reason: str) -> dict[str, str]:
+    """Publish the required visible notice before reading one ordinary Mac file.
+
+    This preflight checks the path without opening its content. Use the returned canonical
+    path, reason, and one-use notice_token in a later read_host_file call.
+    """
+
+    try:
+        result = _host_file_client().action(
+            "preflight_host_file", path=path, reason=reason
+        )
+    except CustodianError as exc:
+        raise ValueError("Host-file preflight failed.") from exc
+    if result.get("ok") is not True:
+        raise ValueError(str(result.get("error") or "Host-file preflight was refused."))
+    canonical_path = str(result["path"])
+    canonical_reason = str(result["reason"])
+    push_ui_message(
+        "host_file_notice",
+        {"path": canonical_path, "reason": canonical_reason},
+        state_key="ui",
+    )
+    return {
+        "path": canonical_path,
+        "reason": canonical_reason,
+        "notice_token": str(result["notice_token"]),
+    }
+
+
+@tool
+def read_host_file(
+    path: str,
+    reason: str,
+    notice_token: str,
+    max_chars: int = 50000,
+) -> str:
+    """Read a host text file only after announce_host_file_read displayed its notice."""
+
+    try:
+        result = _host_file_client().action(
+            "read_host_file",
+            path=path,
+            reason=reason,
+            notice_token=notice_token,
+            max_chars=max_chars,
+        )
+    except CustodianError as exc:
+        raise ValueError("Host-file read failed.") from exc
+    if result.get("ok") is not True:
+        raise ValueError(str(result.get("error") or "Host-file read was refused."))
+    return str(result.get("content") or "")
+
+
 ACTIVE_TOOLS = [
     list_todos,
     read_file,
+    announce_host_file_read,
+    read_host_file,
     draw_concept_map,
     transfer_to_coding,
     transfer_to_librarian,
@@ -285,29 +352,23 @@ visual map would materially improve understanding. Do not create a visual merely
 decorate a simple answer.
 
 Use Deep Agents filesystem tools ls, glob, grep, and read_file to inspect only the
-exact selected repository. An existing empty selected directory is valid. Never search
-a parent, child, or sibling for another repository, and never substitute the home
-directory, current working directory, /workspace, or another checkout. Use the
-server-produced execution manifest as deployment truth: selected repository files
-originate from a macOS-host bind mount, while ordinary commands run in the Linux Agent
-Server container. Never call Linux commands Mac-host commands or claim they changed
-macOS, /Applications, Homebrew, a DMG, Finder, Keychain, launch services, or a native
-Mac application. For Docker or Docker Compose work, delegate the requested outcome to Coding with
-instructions to use request_macos_host_operation with exactly one typed docker_sandbox
-action only when the execution manifest reports "docker_sandbox via
-request_macos_host_operation: available". This is the only local Docker route; never
-direct Coding to wait for a legacy Docker broker tool. Never direct Coding to inspect
-Docker or Docker Desktop through a generic Mac inspection action, including
-installation, presence, or version checks, and never use Mac inspection as a Docker
-preflight. In autonomous mode, do not replace the requested deployment with a preflight,
-architecture proposal, or an extra approval request for ordinary repository changes;
-the typed host-operation interrupt remains the authority boundary. When deployment is
-paired with read-only integration analysis, preserve that separation and do not make
-integration implementation or redeployment of an existing service a prerequisite. If
-the docker_sandbox capability is unavailable, report that exact blocker. For other
-macOS-only work, delegate to Coding with instructions to call
-request_macos_host_operation only when the manifest reports it available; otherwise
-report that host operations are unavailable and do not propose a Linux substitute.
+exact selected repository through native Custodian. To read an ordinary text file
+elsewhere on the Mac host, first call announce_host_file_read with the exact path and a
+plain-English reason. This publishes a visible notice, not an approval request, and
+returns a one-use token. Only afterward call read_host_file with the returned canonical
+path, reason, and token. Never use either tool for credentials, keychains, tokens,
+environment files, private keys, or browser credential data. An existing empty selected
+directory is valid. Never search a parent, child, or sibling for another repository, and
+never substitute the home directory, current working directory, /workspace, or another
+checkout. Use the server-produced execution manifest as deployment truth. For Docker,
+Docker Compose, or other host-side changes, delegate the requested outcome to Coding.
+Coding uses the direct native Custodian worker when the execution manifest reports it
+available. Deployment-changing Compose actions always require explicit operator
+approval. Do not route host work through another service. If the
+direct Custodian worker is unavailable, report that
+exact blocker and do not substitute a Linux command for host-side work. In autonomous
+mode, do not replace the requested outcome with a preflight, architecture proposal, or
+extra approval request.
 Use read_repository_file for every repository file whose
 contents support a grounded visual so its evidence ID can be cited. Delegate external
 research with transfer_to_librarian. Delegate repository
@@ -403,9 +464,9 @@ def _middleware():
 
 def _workspace_backend(
     workspace: str | None,
-) -> tuple[FilesystemBackend, list[FilesystemPermission]]:
+) -> tuple[CustodianBackend, list[FilesystemPermission]]:
     root = canonical_workspace(workspace)
-    backend = FilesystemBackend(root_dir=root, virtual_mode=True)
+    backend = CustodianBackend(str(root), read_only=True)
     permissions = [
         FilesystemPermission(
             operations=["read", "write"],

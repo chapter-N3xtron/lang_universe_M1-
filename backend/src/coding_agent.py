@@ -12,6 +12,7 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import StructuredTool
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.ui import (
@@ -20,13 +21,11 @@ from langgraph.graph.ui import (
     push_ui_message,
     ui_message_reducer,
 )
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.coding_persistence import coding_session_id, export_coding_session
+from src.custodian_backend import CustodianBackend, CustodianClient, CustodianError
 from src.llm import get_coding_llm
-from src.macos_host_operations import (
-    create_request_macos_host_operation_tool,
-    load_operator_config,
-)
 from src.workspace_policy import (
     ExecutionManifest,
     WorkspacePolicyError,
@@ -69,8 +68,74 @@ logger = logging.getLogger(__name__)
 
 _SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str, str], Any] = OrderedDict()
 _SESSION_AGENT_CACHE_SIZE = 8
-_CODING_TOOL_PATHS = ("/opt/coding-tools/node/bin", "/opt/coding-tools/pnpm")
 _CODING_PROGRESS_INTERVAL_SECONDS = 15 * 60
+_HOST_WORKER_URL = os.getenv("CUSTODIAN_WORKER_URL", "http://host.docker.internal:8765").rstrip("/")
+
+
+class ArgvTask(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    argv: list[str] = Field(min_length=1, max_length=128)
+    timeout: int = Field(default=60, ge=1, le=300)
+
+
+def create_custodian_command_tools(workspace: Path) -> list[StructuredTool]:
+    client = CustodianClient(str(workspace), base_url=_HOST_WORKER_URL, timeout=305)
+
+    def invoke(action: str, argv: list[str], timeout: int = 60) -> str:
+        try:
+            result = client.action(action, argv=argv, timeout=timeout)
+        except CustodianError:
+            return "Custodian command request failed."
+        output = str(result.get("output") or result.get("error") or "")
+        return (
+            f"exit_code={result.get('exit_code')} truncated={bool(result.get('truncated'))}\n"
+            f"{output}"
+        )
+
+    return [
+        StructuredTool.from_function(
+            func=lambda argv, timeout=60: invoke("command", argv, timeout),
+            name="custodian_command",
+            description=(
+                "Run one allowlisted host project command in the exact selected repository. "
+                "Begin argv with an executable basename such as pnpm, never an absolute "
+                "Agent Server path such as /opt/coding-tools. For OpenSpec 1.7, use pnpm "
+                "dlx @fission-ai/openspec@1.7.0. Shell strings, pipes, redirects, and "
+                "expansion are not supported."
+            ),
+            args_schema=ArgvTask,
+        ),
+        StructuredTool.from_function(
+            func=lambda argv, timeout=60: invoke("git", argv, timeout),
+            name="custodian_git",
+            description=(
+                "Run an allowlisted Git subcommand in the selected repository. Pass argv "
+                "beginning with the Git subcommand, not a shell command."
+            ),
+            args_schema=ArgvTask,
+        ),
+        StructuredTool.from_function(
+            func=lambda argv, timeout=60: invoke("compose_read", argv, timeout),
+            name="custodian_compose_read",
+            description=(
+                "Inspect Docker Compose state with config, logs, or ps in the selected "
+                "repository. Pass argv beginning with the Compose subcommand."
+            ),
+            args_schema=ArgvTask,
+        ),
+        StructuredTool.from_function(
+            func=lambda argv, timeout=60: invoke("compose_change", argv, timeout),
+            name="custodian_compose_change",
+            description=(
+                "Request an explicitly reviewed Docker Compose deployment change. This "
+                "always pauses for operator approval before build, pull, start, stop, "
+                "restart, up, or down."
+            ),
+            args_schema=ArgvTask,
+        ),
+    ]
+
 
 _LOCAL_APPROVAL_INTERRUPT_ON = {
     "write_file": {
@@ -85,10 +150,29 @@ _LOCAL_APPROVAL_INTERRUPT_ON = {
         "allowed_decisions": ["approve", "reject"],
         "description": "Review a file deletion in the selected repository.",
     },
-    "execute": {
+    "custodian_command": {
         "allowed_decisions": ["approve", "edit", "reject"],
-        "description": "Review a shell command rooted in the selected repository.",
+        "description": "Review an argv-only project command in the selected repository.",
     },
+    "custodian_git": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": "Review an argv-only Git command in the selected repository.",
+    },
+    "custodian_compose_read": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": "Review a read-only Docker Compose inspection.",
+    },
+    "custodian_compose_change": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": "Approve or reject this Docker Compose deployment change.",
+    },
+}
+
+_AUTONOMOUS_BOUNDARY_INTERRUPT_ON = {
+    "custodian_compose_change": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": "Approve or reject this Docker Compose deployment change.",
+    }
 }
 
 
@@ -116,9 +200,8 @@ def _deep_agent_components():
     # Lazy imports let the rollback backend and unit tests start without loading
     # the comparatively large Deep Agents dependency tree.
     from deepagents import FilesystemPermission, create_deep_agent
-    from deepagents.backends import FilesystemBackend, LocalShellBackend
 
-    return FilesystemPermission, FilesystemBackend, LocalShellBackend, create_deep_agent
+    return FilesystemPermission, create_deep_agent
 
 
 def _execution_mode(raw_mode: str | None) -> str:
@@ -133,12 +216,7 @@ def _build_deep_agent(
     execution_mode: str = "read_only",
     checkpointer: Any = None,
 ):
-    (
-        permission_type,
-        filesystem_backend_type,
-        local_shell_backend_type,
-        create_deep_agent,
-    ) = _deep_agent_components()
+    permission_type, create_deep_agent = _deep_agent_components()
     mode = _execution_mode(execution_mode)
     approval_mode = mode == "approval"
     autonomous_mode = mode == "autonomous"
@@ -159,56 +237,41 @@ def _build_deep_agent(
             ),
         ]
     )
-    if approval_mode or autonomous_mode:
-        backend = local_shell_backend_type(
-            root_dir=workspace,
-            virtual_mode=True,
-            timeout=120,
-            max_output_bytes=100_000,
-            env={
-                "PATH": os.pathsep.join(
-                    (*_CODING_TOOL_PATHS, os.environ.get("PATH", ""))
-                ),
-                "NPM_CONFIG_PREFIX": "/opt/coding-tools/node",
-                "PNPM_HOME": "/opt/coding-tools/pnpm",
-            },
-            inherit_env=True,
-        )
-    else:
-        backend = filesystem_backend_type(root_dir=workspace, virtual_mode=True)
-    operator_config = load_operator_config()
     mutable_mode = approval_mode or autonomous_mode
-    host_tool_enabled = operator_config is not None and mutable_mode
-    tools = []
-    if host_tool_enabled and operator_config is not None:
-        tools.append(create_request_macos_host_operation_tool(operator_config))
-    if approval_mode:
-        interrupt_on = _LOCAL_APPROVAL_INTERRUPT_ON
-    else:
-        interrupt_on = None
+    backend = CustodianBackend(str(workspace), read_only=not mutable_mode)
+    tools = create_custodian_command_tools(workspace) if mutable_mode else []
+    interrupt_on = (
+        _LOCAL_APPROVAL_INTERRUPT_ON
+        if approval_mode
+        else _AUTONOMOUS_BOUNDARY_INTERRUPT_ON
+        if autonomous_mode
+        else None
+    )
     if approval_mode:
         mutation_prompt = (
-            "Use the built-in repository file tools and execute tool for coding work. "
-            "Every write, edit, deletion, or shell command pauses for human review. "
+            "Use the built-in repository file tools and typed Custodian command tools. "
+            "Every write, edit, deletion, or command pauses for human review. "
             "Commands start in the selected repository. Never read or modify secrets "
             "or edit .git files directly. Use normal Git commands for repository "
-            "management; never force-push or delete remote history."
+            "management; commit only when the human explicitly requests it. Remote Git "
+            "operations are unavailable."
         )
     elif autonomous_mode:
         mutation_prompt = (
-            "Work autonomously in the selected repository using the native Deep Agents "
-            "filesystem and shell tools. Follow repository instructions and validate "
+            "Work autonomously in the selected repository using the native Custodian "
+            "filesystem backend and typed command tools. Follow repository instructions and validate "
             "your work with the available project commands. Never read or modify secrets "
-            "or edit .git files directly."
+            "or edit .git files directly. Commit only when the human explicitly requests it; "
+            "remote Git operations are unavailable."
         )
     else:
         mutation_prompt = (
             "This deployment is read-only: never write, edit, delete, or execute files."
         )
-    memory = ["/AGENTS.md"] if (workspace / "AGENTS.md").is_file() else None
-    skills = (
-        ["/.agents/skills/"] if (workspace / ".agents" / "skills").is_dir() else None
-    )
+    # Host paths intentionally do not exist in the Agent Server container. The
+    # Custodian backend discovers repository instructions through normal reads.
+    memory = None
+    skills = None
     manifest_text = format_execution_manifest(execution_manifest(workspace))
 
     return create_deep_agent(
@@ -221,38 +284,16 @@ def _build_deep_agent(
             "or sibling directories for another repository; never substitute the "
             "home directory, current working directory, /workspace, or another "
             "checkout. Use absolute virtual paths rooted at /, which maps only to "
-            "the selected repository. The shell is container-only. For every Docker "
-            "or Docker Compose task, use request_macos_host_operation with exactly one "
-            "typed docker_sandbox action only when the execution manifest reports that "
-            "capability available; if it is unavailable, report that exact blocker. "
-            "Bind each request to the current Compose file with its SHA-256 digest. "
-            "For every docker_sandbox action, set action.workspace exactly to the "
-            f"server-produced selected repository host path {workspace}; never use a "
-            "virtual path such as /local-deployment-sandbox as action.workspace. "
-            "Set action.project_directory relative to that workspace and set "
-            "action.compose_file relative to the project directory. For example, virtual "
-            "/local-deployment-sandbox/compose.yaml means project_directory "
-            "local-deployment-sandbox and compose_file compose.yaml. For pull, build, up, "
-            "start, stop, restart, or down, expected_mutations must contain exactly one "
-            "replace mutation whose path exactly equals action.workspace; rollback.strategy "
-            "must be none and rollback.may_require_human_inspection must be true. For ps, "
-            "declare one inspect mutation at action.workspace, use rollback.strategy none, "
-            "and do not claim a mutation. "
-            "Never request Docker inspection, logs, exec, raw commands, names, argv, "
-            "environment, or secrets. Issue one Docker sandbox host-operation request "
-            "alone per assistant turn, with no other tool calls in that turn, and wait "
-            "for its complete native confirmation and signed receipt before another. "
-            "Commands execute in the Linux Agent Server container; repository files "
-            "originate from the macOS-host bind mount. Never describe container "
-            "commands as Mac-host commands or infer a macOS mutation from Linux "
-            "output. For work requiring macOS, a native "
-            "application, Homebrew, DMG handling, or /Applications, call "
-            "request_macos_host_operation only when the execution manifest reports "
-            "that capability available; otherwise report the host operation as "
-            "unavailable and do not attempt a Linux substitute. Issue exactly one "
-            "request_macos_host_operation call in an assistant turn, with no other "
-            "tool calls in that turn. Never batch Mac-host inspections or mutations; "
-            "wait for the complete review and receipt cycle before requesting another. "
+            "the selected repository. Native Custodian is the sole filesystem and command "
+            "boundary. Use custodian_command for allowlisted project argv, custodian_git "
+            "for Git argv, custodian_compose_read for Compose inspection, and "
+            "custodian_compose_change for deployment changes that always require explicit "
+            "operator approval. Do not request executor, broker, docker_sandbox, or "
+            "request_macos_host_operation interfaces; they are not part of this architecture. "
+            "Pass host command executable basenames, never Agent Server paths such as "
+            "/opt/coding-tools. Never construct shell strings or claim that commands ran "
+            "in the Agent Server container. "
+            f"Every operation is bound to the exact host repository {workspace}. "
             "For multi-step work, create and maintain a task list with write_todos before "
             "implementation. If the request names an OpenSpec change, use only its relevant "
             "tasks; otherwise turn the request into a short checklist. Keep working until "
@@ -284,13 +325,7 @@ async def _session_agent(
     execution_mode: str,
 ):
     mode = _execution_mode(execution_mode)
-    operator_config = load_operator_config()
-    host_config_identity = (
-        f"{operator_config.endpoint}:{operator_config.key_id}"
-        if operator_config is not None
-        else "unavailable"
-    )
-    key = (str(workspace), model_name or "", mode, host_config_identity)
+    key = (str(workspace), model_name or "", mode, _HOST_WORKER_URL)
     if key in _SESSION_AGENT_CACHE:
         app = _SESSION_AGENT_CACHE.pop(key)
         _SESSION_AGENT_CACHE[key] = app

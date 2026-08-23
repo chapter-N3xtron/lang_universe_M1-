@@ -1,0 +1,75 @@
+# Local evaluation manifest for the first deployment step.
+# This file contains no credentials and is safe to commit.
+# The signed Docker receipt is the authoritative runtime record for resolved digests.
+manifest_version: 1
+scope: local-compose-evaluation
+compose_file: compose.yaml
+project_name: langgraph-local-topology
+integration:
+  langgraph_agent_server: disconnected
+  plane_temporal_cross_domain_links: none
+network_policy:
+  exposed_bindings:
+    - 127.0.0.1:8080
+    - 127.0.0.1:7233
+    - 127.0.0.1:8088
+    - 127.0.0.1:8090
+  internal_only:
+    - plane-db
+    - plane-redis
+    - plane-rabbitmq
+    - plane-minio
+    - temporal-db
+    - temporal frontend gRPC from non-local clients
+persistence:
+  named_volumes:
+    - plane-postgres
+    - plane-redis
+    - plane-rabbitmq
+    - plane-minio
+    - temporal-postgres
+images:
+  # Tags are the selected release inputs. The host receipt records the resolved
+  # immutable digest; startup is not release-accepted when a digest is absent.
+  - service: plane-db
+    image: postgres:15.7-alpine
+    source: https://hub.docker.com/_/postgres
+  - service: plane-redis
+    image: redis:7.2.5-alpine
+    source: https://hub.docker.com/_/redis
+  - service: plane-rabbitmq
+    image: rabbitmq:3.13.7-management-alpine
+    source: https://hub.docker.com/_/rabbitmq
+  - service: plane-minio
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    source: https://hub.docker.com/r/minio/minio
+  - service: plane-api
+    image: makeplane/plane-backend:v1.26.0
+    source: https://github.com/makeplane/plane
+  - service: plane-web
+    image: makeplane/plane-frontend:v1.26.0
+    source: https://github.com/makeplane/plane
+  - service: temporal-db
+    image: postgres:16.4-alpine
+    source: https://hub.docker.com/_/postgres
+  - service: temporal
+    image: temporalio/auto-setup:1.27.2
+    source: https://github.com/temporalio/temporal
+  - service: temporal-ui
+    image: temporalio/ui:2.34.0
+    source: https://github.com/temporalio/ui
+health_contract:
+  process_health: compose healthcheck must be healthy for every started service.
+  dependency_readiness: database, Redis, RabbitMQ, MinIO, Temporal server, and HTTP
+    UI checks must independently pass; Temporal gRPC health alone is insufficient.
+rollback:
+  stop: docker compose stop
+  preserve_volumes: true
+  disable_integration: true
+  destructive_teardown: docker compose down -v (only after protected backups)
+verification:
+  - docker compose config
+  - docker compose ps
+  - curl --fail http://127.0.0.1:8080
+  - curl --fail http://127.0.0.1:8088
+  - curl --fail http://127.0.0.1:8090/healthz

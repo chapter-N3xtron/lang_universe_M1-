@@ -14,35 +14,21 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       REDIS_URI: redis://redis:6379
       REDIS_URL: redis://redis:6379
-      AGENT_WORKSPACE: /workspace
-      TODOS_FILE: /workspace/todos.json
-      OCR_UPLOAD_DIR: /workspace/data/ocr/uploads
+      AGENT_WORKSPACE: /app-data
+      TODOS_FILE: /app-data/todos.json
+      OCR_UPLOAD_DIR: /app-data/ocr/uploads
       SESSION_RUNTIME_MODE: durable
       SESSION_RUNTIME_ID: backend-postgres-v1
       CODING_OLLAMA_BASE_URL: http://host.docker.internal:11434
       OLLAMA_BASE_URL: http://host.docker.internal:11434
-      MACOS_HOST_EXECUTOR_URL: http://host.docker.internal:8765
-      MACOS_HOST_EXECUTOR_PUBLIC_KEY_FILE: /run/macos-host-executor/receipt-signing.pub
-      DOCKER_BROKER_URL: http://host.docker.internal:8766
-      NPM_CONFIG_PREFIX: /opt/coding-tools/node
-      PNPM_HOME: /opt/coding-tools/pnpm
+      CUSTODIAN_WORKER_URL: http://host.docker.internal:8765
+      CUSTODIAN_API_TOKEN_FILE: /run/secrets/custodian_api_token
+    secrets:
+      - custodian_api_token
     volumes:
-      - .:/workspace
+      - ./todos.json:/app-data/todos.json:ro
+      - ./data/ocr/uploads:/app-data/ocr/uploads
       - ./data/coding-checkpoints:/deps/backend/data
-      - /Volumes/Storage:/Volumes/Storage
-      - ${HOME}:${HOME}
-      - ${HOME}/.jasper/macos-host-executor/public:/run/macos-host-executor:ro
-      - coding-tools:/opt/coding-tools
-    tmpfs:
-      - ${HOME}/.jasper
-      - ${HOME}/Library/Keychains
-      - ${HOME}/.ssh
-      - ${HOME}/.aws
-      - ${HOME}/.gnupg
-      - ${HOME}/.docker
-      - ${HOME}/.kube
-      - ${HOME}/.azure
-      - ${HOME}/.config/gcloud
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,7 +106,6 @@ services:
       args:
         NEXT_PUBLIC_API_URL: http://127.0.0.1:8123
         NEXT_PUBLIC_ASSISTANT_ID: chat_ui
-        NEXT_PUBLIC_DOCKER_BROKER_URL: http://127.0.0.1:8766/v1/coder/confirmations
     restart: unless-stopped
     ports:
       - "127.0.0.1:3002:3000"
@@ -135,8 +120,10 @@ services:
       timeout: 5s
       retries: 12
 
+secrets:
+  custodian_api_token:
+    file: ./backend/.custodian_api_token
+
 volumes:
   jasper-runtime-postgres:
-  coding-tools:
-    name: backend_coding-tools
   sidecar-huggingface-cache:

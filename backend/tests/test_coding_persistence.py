@@ -78,8 +78,18 @@ def test_session_id_accepts_runtime_uuid_identifiers(tmp_path):
 
 
 def test_pending_approval_resumes_after_checkpointer_restart(monkeypatch, tmp_path):
+    from deepagents.backends import FilesystemBackend
+
     from src import coding_agent
     from src.coding_persistence import CodingCheckpointerManager
+
+    monkeypatch.setattr(
+        coding_agent,
+        "CustodianBackend",
+        lambda workspace, read_only: FilesystemBackend(
+            root_dir=workspace, virtual_mode=True
+        ),
+    )
 
     database = tmp_path / "checkpoints.sqlite3"
     session_id = "coding-v1-restart-test"

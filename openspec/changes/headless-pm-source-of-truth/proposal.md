@@ -1,25 +1,28 @@
 ## Why
 
-Jasper needs a durable, human-editable project-management record without turning LangGraph checkpoints or the chat UI into a second PM database. A self-hosted PM engine can remain the headless source of truth while Jasper and TanStack provide safe projections, explanations, and links into the human's existing work.
+Jasper needs a durable, human-editable project-management record without turning LangGraph checkpoints or the chat UI into a second PM database. This change now selects self-hosted Plane as the headless project-management source of truth and Temporal as the durable workflow/orchestration component around integration work. Both remain separately operated services; neither changes the authority boundary of the LangGraph Agent Server.
 
 ## What Changes
 
-- Preserve a future architecture in which a self-hosted PM engine is Jasper's headless source of truth and its native browser UI remains available for complete human editing.
+- Select self-hosted Plane for authoritative PM records and its native browser UI for complete human editing.
+- Select self-hosted Temporal for durable, retryable, observable orchestration of future Plane synchronization and integration workflows; Temporal workflow state is not a copy of Plane records.
+- Define the dependency topology, persistence, trusted-network boundaries, configuration and secret policy, health/readiness acceptance contract, image/version/digest tracking, rollback, and verification work needed before implementation.
 - Define a clearly identified integration identity for Jasper, with attribution, auditability, previews, approval gates where appropriate, and conflict-aware edits.
 - Define TanStack/Jasper projections for lists, filters, lightweight tickets, links, timelines, node visualizations, and conversational explanation/prioritization.
-- Link OpenSpec changes and agent runs to PM records without duplicating the PM database in LangGraph checkpoints.
-- Explicitly defer vendor selection, PM-engine construction, integrations, dashboard implementation, and production migration.
+- Link OpenSpec changes and agent runs to PM records through bounded references without duplicating the PM database in LangGraph checkpoints or Temporal workflow state.
+- Distinguish local Docker Compose evaluation from production deployments with externalized managed dependencies.
+- Explicitly defer deployment files, vendor-specific integration code, production migration, exact image tags, endpoint contracts, and licensing or production guarantees that authoritative sources do not establish.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `headless-pm-source-of-truth`: Future contract for a self-hosted PM authority, human-native UI, attributed Jasper integration, safe projections, and cross-links to OpenSpec and agent runs.
+- `headless-pm-source-of-truth`: Future contract for self-hosted Plane authority, Temporal orchestration, human-native editing, attributed Jasper integration, safe projections, and cross-links to OpenSpec and agent runs.
 
 ### Modified Capabilities
 
-- None. `visualization-board-alignment` covers visual artifact presentation/editing, while `durable-interaction-records` covers durable interaction records and rebuildable projections; neither owns a PM system or its integration boundary.
+- None. `visualization-board-alignment` covers visual artifact presentation/editing, while `durable-interaction-records` covers durable interaction records and rebuildable projections; neither owns a PM system, Plane, Temporal, or their integration boundary.
 
 ## Impact
 
-Future work may affect PM integration APIs, identity and authorization, audit/revision records, TanStack projection views, OpenSpec/agent-run linking, and deep-link navigation. This proposal changes planning artifacts only and does not select a vendor, add a PM engine, create integrations, alter checkpoints, or implement a dashboard.
+Future work may affect Plane API integration, Temporal workflows and workers, identity and authorization, audit/revision records, TanStack projection views, OpenSpec/agent-run linking, and deep-link navigation. Plane commonly requires application services plus PostgreSQL, Redis, RabbitMQ, object storage, and a reverse proxy; Temporal requires a supported persistence database and may use Elasticsearch for visibility. These are planning inputs, not an approved topology or production guarantee. This proposal changes planning artifacts only: it does not install or start containers, add deployment files, create integrations, alter checkpoints, or implement a dashboard.

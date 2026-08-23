@@ -44,35 +44,14 @@ Repository `AGENTS.md` is loaded as read-only Deep Agents memory on each agent
 construction. Workspace-local `.agents/skills/` is loaded when present. Credential
 values remain only in the runtime environment or secret manager.
 
-## macOS host-operation durability
+## Custodian host-operation lifecycle
 
-Host operations cross three independently restarting domains without combining their
-sources of truth:
+Host requests are synchronous calls from the Agent Server to the Custodian worker. The
+Agent Server checkpoint remains the source of truth for the conversation and selected
+repository; the worker does not maintain a second repository-selection or approval
+record. Every request includes the exact selected repository path.
 
-- the Agent Server checkpoint owns the exact pending LangGraph interrupt and selected
-  repository;
-- the UI owns no durable authority and resumes through the ordinary `Command` decision;
-- `$HOME/.jasper/macos-host-executor/private/state` owns digest-keyed executor state,
-  request process identity, rollback accounting, and the private signing key.
-
-The executor uses a monotonic, single-use lifecycle. Concurrent attempts lock on the
-plan digest; duplicate approval, browser retry, or resume returns the same terminal
-signed receipt and never repeats a mutation. After restart, a pending/running uncertain
-mutation is not replayed silently. It is reported for human inspection or requires a
-new request. Cancellation and timeout address only the recorded request-owned process
-group; launcher shutdown signals only the exact PID and full command identity.
-
-Terminal receipts are redacted, non-secret persistence evidence. Only the read-only
-public verification key is visible to Docker. A verified successful receipt is the sole
-source of truth for a Mac effect; failed, partial, cancelled, expired, or unverifiable
-receipts preserve known mutations and rollback uncertainty without claiming recovery.
-Repository work and checkpoints remain usable when the executor was never installed.
-If it is installed but policy, integrity, identity, or health validation fails, core
-startup fails closed until the operator repairs or explicitly disables the feature.
-
-The installed runtime is an immutable, integrity-manifested snapshot outside writable
-repositories. Ordinary start/restart never updates it or runs a canary. The operator's
-private `policy.json` persists across explicit reinstalls and must be reviewed and pinned
-separately. Rollback/disable stops the exact executor, removes or moves the installation
-out of `$HOME/.jasper/macos-host-executor`, and restarts ordinary Coding; it does not
-rewrite checkpoints, receipts, local Git state, or substitute the selected workspace.
+A worker restart does not replay a previous request. Coder receives the result of the
+current call and must issue a new call if work remains. Command timeouts and process
+results are returned directly to the calling agent. Repository checkpoints remain
+independent from worker lifecycle.

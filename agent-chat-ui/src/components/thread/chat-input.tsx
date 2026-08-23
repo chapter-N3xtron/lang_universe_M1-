@@ -592,7 +592,7 @@ function ChatInputImpl({
                   setIsPickingWorkspace(true);
                   try {
                     const pickerUrl = new URL(
-                      "http://127.0.0.1:8000/api/fs/pick-folder",
+                      "http://127.0.0.1:8765/api/fs/pick-folder",
                     );
                     pickerUrl.searchParams.set(
                       "starting_path",
@@ -618,7 +618,7 @@ function ChatInputImpl({
                     console.error("[Repo picker] failed:", error);
                     toast.error("Could not open folder picker", {
                       description:
-                        "Check that the sidecar is running and macOS allows Finder access.",
+                        "Check that the host worker is running and macOS allows Finder access.",
                     });
                   } finally {
                     setIsPickingWorkspace(false);

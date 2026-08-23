@@ -3,7 +3,7 @@
 import importlib
 import json
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
@@ -98,10 +98,9 @@ def test_jasper_prompt_contains_versioned_interaction_governance():
     assert "Do not invent a standard or propose speculative coding" in prompt
     assert "model estimate, not an empirically calibrated probability" in prompt
     assert "Never search a parent, child, or sibling" in prompt
-    assert "Linux Agent Server container" in prompt
-    assert "request_macos_host_operation" in prompt
-    assert "For Docker or Docker Compose work" in prompt
-    assert "never use Mac inspection as a Docker preflight" in prompt
+    assert "exact selected repository through native Custodian" in prompt
+    assert "read_host_file" in prompt
+    assert "direct Custodian worker" in prompt
 
 
 @pytest.mark.asyncio
@@ -208,16 +207,14 @@ async def test_jasper_recovers_when_tool_loop_returns_empty_final_content():
     assert "unrequested next steps" in module.NO_SELF_RESPONSE_GUIDANCE
 
 
-def test_jasper_docker_handoff_uses_only_typed_sandbox_route():
+def test_jasper_docker_handoff_uses_direct_custodian_route():
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
 
     prompt = " ".join(module.SYSTEM_PROMPT.split())
-    assert "exactly one typed docker_sandbox action" in prompt
-    assert "request_docker_compose_operation" not in prompt
-    assert "do not replace the requested deployment with a preflight" in prompt
-    assert "typed host-operation interrupt remains the authority boundary" in prompt
-    assert "preserve that separation" in prompt
+    assert "Docker, Docker Compose, or other host-side changes" in prompt
+    assert "direct Custodian worker" in prompt
+    assert "do not replace the requested outcome with a preflight" in prompt
 
 
 @pytest.mark.asyncio
@@ -554,6 +551,57 @@ def test_exact_verified_model_override_is_used(monkeypatch):
     )
 
 
+def test_host_file_notice_precedes_token_bound_read():
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    client = MagicMock()
+    client.action.side_effect = [
+        {
+            "ok": True,
+            "path": "/Users/chapter/Documents/notes.txt",
+            "reason": "Read the notes requested by the human.",
+            "notice_token": "one-use-token",
+        },
+        {"ok": True, "content": "ordinary notes"},
+    ]
+
+    with (
+        patch.object(module, "_host_file_client", return_value=client),
+        patch.object(module, "push_ui_message") as push_notice,
+    ):
+        notice = module.announce_host_file_read.invoke(
+            {
+                "path": "/Users/chapter/Documents/notes.txt",
+                "reason": "Read the notes requested by the human.",
+            }
+        )
+        result = module.read_host_file.invoke({**notice, "max_chars": 12000})
+
+    assert client.action.call_args_list == [
+        call(
+            "preflight_host_file",
+            path="/Users/chapter/Documents/notes.txt",
+            reason="Read the notes requested by the human.",
+        ),
+        call(
+            "read_host_file",
+            path="/Users/chapter/Documents/notes.txt",
+            reason="Read the notes requested by the human.",
+            notice_token="one-use-token",
+            max_chars=12000,
+        ),
+    ]
+    push_notice.assert_called_once_with(
+        "host_file_notice",
+        {
+            "path": "/Users/chapter/Documents/notes.txt",
+            "reason": "Read the notes requested by the human.",
+        },
+        state_key="ui",
+    )
+    assert result == "ordinary notes"
+
+
 def test_jasper_delegates_web_access_to_librarian_without_direct_web_tools():
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
@@ -563,6 +611,8 @@ def test_jasper_delegates_web_access_to_librarian_without_direct_web_tools():
     assert [tool.name for tool in module.ACTIVE_TOOLS] == [
         "list_todos",
         "read_repository_file",
+        "announce_host_file_read",
+        "read_host_file",
         "draw_concept_map",
         "transfer_to_coding",
         "transfer_to_librarian",
@@ -583,6 +633,8 @@ def test_jasper_deep_agent_exposes_documented_tools_and_task(tmp_path):
         "list_todos",
         "ls",
         "read_file",
+        "announce_host_file_read",
+        "read_host_file",
         "read_repository_file",
         "task",
         "transfer_to_coding",
@@ -815,8 +867,17 @@ async def test_documented_handoff_tool_runs_top_level_coding_node(tmp_path):
     assert result["messages"][-1].content == "Jasper relayed the Coding result."
 
 
-def test_jasper_deep_agent_executes_builtin_repository_discovery(tmp_path):
+def test_jasper_deep_agent_executes_builtin_repository_discovery(monkeypatch, tmp_path):
     module = importlib.import_module("src.jasper_agent")
+    from deepagents.backends import FilesystemBackend
+
+    monkeypatch.setattr(
+        module,
+        "CustodianBackend",
+        lambda workspace, read_only: FilesystemBackend(
+            root_dir=workspace, virtual_mode=True
+        ),
+    )
     (tmp_path / "README.md").write_text("repository evidence")
     model = _plain_model(
         AIMessage(

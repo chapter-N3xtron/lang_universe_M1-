@@ -1,8 +1,10 @@
+import io
+import io
+import itertools
 import os
-import subprocess
-import tempfile
 from functools import lru_cache
 
+import av
 import numpy as np
 from faster_whisper import WhisperModel
 
@@ -18,101 +20,47 @@ def _get_model() -> WhisperModel:
 
 
 def _decode_to_pcm(audio_bytes: bytes) -> np.ndarray:
-    with tempfile.NamedTemporaryFile(suffix=".webm") as tmp:
-        tmp.write(audio_bytes)
-        tmp.flush()
-        proc = subprocess.Popen(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-loglevel",
-                "error",
-                "-seekable",
-                "0",
-                "-f",
-                "webm",
-                "-i",
-                tmp.name,
-                "-f",
-                "s16le",
-                "-ac",
-                "1",
-                "-ar",
-                str(SAMPLE_RATE),
-                "-",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        out, err = proc.communicate(timeout=30)
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {err.decode(errors='replace')}")
-    return np.frombuffer(out, dtype=np.int16).astype(np.float32) / 32768.0
+    resampler = av.audio.resampler.AudioResampler(
+        format="s16",
+        layout="mono",
+        rate=SAMPLE_RATE,
+    )
+    arrays: list[np.ndarray] = []
+    with av.open(
+        io.BytesIO(audio_bytes),
+        mode="r",
+        metadata_errors="ignore",
+    ) as container:
+        frames = container.decode(audio=0)
+        for frame in itertools.chain(frames, [None]):
+            if frame is not None:
+                frame.pts = None
+            for resampled in resampler.resample(frame):
+                arrays.append(resampled.to_ndarray())
+    if not arrays:
+        return np.empty(0, dtype=np.float32)
+    audio = np.concatenate(arrays, axis=1)[0]
+    return audio.astype(np.float32) / 32768.0
 
 
 def debug_decode(audio_bytes: bytes) -> dict:
-    """Run ffmpeg decode with full diagnostics. Never raises."""
+    """Run the bundled PyAV decoder with full diagnostics. Never raises."""
     result = {
         "input_size": len(audio_bytes),
         "input_first_bytes": audio_bytes[:64].hex() if audio_bytes else "",
         "input_last_bytes": audio_bytes[-64:].hex() if audio_bytes else "",
+        "decoder": "PyAV",
     }
     try:
-        proc = subprocess.Popen(
-            ["ffmpeg", "-version"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        out, _ = proc.communicate(timeout=10)
-        result["ffmpeg_version"] = out.decode(errors="replace").split("\n")[0]
-    except Exception as e:
-        result["ffmpeg_version"] = str(e)
-
-    with tempfile.NamedTemporaryFile(suffix=".webm") as tmp:
-        tmp.write(audio_bytes)
-        tmp.flush()
-        result["tmp_path"] = tmp.name
-        proc = subprocess.Popen(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-loglevel",
-                "error",
-                "-seekable",
-                "0",
-                "-f",
-                "webm",
-                "-i",
-                tmp.name,
-                "-f",
-                "s16le",
-                "-ac",
-                "1",
-                "-ar",
-                str(SAMPLE_RATE),
-                "-",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        try:
-            out, err = proc.communicate(timeout=30)
-            result["ffmpeg_returncode"] = proc.returncode
-            result["ffmpeg_stdout_size"] = len(out)
-            result["ffmpeg_stderr"] = err.decode(errors="replace")
-            if proc.returncode == 0:
-                audio = np.frombuffer(out, dtype=np.int16).astype(np.float32) / 32768.0
-                result["decoded_shape"] = list(audio.shape)
-                result["decoded_dtype"] = str(audio.dtype)
-                result["decoded_min"] = float(audio.min())
-                result["decoded_max"] = float(audio.max())
-                result["decoded_mean"] = float(audio.mean())
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            result["ffmpeg_returncode"] = -1
-            result["ffmpeg_stderr"] = "timeout"
-        except Exception as e:
-            result["ffmpeg_error"] = str(e)
+        audio = _decode_to_pcm(audio_bytes)
+        result["decoded_shape"] = list(audio.shape)
+        result["decoded_dtype"] = str(audio.dtype)
+        if audio.size:
+            result["decoded_min"] = float(audio.min())
+            result["decoded_max"] = float(audio.max())
+            result["decoded_mean"] = float(audio.mean())
+    except Exception as exc:
+        result["decode_error"] = str(exc)
     return result
 
 

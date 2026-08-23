@@ -9,15 +9,22 @@ workspace; Chat/Split/Visual presentation state is separate. See
 ## Components
 
 - `agent-chat-ui/`: Next.js 15 / React 19 chat UI.
-- `backend/src/chat_ui.py`: supervisor graph for Coding, Jasper, Research, and
+- `backend/src/chat_ui.py`: supervisor graph for Coding, Jasper, Librarian, and
   Magic Coder.
-- `backend/src/coding_agent.py`: durable Deep Agents coding subgraph.
-- `backend/src/secure_coding_tools.py`: approval-gated writes and allowlisted
-  workspace commands.
+- `backend/src/coding_agent.py`: durable Deep Agents coding subgraph that sends
+  repository work directly to native Custodian.
+- `backend/src/custodian_backend.py`: authenticated, repository-bound Deep Agents
+  filesystem bridge.
+- `backend/custodian_worker.py`: native macOS filesystem and bounded-command
+  boundary on port 8765.
+- `backend/custodian_orchestrator.py`: native Custodian orchestrator on port 8767.
 - `backend/src/coding_persistence.py`: isolated SQLite or Postgres checkpoints.
-- `backend/src/web_server.py`: local TTS, STT, model-list, session lifecycle,
-  todo, and folder-picker sidecar.
+- `backend/src/web_server.py`: local text-to-speech, speech-to-text, model-list,
+  session lifecycle, and todo sidecar.
 - `todos.json`: project task source of truth, governed by `AGENTS.md`.
+
+Coder has no executor or broker hop. Repository filesystem operations and typed
+commands go directly through Custodian.
 
 ## Coding providers
 
@@ -32,37 +39,27 @@ Model IDs use these prefixes:
 - `huggingface/org/model`
 
 `CODING_MODEL` selects the default. `CODING_MODELS` is an optional comma-separated
-list shown by the UI. Read-only mode is the default; mutation tools are exposed
-only in approval mode and every mutation pauses for human review.
+list shown by the UI. The browser initially selects approval mode; read-only and
+autonomous modes remain available. In approval mode, repository mutations pause for
+review. Autonomous repository work remains bounded by Custodian, while deployment-
+changing Compose actions require explicit approval.
 
 ## Run
 
-Backend graph:
+The canonical launcher starts native Custodian and the Docker-backed application:
 
 ```bash
-./start_image_pipeline.sh start
+./bttm_lock_start.command start
 ```
 
-The application UI requires the canonical Docker-backed Agent Server started by this
-launcher. It rejects `langgraph dev` and other unverified runtimes so an in-memory
-server on port 8123 cannot silently present a different thread catalog. Studio-only
-development servers must use a separate port and are not accepted by the application
-UI.
+The application is served at `http://127.0.0.1:3002`. The Agent Server uses port
+8123, the speech/model sidecar uses port 8000, native Custodian uses port 8765, and
+the native Custodian orchestrator uses port 8767. The application rejects
+`langgraph dev` and other unverified runtimes so a separate in-memory server cannot
+silently present a different thread catalog.
 
-Sidecar:
-
-```bash
-cd backend
-UV_CACHE_DIR=/tmp/deep-agent-uv-cache uv run uvicorn src.web_server:app --host 127.0.0.1 --port 8000
-```
-
-UI:
-
-```bash
-cd agent-chat-ui
-pnpm install
-pnpm dev
-```
+Starting this stack may build or recreate containers and must be an intentional
+operator action.
 
 ## Verification
 

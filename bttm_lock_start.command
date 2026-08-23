@@ -1,129 +1,117 @@
 #!/bin/zsh
-set -e
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-RUNTIME_ROOT="${ROOT}-bottom-locking-runtime"
-RUNTIME_BRANCH="refs/heads/stabilization/bottom-locking"
-ENV_SOURCE="$ROOT/backend/.env"
-RUNTIME_ENV="$RUNTIME_ROOT/backend/.env"
-UI_DIR="$RUNTIME_ROOT/agent-chat-ui"
-LOGDIR="$ROOT/logs"
-PIDDIR="$ROOT/.pids"
-UI_PORT=3002
 
-if [ ! -e "$RUNTIME_ROOT/.git" ] || [ ! -d "$UI_DIR" ]; then
-  echo "Clean bottom-locking runtime worktree not found at $RUNTIME_ROOT" >&2
-  exit 1
-fi
+CUSTODIAN_WORKER_PID="$ROOT/backend/.custodian_worker.pid"
+CUSTODIAN_ORCHESTRATOR_PID="$ROOT/backend/.custodian_orchestrator.pid"
+CUSTODIAN_WORKER_LOG="$ROOT/backend/logs/custodian_worker.log"
+CUSTODIAN_ORCHESTRATOR_LOG="$ROOT/backend/logs/custodian_orchestrator.log"
+CUSTODIAN_API_TOKEN_FILE="$ROOT/backend/.custodian_api_token"
 
-if [ ! -f "$ENV_SOURCE" ]; then
-  echo "Broker-held backend environment file not found at $ENV_SOURCE" >&2
-  exit 1
-fi
-chmod 600 "$ENV_SOURCE"
-if [ -L "$RUNTIME_ENV" ]; then
-  if [ "$(readlink "$RUNTIME_ENV")" != "$ENV_SOURCE" ]; then
-    echo "Runtime environment symlink points to an unexpected file; refusing startup." >&2
+ensure_custodian_token() {
+  if [ ! -e "$CUSTODIAN_API_TOKEN_FILE" ]; then
+    umask 077
+    /usr/bin/openssl rand -hex 32 > "$CUSTODIAN_API_TOKEN_FILE"
+  fi
+  chmod 600 "$CUSTODIAN_API_TOKEN_FILE"
+  if [ "$(wc -c < "$CUSTODIAN_API_TOKEN_FILE" | tr -d ' ')" -lt 32 ]; then
+    echo "Custodian authentication token is invalid." >&2
     exit 1
   fi
-elif [ -e "$RUNTIME_ENV" ]; then
-  echo "Runtime environment path is not the approved symlink; refusing startup." >&2
-  exit 1
-else
-  ln -s "$ENV_SOURCE" "$RUNTIME_ENV"
-fi
+  export CUSTODIAN_API_TOKEN_FILE
+}
 
-if [ -n "$(git -C "$RUNTIME_ROOT" status --porcelain)" ]; then
-  echo "Clean bottom-locking runtime worktree has local changes; refusing startup." >&2
-  exit 1
-fi
+wait_for_host_service() {
+  local port="$1"
+  local label="$2"
+  for _ in $(seq 1 15); do
+    if curl -fsS --connect-timeout 2 --max-time 3 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "${label} failed health check on :${port}." >&2
+  return 1
+}
 
-if ! command -v uv >/dev/null 2>&1; then
-  echo "uv is required to install the committed backend dependencies." >&2
-  exit 1
-fi
-
-mkdir -p "$LOGDIR" "$PIDDIR"
-runtime_commit="$(git -C "$ROOT" rev-parse "$RUNTIME_BRANCH")"
-git -C "$RUNTIME_ROOT" switch --quiet --detach "$runtime_commit"
-if ! git -C "$RUNTIME_ROOT" submodule update --init --recursive --no-fetch; then
-  echo "The pinned bottom-locking submodule commit is unavailable locally; refusing credentialed fetching." >&2
-  exit 1
-fi
-if ! uv sync --frozen --extra sidecar --project "$RUNTIME_ROOT/backend" \
-  >> "$LOGDIR/bottom-locking-backend-dependencies.log" 2>&1; then
-  echo "Committed backend dependency sync failed; check $LOGDIR/bottom-locking-backend-dependencies.log" >&2
-  exit 1
-fi
-
-rm "$RUNTIME_ENV"
-: > "$RUNTIME_ENV"
-chmod 600 "$RUNTIME_ENV"
-if ! (cd "$RUNTIME_ROOT/backend" && \
-  ./.venv/bin/langgraph build --no-pull -t jasper-langgraph:current) \
-  >> "$LOGDIR/bottom-locking-langgraph-build.log" 2>&1; then
-  rm -f "$RUNTIME_ENV"
-  ln -s "$ENV_SOURCE" "$RUNTIME_ENV"
-  echo "Committed LangGraph image build failed; check $LOGDIR/bottom-locking-langgraph-build.log" >&2
-  exit 1
-fi
-rm -f "$RUNTIME_ENV"
-ln -s "$ENV_SOURCE" "$RUNTIME_ENV"
-
-if ! command -v pnpm >/dev/null 2>&1; then
-  echo "pnpm is required to install the bottom-locking dependencies." >&2
-  exit 1
-fi
-cd "$UI_DIR"
-pnpm install --frozen-lockfile >> "$LOGDIR/bottom-locking-dependencies.log" 2>&1
-
-export SIDECAR_ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002"
-export DOCKER_BROKER_ALLOWED_ROOT="$ROOT"
-
-if ! "$RUNTIME_ROOT/start_image_pipeline.sh" restart-core; then
-  echo "Committed bottom-locking core services did not become ready; the UI was not started." >&2
-  exit 1
-fi
-
-NEXT_PUBLIC_API_URL="http://127.0.0.1:8123" \
-NEXT_PUBLIC_ASSISTANT_ID="chat_ui" \
-NEXT_PUBLIC_DOCKER_BROKER_URL="http://127.0.0.1:8766/v1/coder/confirmations" \
-  ./node_modules/.bin/next build >> "$LOGDIR/bottom-locking-frontend-build.log" 2>&1
-
-if [ -f "$PIDDIR/frontend.pid" ]; then
-  frontend_pid="$(cat "$PIDDIR/frontend.pid")"
-  if kill -0 "$frontend_pid" 2>/dev/null; then
-    kill "$frontend_pid" 2>/dev/null || true
+start_host_custodian() {
+  if curl -fsS --connect-timeout 2 "http://127.0.0.1:8765/health" >/dev/null 2>&1; then
+    echo "Custodian worker already running at :8765"
+  else
+    mkdir -p "$(dirname "$CUSTODIAN_WORKER_LOG")"
+    if [ -x "$ROOT/backend/.venv/bin/python" ]; then
+      (
+        cd "$ROOT/backend"
+        nohup ./.venv/bin/python custodian_worker.py >> "$CUSTODIAN_WORKER_LOG" 2>&1 &
+        echo $! > "$CUSTODIAN_WORKER_PID"
+      )
+      echo "Started custodian worker (pid $(cat "$CUSTODIAN_WORKER_PID"))"
+    else
+      echo "Warning: virtualenv python not found at backend/.venv/bin/python; attempting system python"
+      (
+        cd "$ROOT/backend"
+        nohup python3 custodian_worker.py >> "$CUSTODIAN_WORKER_LOG" 2>&1 &
+        echo $! > "$CUSTODIAN_WORKER_PID"
+      )
+      echo "Started custodian worker with system python (pid $(cat "$CUSTODIAN_WORKER_PID"))"
+    fi
   fi
-  rm -f "$PIDDIR/frontend.pid"
-fi
-lsof -nP -tiTCP:3001 -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
 
-if [ -f "$PIDDIR/bottom-locking-frontend.pid" ]; then
-  bottom_pid="$(cat "$PIDDIR/bottom-locking-frontend.pid")"
-  if kill -0 "$bottom_pid" 2>/dev/null; then
-    kill "$bottom_pid" 2>/dev/null || true
+  if curl -fsS --connect-timeout 2 "http://127.0.0.1:8767/health" >/dev/null 2>&1; then
+    echo "Custodian orchestrator already running at :8767"
+  else
+    mkdir -p "$(dirname "$CUSTODIAN_ORCHESTRATOR_LOG")"
+    if [ -x "$ROOT/backend/.venv/bin/python" ]; then
+      (
+        cd "$ROOT/backend"
+        nohup ./.venv/bin/python custodian_orchestrator.py >> "$CUSTODIAN_ORCHESTRATOR_LOG" 2>&1 &
+        echo $! > "$CUSTODIAN_ORCHESTRATOR_PID"
+      )
+      echo "Started custodian orchestrator (pid $(cat "$CUSTODIAN_ORCHESTRATOR_PID"))"
+    else
+      (
+        cd "$ROOT/backend"
+        nohup python3 custodian_orchestrator.py >> "$CUSTODIAN_ORCHESTRATOR_LOG" 2>&1 &
+        echo $! > "$CUSTODIAN_ORCHESTRATOR_PID"
+      )
+      echo "Started custodian orchestrator with system python (pid $(cat "$CUSTODIAN_ORCHESTRATOR_PID"))"
+    fi
   fi
-  rm -f "$PIDDIR/bottom-locking-frontend.pid"
-fi
-lsof -nP -tiTCP:"$UI_PORT" -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
+  wait_for_host_service 8765 "Custodian worker"
+  wait_for_host_service 8767 "Custodian orchestrator"
+}
 
-nohup env \
-  NEXT_PUBLIC_API_URL="http://127.0.0.1:8123" \
-  NEXT_PUBLIC_ASSISTANT_ID="chat_ui" \
-  NEXT_PUBLIC_DOCKER_BROKER_URL="http://127.0.0.1:8766/v1/coder/confirmations" \
-  ./node_modules/.bin/next start -p "$UI_PORT" \
-  >> "$LOGDIR/bottom-locking-frontend.log" 2>&1 &
-echo $! > "$PIDDIR/bottom-locking-frontend.pid"
-disown
-
-for _ in {1..60}; do
-  if lsof -nP -tiTCP:"$UI_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-    open -a "Brave Browser" "http://127.0.0.1:$UI_PORT/"
-    exit 0
+stop_host_custodian() {
+  if [ -f "$CUSTODIAN_WORKER_PID" ]; then
+    kill "$(cat "$CUSTODIAN_WORKER_PID")" 2>/dev/null || true
+    rm -f "$CUSTODIAN_WORKER_PID"
   fi
-  sleep 1
-done
+  if [ -f "$CUSTODIAN_ORCHESTRATOR_PID" ]; then
+    kill "$(cat "$CUSTODIAN_ORCHESTRATOR_PID")" 2>/dev/null || true
+    rm -f "$CUSTODIAN_ORCHESTRATOR_PID"
+  fi
+  lsof -nP -tiTCP:8765 -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
+  lsof -nP -tiTCP:8767 -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
+}
 
-echo "Bottom-locking UI failed to start; check $LOGDIR/bottom-locking-frontend.log" >&2
-exit 1
+case "${1:-start}" in
+  start)
+    ensure_custodian_token
+    start_host_custodian
+    exec "$ROOT/docker-stack.command" "$@"
+    ;;
+  stop)
+    stop_host_custodian
+    exec "$ROOT/docker-stack.command" "$@"
+    ;;
+  restart)
+    stop_host_custodian
+    ensure_custodian_token
+    start_host_custodian
+    exec "$ROOT/docker-stack.command" start
+    ;;
+  *)
+    exec "$ROOT/docker-stack.command" "$@"
+    ;;
+esac

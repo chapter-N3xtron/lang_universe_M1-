@@ -2438,7 +2438,6 @@ name = "langgraph-agent-chat-deep-agents"
 version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "cryptography" },
     { name = "deepagents" },
     { name = "fastapi" },
     { name = "firecrawl-py" },
@@ -2469,8 +2468,11 @@ dev = [
     { name = "ruff" },
 ]
 sidecar = [
+    { name = "av" },
     { name = "beautifulsoup4" },
+    { name = "defusedxml" },
     { name = "faster-whisper" },
+    { name = "huggingface-hub" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "odfpy" },
@@ -2480,8 +2482,10 @@ sidecar = [
     { name = "python-docx" },
     { name = "python-multipart" },
     { name = "python-pptx" },
+    { name = "safetensors" },
     { name = "soundfile" },
     { name = "striprtf" },
+    { name = "torch" },
 ]
 
 [package.dev-dependencies]
@@ -2492,12 +2496,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "av", marker = "extra == 'sidecar'", specifier = ">=13,<19" },
     { name = "beautifulsoup4", marker = "extra == 'sidecar'", specifier = ">=4.14,<5" },
-    { name = "cryptography", specifier = ">=49.0.0" },
     { name = "deepagents", specifier = "==0.7.0b2" },
+    { name = "defusedxml", marker = "extra == 'sidecar'", specifier = ">=0.7,<1" },
     { name = "fastapi", specifier = ">=0.115.0,<1" },
     { name = "faster-whisper", marker = "extra == 'sidecar'", specifier = ">=1.0.0" },
     { name = "firecrawl-py", specifier = ">=1.0.0" },
+    { name = "huggingface-hub", marker = "extra == 'sidecar'", specifier = ">=0.20,<1" },
     { name = "langchain", specifier = ">=1.3.14,<2" },
     { name = "langchain-core", specifier = ">=0.3.66" },
     { name = "langchain-huggingface", specifier = ">=1.2.2,<2" },
@@ -2525,9 +2531,11 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'sidecar'", specifier = ">=0.0.20" },
     { name = "python-pptx", marker = "extra == 'sidecar'", specifier = ">=1,<2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
+    { name = "safetensors", marker = "extra == 'sidecar'", specifier = ">=0.4,<1" },
     { name = "soundfile", marker = "extra == 'sidecar'", specifier = ">=0.12.0" },
     { name = "striprtf", marker = "extra == 'sidecar'", specifier = ">=0.0.29,<1" },
     { name = "tavily-python", specifier = ">=0.3.0,<1" },
+    { name = "torch", marker = "extra == 'sidecar'", specifier = ">=2.0,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0,<1" },
 ]
 provides-extras = ["sidecar", "dev"]

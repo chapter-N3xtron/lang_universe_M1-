@@ -1,37 +1,15 @@
 services:
   langgraph-api:
     volumes:
-      - ..:/workspace
-      - /Volumes/Storage:/Volumes/Storage
-      - ${HOME}:${HOME}
-      - ${HOME}/.jasper/macos-host-executor/public:/run/macos-host-executor:ro
-      - coding-tools:/opt/coding-tools
-    # The broad home mount preserves exact selected paths. Shadow every known
-    # credential/private executor location; Docker receives only the public key
-    # directory above and never executor control, state, staging, or signing data.
-    tmpfs:
-      - ${HOME}/.jasper
-      - ${HOME}/Library/Keychains
-      - ${HOME}/.ssh
-      - ${HOME}/.aws
-      - ${HOME}/.gnupg
-      - ${HOME}/.config/gh
-      - ${HOME}/.docker
-      - ${HOME}/.kube
-      - ${HOME}/.azure
-      - ${HOME}/.config/gcloud
+      - ../todos.json:/app-data/todos.json:ro
+      - ../data/ocr/uploads:/app-data/ocr/uploads
+      - ../data/coding-checkpoints:/deps/backend/data
     environment:
-      - AGENT_WORKSPACE=/workspace
-      - TODOS_FILE=/workspace/todos.json
+      - AGENT_WORKSPACE=/app-data
+      - TODOS_FILE=/app-data/todos.json
+      - OCR_UPLOAD_DIR=/app-data/ocr/uploads
       - CODING_OLLAMA_BASE_URL=http://host.docker.internal:11434
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - SESSION_RUNTIME_MODE=durable
       - SESSION_RUNTIME_ID=backend-postgres-v1
-      - MACOS_HOST_EXECUTOR_URL=http://host.docker.internal:8765
-      - MACOS_HOST_EXECUTOR_PUBLIC_KEY_FILE=/run/macos-host-executor/receipt-signing.pub
-      - DOCKER_BROKER_URL=http://host.docker.internal:8766
-      - NPM_CONFIG_PREFIX=/opt/coding-tools/node
-      - PNPM_HOME=/opt/coding-tools/pnpm
-
-volumes:
-  coding-tools:
+      - CUSTODIAN_WORKER_URL=http://host.docker.internal:8765

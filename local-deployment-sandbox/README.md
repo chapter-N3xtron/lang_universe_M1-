@@ -1,6 +1,6 @@
-# Local Plane + Temporal topology (prepared, not started)
+# Local Plane + Temporal topology
 
-This directory is a sandbox deployment plan. It was **not started**: the Linux agent container has no `docker`, `podman`, or `nerdctl` executable. No macOS/host operation was attempted, and no host software was installed or changed.
+This directory is the first, local-only deployment step for self-hosted Plane and Temporal. Plane remains the project-management authority and Temporal remains workflow infrastructure. Neither is connected to the LangGraph Agent Server in this phase. The Docker sandbox is the only approved runtime route; the signed host receipt is the authority for actual startup and resolved image digests.
 
 ## Contents
 
@@ -12,11 +12,11 @@ This directory is a sandbox deployment plan. It was **not started**: the Linux a
 
 ## Preconditions before activation
 
-1. Install/enable an approved container runtime outside this sandbox and confirm Docker Compose support.
-2. Reconcile the Plane services, migrations, workers, and environment variables with the exact official Plane release compose file. The compact Plane service set here is intentionally not claimed as production-complete.
-3. Resolve and record image digests in `source-revisions.md`; inspect any downloaded compose/source before use.
+1. Use the approved Docker sandbox route with `compose.yaml` as the bound Compose file.
+2. Use the selected Plane release inputs and the documented dependency topology here; this is not a claim that local Compose is production-complete.
+3. Record resolved image digests and the signed runtime receipt in the deployment record before treating the run as release evidence.
 4. Check disk, memory, and that ports 8080, 7233, 8088, and 8090 are free.
-5. Create a local `.env` from `.env.example` with unique random local database passwords. Do not add credentials to Git.
+5. Create a local `.env` from `.env.example` with unique random local database and object-storage passwords. Do not add credentials to Git.
 
 ## Commands (after preconditions)
 

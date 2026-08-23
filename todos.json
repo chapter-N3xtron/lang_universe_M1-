@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-14T14:12:01Z",
+  "updated_at": "2026-08-23T02:45:16Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2637,6 +2637,204 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": "Implementation has not started. The current frontend is listening, while the Agent Server and both specialist backends remain unavailable because the backend deployment is stopped. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "plane-temporal-container-foundation",
+      "title": "Plane and Temporal Container Foundation",
+      "created_at": "2026-08-14T15:00:00Z",
+      "planned_by_model": "openai/gpt-5.6-sol",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "locate-and-review-pm-workflow-change",
+          "content": "Locate the open OpenSpec change covering Plane and Temporal installation, read its relevant proposal, specification, design, and task files, and report authorization and status.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-14T15:06:00Z",
+          "notes": "Reviewed /openspec/changes/headless-pm-source-of-truth/{proposal.md,design.md,specs/headless-pm-source-of-truth/spec.md,tasks.md}. The change explicitly defers vendor selection, PM-engine construction, integrations, and migration; its tasks are future planning only and remain 0/5 complete. It does not authorize Plane or Temporal installation. The local deployment sandbox is a separate prepared plan, not an OpenSpec authorization."
+        },
+        {
+          "id": "build-plane-temporal-container-foundation",
+          "content": "If the reviewed specification clearly authorizes the first step, build/install only the Plane and Temporal Docker images/configuration without wiring them to the LangGraph Agent Server, then run repository-local verification.",
+          "status": "superseded",
+          "agent": null,
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Superseded for this session because the reviewed OpenSpec change explicitly prohibits implementation under this planning change; requires a later explicitly authorized implementation change."
+        },
+        {
+          "id": "BLOCKER-pm-temporal-installation-not-authorized",
+          "content": "BLOCKER: Obtain a later explicitly authorized OpenSpec implementation change that selects and authorizes Plane and Temporal before container build or activation.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "The current change's proposal, design, and task list explicitly defer PM-engine construction and vendor selection."
+        },
+        {
+          "id": "report-plane-temporal-foundation",
+          "content": "Report completion, exact specification path, changed files, verification, and blockers or questions.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-14T15:07:00Z",
+          "notes": "Reported that no container work was authorized or performed; todos.json is the only file changed by this session."
+        }
+      ]
+    },
+    {
+      "id": "update-headless-pm-source-of-truth",
+      "title": "Update Headless Project-Management Source of Truth",
+      "created_at": "2026-08-23T02:02:18Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "review-headless-pm-openspec",
+          "content": "Review the existing headless-pm-source-of-truth OpenSpec artifacts and repository conventions against the requested Plane and Temporal research.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-23T02:03:29Z",
+          "notes": "Reviewed the existing change artifacts and repository task conventions; the OpenSpec CLI is not installed in the container."
+        },
+        {
+          "id": "revise-headless-pm-openspec-artifacts",
+          "content": "Revise only proposal.md, design.md, the relevant spec.md, and tasks.md to capture self-hosted Plane and Temporal roles, dependencies, persistence, boundaries, configuration, readiness, image tracking, integration, rollback, verification, and local-versus-production decisions.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-23T02:03:29Z",
+          "notes": "Revised only the four requested OpenSpec artifacts to select self-hosted Plane and Temporal and capture dependencies, persistence, boundaries, configuration, readiness, provenance, integration, rollback, and local-versus-production tasks."
+        },
+        {
+          "id": "validate-headless-pm-openspec",
+          "content": "Validate the revised OpenSpec change and report exact files changed and verification results without installing or starting containers.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-23T02:03:29Z",
+          "notes": "Ran diff whitespace validation and focused OpenSpec content/reference checks; no containers or deployment commands were run."
+        }
+      ]
+    },
+    {
+      "id": "implement-headless-pm-source-of-truth",
+      "title": "Implement Headless Project-Management Deployment Foundation",
+      "created_at": "2026-08-23T02:18:34Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "read-validated-pm-artifacts",
+          "content": "Read the validated headless-pm-source-of-truth proposal, design, specification, and tasks, then confirm the authorized deployment scope.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-23T02:20:23Z",
+          "notes": "Read proposal.md, design.md, the capability spec, and tasks.md; confirmed the first deployment step is separate local Compose infrastructure with no LangGraph integration."
+        },
+        {
+          "id": "create-pm-deployment-artifacts",
+          "content": "Create or update repository Docker Compose and deployment artifacts for separate self-hosted Plane and Temporal services, including documented dependencies, persistence, internal networking, configuration and secret boundaries, readiness checks, provenance, and rollback.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-23T02:20:23Z",
+          "notes": "Updated local-deployment-sandbox Compose, documentation, source manifest, and generated an ignored per-deployment .env with random local credentials."
+        },
+        {
+          "id": "validate-pm-repository",
+          "content": "Run OpenSpec 1.7.0 strict non-interactive validation and repository-local verification after implementation.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5",
+          "completed_at": "2026-08-23T02:20:23Z",
+          "notes": "OpenSpec 1.7.0 strict non-interactive validation passed with --no-interactive; Compose YAML parsing, required-service checks, and git diff whitespace checks passed."
+        },
+        {
+          "id": "deploy-and-verify-pm-services",
+          "content": "Use the approved Docker sandbox route to create, build or pull, start, and verify the authorized Plane and Temporal services and their connectivity.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Prepared for the single approved Docker sandbox host operation; no Linux Docker command used."
+        },
+        {
+          "id": "publish-pm-implementation",
+          "content": "Inspect repository authorization for GitHub publication, then commit and push the implementation only if explicitly authorized and credentials are available without inspecting secrets.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": ""
+        },
+        {
+          "id": "report-pm-completion",
+          "content": "Report changed files, service status, verification, publication result, and exact blockers truthfully.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "retry-headless-pm-deployment",
+      "title": "Retry Headless PM Deployment",
+      "created_at": "2026-08-23T02:45:16Z",
+      "planned_by_model": "openai/gpt-5",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "inspect-validated-change-and-tree",
+          "content": "Inspect validated OpenSpec change headless-pm-source-of-truth and current working tree; reconcile its planning-only scope with the requested deployment work.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": ""
+        },
+        {
+          "id": "implement-supported-deployment-requirements",
+          "content": "Implement only deployment requirements explicitly authorized by the validated change and existing repository conventions; do not invent unsupported Plane or Temporal details.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": ""
+        },
+        {
+          "id": "validate-and-run-local-checks",
+          "content": "Run strict OpenSpec validation and relevant local checks; record precise failures without exposing secrets.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": ""
+        },
+        {
+          "id": "docker-deployment-verification",
+          "content": "Use the single permitted typed Docker sandbox action to create/start and verify required services if authorized and available; otherwise record the exact blocker.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": ""
+        },
+        {
+          "id": "report-completion-and-blockers",
+          "content": "Report files changed, validation and deployment results, and any authorization or tool blockers; do not commit or push without explicit authorization and credentials.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": ""
         }
       ]
     }

@@ -196,6 +196,13 @@ function MessageListImpl({
     );
     return reports[reports.length - 1];
   }, [stream.values?.ui]);
+  const hostFileNotices = useMemo(
+    () =>
+      (stream.values?.ui ?? []).filter(
+        (component) => component.name === "host_file_notice",
+      ),
+    [stream.values?.ui],
+  );
   let windowStart = Math.max(0, renderableMessages.length - visibleLimit);
   while (windowStart > 0 && renderableMessages[windowStart]?.type === "tool") {
     windowStart -= 1;
@@ -271,6 +278,28 @@ function MessageListImpl({
           hasCustomComponent={false}
         />
       )}
+      {hostFileNotices.map((notice) => {
+        const path =
+          typeof notice.props.path === "string"
+            ? notice.props.path
+            : "Unknown path";
+        const reason =
+          typeof notice.props.reason === "string"
+            ? notice.props.reason
+            : "No reason supplied";
+        return (
+          <aside
+            key={notice.id}
+            role="status"
+            className="bg-muted/40 mx-auto w-full max-w-3xl rounded-lg border px-4 py-3 text-sm"
+          >
+            <p className="font-medium">Host file notice</p>
+            <p className="text-muted-foreground mt-1">Jasper needs to read:</p>
+            <code className="mt-1 block break-all">{path}</code>
+            <p className="text-muted-foreground mt-2">Reason: {reason}</p>
+          </aside>
+        );
+      })}
       {coderProgressReport && (
         <CoderProgressReport props={coderProgressReport.props} />
       )}

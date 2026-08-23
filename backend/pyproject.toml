@@ -25,14 +25,16 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "langchain-openai>=1.4,<2",
     "open-deep-research",
-    "cryptography>=49.0.0",
 ]
 
 [project.optional-dependencies]
 sidecar = [
     "soundfile>=0.12.0",
     "numpy>=1.26.0,<3",
+    "av>=13,<19",
+    "defusedxml>=0.7,<1",
     "faster-whisper>=1.0.0",
+    "huggingface-hub>=0.20,<1",
     "python-multipart>=0.0.20",
     "pypdf>=6,<7",
     "python-docx>=1.2,<2",
@@ -42,6 +44,8 @@ sidecar = [
     "striprtf>=0.0.29,<1",
     "beautifulsoup4>=4.14,<5",
     "pocket-tts==2.1.0",
+    "safetensors>=0.4,<1",
+    "torch>=2.0,<3",
 ]
 dev = [
     "ruff>=0.8.0",

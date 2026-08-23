@@ -4,3 +4,6 @@
 
 # Test environment
 .testenv/
+
+# Local Custodian capability
+.custodian_api_token

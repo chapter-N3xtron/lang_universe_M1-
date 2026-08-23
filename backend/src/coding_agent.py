@@ -72,13 +72,6 @@ _SESSION_AGENT_CACHE_SIZE = 8
 _CODING_TOOL_PATHS = ("/opt/coding-tools/node/bin", "/opt/coding-tools/pnpm")
 _CODING_PROGRESS_INTERVAL_SECONDS = 15 * 60
 
-_HOST_OPERATION_INTERRUPT = {
-    "allowed_decisions": ["approve", "reject"],
-    "description": (
-        "Review this exact macOS host-operation plan. Approval only resumes receipt "
-        "verification; host execution is independently confirmed outside Coding."
-    ),
-}
 _LOCAL_APPROVAL_INTERRUPT_ON = {
     "write_file": {
         "allowed_decisions": ["approve", "edit", "reject"],
@@ -189,15 +182,8 @@ def _build_deep_agent(
     tools = []
     if host_tool_enabled and operator_config is not None:
         tools.append(create_request_macos_host_operation_tool(operator_config))
-    broker_interrupts = (
-        {"request_macos_host_operation": _HOST_OPERATION_INTERRUPT}
-        if host_tool_enabled
-        else {}
-    )
     if approval_mode:
-        interrupt_on = {**_LOCAL_APPROVAL_INTERRUPT_ON, **broker_interrupts}
-    elif autonomous_mode and broker_interrupts:
-        interrupt_on = broker_interrupts
+        interrupt_on = _LOCAL_APPROVAL_INTERRUPT_ON
     else:
         interrupt_on = None
     if approval_mode:

@@ -1,0 +1,142 @@
+name: jasper-runtime
+
+services:
+  langgraph-api:
+    image: jasper-langgraph:current
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8123:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      LANGGRAPH_API_URL: http://localhost:8000
+      POSTGRES_URI: postgresql://postgres:postgres@postgres:5432/postgres
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      REDIS_URI: redis://redis:6379
+      REDIS_URL: redis://redis:6379
+      AGENT_WORKSPACE: /workspace
+      TODOS_FILE: /workspace/todos.json
+      OCR_UPLOAD_DIR: /workspace/data/ocr/uploads
+      SESSION_RUNTIME_MODE: durable
+      SESSION_RUNTIME_ID: backend-postgres-v1
+      CODING_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      MACOS_HOST_EXECUTOR_URL: http://host.docker.internal:8765
+      MACOS_HOST_EXECUTOR_PUBLIC_KEY_FILE: /run/macos-host-executor/receipt-signing.pub
+      DOCKER_BROKER_URL: http://host.docker.internal:8766
+      NPM_CONFIG_PREFIX: /opt/coding-tools/node
+      PNPM_HOME: /opt/coding-tools/pnpm
+    volumes:
+      - .:/workspace
+      - ./data/coding-checkpoints:/deps/backend/data
+      - /Volumes/Storage:/Volumes/Storage
+      - ${HOME}:${HOME}
+      - ${HOME}/.jasper/macos-host-executor/public:/run/macos-host-executor:ro
+      - coding-tools:/opt/coding-tools
+    tmpfs:
+      - ${HOME}/.jasper
+      - ${HOME}/Library/Keychains
+      - ${HOME}/.ssh
+      - ${HOME}/.aws
+      - ${HOME}/.gnupg
+      - ${HOME}/.docker
+      - ${HOME}/.kube
+      - ${HOME}/.azure
+      - ${HOME}/.config/gcloud
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/info')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  sidecar:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.sidecar
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      SIDECAR_ALLOWED_ORIGINS: http://localhost:3002,http://127.0.0.1:3002
+      TODOS_FILE: /app/todos.json
+      OCR_UPLOAD_DIR: /app/data/ocr/uploads
+      CODING_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - ./backend/voices:/app/voices:ro
+      - ./todos.json:/app/todos.json:ro
+      - ./data/ocr/uploads:/app/data/ocr/uploads
+      - sidecar-huggingface-cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health'); models=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/models')); voices=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/tts/voices')); assert models.get('models') and voices.get('voices')"]
+      interval: 10s
+      timeout: 60s
+      retries: 12
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - jasper-runtime-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:6
+    working_dir: /tmp
+    command: ["redis-server", "--dir", "/data"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    image: jasper-runtime-frontend:latest
+    build:
+      context: ./agent-chat-ui
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:8123
+        NEXT_PUBLIC_ASSISTANT_ID: chat_ui
+        NEXT_PUBLIC_DOCKER_BROKER_URL: http://127.0.0.1:8766/v1/coder/confirmations
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3002:3000"
+    depends_on:
+      langgraph-api:
+        condition: service_healthy
+      sidecar:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  jasper-runtime-postgres:
+  coding-tools:
+    name: backend_coding-tools
+  sidecar-huggingface-cache:

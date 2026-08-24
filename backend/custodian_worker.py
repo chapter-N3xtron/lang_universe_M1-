@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import base64
+import binascii
 import fnmatch
 import hashlib
 import hmac
@@ -14,10 +16,12 @@ import subprocess
 import tempfile
 import threading
 import time
+import zipfile
 from datetime import UTC, datetime
 from html import escape
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
@@ -30,6 +34,9 @@ WORKSPACES_DIR = BASE_DIR / "workspaces"
 ACTIVE_WORKSPACE_PATH = BASE_DIR / "active_workspace.txt"
 REPOS_DIR = BASE_DIR / "repos"
 SELECTED_REPO_PATH = BASE_DIR / "selected_repo.txt"
+OCR_UPLOAD_DIR = (BASE_DIR.parent / "data" / "ocr" / "uploads").resolve()
+MAX_OCR_DOCUMENT_BYTES = 25 * 1024 * 1024
+MAX_OCR_OUTPUT_BYTES = 25 * 1024 * 1024
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -37,7 +44,11 @@ def load_env(path: Path) -> dict[str, str]:
     if not path.exists():
         return values
     for raw_line in path.read_text().splitlines():
-        if not raw_line.strip() or raw_line.lstrip().startswith("#") or "=" not in raw_line:
+        if (
+            not raw_line.strip()
+            or raw_line.lstrip().startswith("#")
+            or "=" not in raw_line
+        ):
             continue
         key, value = raw_line.split("=", 1)
         value = value.rstrip("\r")
@@ -73,7 +84,12 @@ API_TOKEN_FILE = Path(
 _NOTICE_TTL_SECONDS = 300
 _NOTICE_LOCK = threading.Lock()
 _PENDING_HOST_FILE_NOTICES: dict[str, tuple[str, str, float]] = {}
-RG_BIN = shutil.which("rg") or "/Users/shadwell/.vscode/extensions/openai.chatgpt-26.506.31421-darwin-arm64/bin/macos-aarch64/rg"
+RG_BIN = (
+    shutil.which("rg")
+    or "/Users/shadwell/.vscode/extensions/openai.chatgpt-26.506.31421-darwin-arm64/bin/macos-aarch64/rg"
+)
+
+
 def api_token() -> str:
     value = ENV.get("CUSTODIAN_API_TOKEN", "").strip()
     if value:
@@ -188,7 +204,9 @@ def run_command(args: list[str], cwd: Path | None = None) -> dict:
     }
 
 
-def run_command_input(args: list[str], input_text: str, cwd: Path | None = None, timeout: int = 30) -> dict:
+def run_command_input(
+    args: list[str], input_text: str, cwd: Path | None = None, timeout: int = 30
+) -> dict:
     cwd = cwd or selected_root()
     result = subprocess.run(
         args,
@@ -313,7 +331,10 @@ def tree_lines(root: Path, include_dirs: list[str], max_depth: int = 3) -> list[
         if not start.exists() or not start.is_dir():
             continue
         lines.append(f"{rel_dir}/")
-        for item in sorted(start.rglob("*"), key=lambda p: (len(p.relative_to(start).parts), str(p).lower())):
+        for item in sorted(
+            start.rglob("*"),
+            key=lambda p: (len(p.relative_to(start).parts), str(p).lower()),
+        ):
             if is_ignored_path(item, root):
                 continue
             depth = len(item.relative_to(start).parts)
@@ -328,7 +349,9 @@ def tree_lines(root: Path, include_dirs: list[str], max_depth: int = 3) -> list[
 def read_key_files(root: Path, paths: list[str], max_chars: int = 3500) -> list[str]:
     sections: list[str] = []
     for rel in paths:
-        matches = sorted(root.glob(rel)) if any(ch in rel for ch in "*?[") else [root / rel]
+        matches = (
+            sorted(root.glob(rel)) if any(ch in rel for ch in "*?[") else [root / rel]
+        )
         for path in matches:
             if not path.exists() or not path.is_file() or is_ignored_path(path, root):
                 continue
@@ -407,9 +430,7 @@ SKIP_NAMES = {
 }
 
 
-SKIP_PREFIXES = (
-    "gemini-session-",
-)
+SKIP_PREFIXES = ("gemini-session-",)
 
 
 def redact_text(text: str) -> str:
@@ -497,23 +518,45 @@ FORBIDDEN_HOST_READ_SUFFIXES = {
 
 FORBIDDEN_TERMINAL_PATTERNS = [
     (re.compile(r"\brm\s+-rf\s+/", re.I), "Refusing host-wide destructive removal."),
-    (re.compile(r"\bsudo\b", re.I), "Refusing sudo from the Custodian terminal action."),
+    (
+        re.compile(r"\bsudo\b", re.I),
+        "Refusing sudo from the Custodian terminal action.",
+    ),
     (re.compile(r"\bgit\s+reset\s+--hard\b", re.I), "Refusing destructive git reset."),
-    (re.compile(r"\bgit\s+clean\s+-[^\s]*[fd]", re.I), "Refusing destructive git clean."),
-    (re.compile(r"\bsecurity\s+find-generic-password\b", re.I), "Refusing macOS keychain reads."),
-    (re.compile(r"\b(cat|less|more|head|tail|open)\s+([^;&|]*\/)?\.env(\s|$)", re.I), "Refusing direct .env reads."),
-    (re.compile(r"\b(cat|less|more|head|tail|open)\s+.*\.(pem|key|p12|pfx)(\s|$)", re.I), "Refusing direct key material reads."),
+    (
+        re.compile(r"\bgit\s+clean\s+-[^\s]*[fd]", re.I),
+        "Refusing destructive git clean.",
+    ),
+    (
+        re.compile(r"\bsecurity\s+find-generic-password\b", re.I),
+        "Refusing macOS keychain reads.",
+    ),
+    (
+        re.compile(r"\b(cat|less|more|head|tail|open)\s+([^;&|]*\/)?\.env(\s|$)", re.I),
+        "Refusing direct .env reads.",
+    ),
+    (
+        re.compile(
+            r"\b(cat|less|more|head|tail|open)\s+.*\.(pem|key|p12|pfx)(\s|$)", re.I
+        ),
+        "Refusing direct key material reads.",
+    ),
 ]
 
 
 def assert_repo_write_allowed(path: Path, root: Path) -> None:
     rel = path.relative_to(root)
-    if any(part in {".git", "__pycache__", "node_modules", ".venv", "venv"} for part in rel.parts):
+    if any(
+        part in {".git", "__pycache__", "node_modules", ".venv", "venv"}
+        for part in rel.parts
+    ):
         raise ValueError("Refusing to write inside ignored/internal repo path.")
     if path.name in FORBIDDEN_WRITE_NAMES or path.suffix in FORBIDDEN_WRITE_SUFFIXES:
         raise ValueError("Refusing to write secret/key material paths.")
     if path.match("searxng/settings.yml"):
-        raise ValueError("Refusing to write live local SearXNG config through the repo tool.")
+        raise ValueError(
+            "Refusing to write live local SearXNG config through the repo tool."
+        )
 
 
 def assert_terminal_command_allowed(command: str) -> None:
@@ -546,6 +589,8 @@ SENSITIVE_NAMES = {
 }
 SENSITIVE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 MAX_TEXT_OUTPUT = 100_000
+GITHUB_OWNER = ENV.get("CUSTODIAN_GITHUB_OWNER", "chapter-N3xtron").strip()
+_GITHUB_REPOSITORY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 COMMAND_ALLOWLIST = {
     "cargo",
     "go",
@@ -626,7 +671,9 @@ def bind_agent_workspace(payload: dict) -> tuple[dict, Path]:
     try:
         root = candidate.resolve(strict=True)
     except OSError as exc:
-        raise ValueError("Selected repository does not exist on the Custodian host.") from exc
+        raise ValueError(
+            "Selected repository does not exist on the Custodian host."
+        ) from exc
     if not root.is_dir() or not path_is_allowed(root):
         raise ValueError("Selected repository is outside the allowed Custodian roots.")
     # Do not accept aliases, IDs, a stale picker selection, or a canonicalization change.
@@ -700,6 +747,114 @@ def atomic_write(path: Path, content: str) -> None:
             os.unlink(temporary)
 
 
+def atomic_write_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".custodian-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def stage_ocr_document_action(root: Path, payload: dict) -> dict:
+    source = virtual_path(root, payload.get("path"), must_exist=True)
+    if not source.is_file():
+        raise ValueError("OCR document was not found.")
+    if source.suffix.casefold() != ".pdf":
+        raise ValueError("OCR staging currently accepts PDF files only.")
+    size = source.stat().st_size
+    if size > MAX_OCR_DOCUMENT_BYTES:
+        raise ValueError("OCR document exceeds the 25 MB limit.")
+
+    OCR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    upload_root = OCR_UPLOAD_DIR.resolve(strict=True)
+    if upload_root != OCR_UPLOAD_DIR:
+        raise ValueError("OCR upload directory is unavailable.")
+    target = upload_root / f"{secrets.token_hex(16)}-{source.name}"
+    descriptor, temporary = tempfile.mkstemp(prefix=".custodian-ocr-", dir=upload_root)
+    try:
+        with (
+            source.open("rb") as input_stream,
+            os.fdopen(descriptor, "wb") as output_stream,
+        ):
+            shutil.copyfileobj(input_stream, output_stream, length=1024 * 1024)
+            output_stream.flush()
+            os.fsync(output_stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return {
+        "ok": True,
+        "action": "stage_ocr_document",
+        "reference": f"upload:{target.name}",
+        "filename": source.name,
+        "size": size,
+    }
+
+
+def write_ocr_output_action(root: Path, payload: dict) -> dict:
+    source = virtual_path(root, payload.get("path"), must_exist=True)
+    if not source.is_file() or source.suffix.casefold() != ".pdf":
+        raise ValueError("OCR output requires a source PDF in the selected repository.")
+    output_format = str(payload.get("output_format") or "")
+    if output_format not in {"markdown", "json", "structured", "docx"}:
+        raise ValueError(
+            "OCR output format must be markdown, json, structured, or docx."
+        )
+
+    if output_format == "docx":
+        encoded = payload.get("content_base64")
+        if not isinstance(encoded, str) or not encoded:
+            raise ValueError("DOCX output requires base64-encoded content.")
+        try:
+            binary_content = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("DOCX output is not valid base64.") from exc
+        size = len(binary_content)
+        if size > MAX_OCR_OUTPUT_BYTES:
+            raise ValueError("OCR output exceeds the 25 MB limit.")
+        try:
+            with zipfile.ZipFile(BytesIO(binary_content)) as archive:
+                names = set(archive.namelist())
+        except zipfile.BadZipFile as exc:
+            raise ValueError("DOCX output is not a valid Office document.") from exc
+        if not {"[Content_Types].xml", "word/document.xml"} <= names:
+            raise ValueError("DOCX output is missing required Office document parts.")
+        suffix = ".docx"
+    else:
+        content = payload.get("content")
+        if not isinstance(content, str):
+            raise ValueError("Text OCR output requires string content.")
+        binary_content = None
+        size = len(content.encode("utf-8"))
+        if size > MAX_OCR_OUTPUT_BYTES:
+            raise ValueError("OCR output exceeds the 25 MB limit.")
+        suffix = ".json" if output_format in {"json", "structured"} else ".md"
+
+    target = source.with_name(f"{source.stem}.ocr{suffix}")
+    assert_repo_write_allowed(target, root)
+    replaced = target.exists() or target.is_symlink()
+    if replaced and not target.is_file():
+        raise ValueError("OCR output path is not a regular file.")
+    if binary_content is None:
+        atomic_write(target, content)
+    else:
+        atomic_write_bytes(target, binary_content)
+    return {
+        "ok": True,
+        "action": "write_ocr_output",
+        "path": f"/{target.relative_to(root).as_posix()}",
+        "size": size,
+        "replaced": replaced,
+    }
+
+
 def fs_action(action: str, root: Path, payload: dict) -> dict:
     path = virtual_path(root, payload.get("path", "/"))
     if action == "fs_revision":
@@ -760,9 +915,15 @@ def fs_action(action: str, root: Path, payload: dict) -> dict:
             rel_base = str(item.relative_to(base))
             file_glob = payload.get("glob")
             if action == "fs_glob":
-                if fnmatch.fnmatch(rel_base, pattern) or fnmatch.fnmatch(item.name, pattern):
+                if fnmatch.fnmatch(rel_base, pattern) or fnmatch.fnmatch(
+                    item.name, pattern
+                ):
                     matches.append(file_info(item, root))
-            elif item.is_file() and (not file_glob or fnmatch.fnmatch(rel_base, str(file_glob)) or fnmatch.fnmatch(item.name, str(file_glob))):
+            elif item.is_file() and (
+                not file_glob
+                or fnmatch.fnmatch(rel_base, str(file_glob))
+                or fnmatch.fnmatch(item.name, str(file_glob))
+            ):
                 try:
                     lines = item.read_text(errors="replace").splitlines()
                 except OSError:
@@ -777,9 +938,19 @@ def fs_action(action: str, root: Path, payload: dict) -> dict:
                             }
                         )
                         if len(matches) > cap:
-                            return {"ok": True, "action": action, "matches": matches[:cap], "truncated": True}
+                            return {
+                                "ok": True,
+                                "action": action,
+                                "matches": matches[:cap],
+                                "truncated": True,
+                            }
             if len(matches) > cap:
-                return {"ok": True, "action": action, "matches": matches[:cap], "truncated": True}
+                return {
+                    "ok": True,
+                    "action": action,
+                    "matches": matches[:cap],
+                    "truncated": True,
+                }
         return {"ok": True, "action": action, "matches": matches, "truncated": False}
     if action == "fs_write":
         require_revision(path, payload)
@@ -787,7 +958,12 @@ def fs_action(action: str, root: Path, payload: dict) -> dict:
         if not isinstance(content, str):
             raise ValueError("content must be text.")
         atomic_write(path, content)
-        return {"ok": True, "action": action, "path": str(payload["path"]), "revision": path_revision(path)}
+        return {
+            "ok": True,
+            "action": action,
+            "path": str(payload["path"]),
+            "revision": path_revision(path),
+        }
     if action == "fs_edit":
         require_revision(path, payload)
         if not path.is_file():
@@ -800,10 +976,18 @@ def fs_action(action: str, root: Path, payload: dict) -> dict:
         count = text.count(old)
         replace_all = payload.get("replace_all") is True
         if count == 0 or (count > 1 and not replace_all):
-            raise ValueError("old_string must match exactly once unless replace_all is true.")
+            raise ValueError(
+                "old_string must match exactly once unless replace_all is true."
+            )
         occurrences = count if replace_all else 1
         atomic_write(path, text.replace(old, new, -1 if replace_all else 1))
-        return {"ok": True, "action": action, "path": str(payload["path"]), "occurrences": occurrences, "revision": path_revision(path)}
+        return {
+            "ok": True,
+            "action": action,
+            "path": str(payload["path"]),
+            "occurrences": occurrences,
+            "revision": path_revision(path),
+        }
     if action == "fs_delete":
         require_revision(path, payload)
         if path == root:
@@ -833,6 +1017,32 @@ def sanitized_environment() -> dict[str, str]:
         "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
         "TMPDIR": tempfile.gettempdir(),
     }
+
+
+def broker_environment() -> dict[str, str]:
+    environment = sanitized_environment()
+    environment["HOME"] = str(Path.home())
+    ssh_auth_socket = os.getenv("SSH_AUTH_SOCK", "").strip()
+    if ssh_auth_socket:
+        environment["SSH_AUTH_SOCK"] = ssh_auth_socket
+    return environment
+
+
+def run_broker_argv(argv: list[str], *, cwd: Path, timeout: int = 300) -> dict:
+    executable = shutil.which(argv[0], path=broker_environment()["PATH"])
+    if not executable:
+        return {"returncode": 127, "output": f"{argv[0]} is unavailable."}
+    result = subprocess.run(
+        [executable, *argv[1:]],
+        cwd=cwd,
+        env=broker_environment(),
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    output = f"{result.stdout}{result.stderr}"[-MAX_TEXT_OUTPUT:]
+    return {"returncode": result.returncode, "output": redact_text(output)}
 
 
 def _sandbox_string(value: Path) -> str:
@@ -910,8 +1120,7 @@ def sandboxed_argv(
     if allow_git_internal:
         exceptions.extend(linked_worktree_git_paths(root))
     exception_rules = " ".join(
-        f'(require-not (subpath "{_sandbox_string(path)}"))'
-        for path in exceptions
+        f'(require-not (subpath "{_sandbox_string(path)}"))' for path in exceptions
     )
     rules = [
         "(version 1)",
@@ -936,7 +1145,11 @@ def bounded_argv(
     *,
     allow_git_internal: bool = False,
 ) -> dict:
-    if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
+    if (
+        not isinstance(argv, list)
+        or not argv
+        or not all(isinstance(item, str) and item for item in argv)
+    ):
         raise ValueError("argv must be a non-empty array of strings.")
     if len(argv) > 128 or any(len(item) > 4096 for item in argv):
         raise ValueError("argv exceeds the command bounds.")
@@ -1004,24 +1217,35 @@ def command_action(action: str, root: Path, payload: dict) -> dict:
         raise ValueError("argv is required.")
     for argument in argv:
         lowered = str(argument).casefold()
-        if any(
-            marker in lowered
-            for marker in (".env", ".ssh", ".aws", "keychain", "credential")
-        ) or Path(str(argument)).suffix.casefold() in SENSITIVE_SUFFIXES:
+        if (
+            any(
+                marker in lowered
+                for marker in (".env", ".ssh", ".aws", "keychain", "credential")
+            )
+            or Path(str(argument)).suffix.casefold() in SENSITIVE_SUFFIXES
+        ):
             raise ValueError("Command arguments may not reference sensitive paths.")
         candidate = Path(str(argument))
-        if candidate.is_absolute() or "/" in str(argument) or str(argument).startswith("."):
+        if (
+            candidate.is_absolute()
+            or "/" in str(argument)
+            or str(argument).startswith(".")
+        ):
             resolved = (
                 candidate.resolve(strict=False)
                 if candidate.is_absolute()
                 else (root / candidate).resolve(strict=False)
             )
             if resolved != root and root not in resolved.parents:
-                raise ValueError("Command arguments may not reference paths outside the selected repository.")
+                raise ValueError(
+                    "Command arguments may not reference paths outside the selected repository."
+                )
     if action == "command":
         if "/" in str(argv[0]) or str(argv[0]) not in COMMAND_ALLOWLIST:
             raise ValueError("Command executable is not allowlisted.")
-        if Path(str(argv[0])).name in {"python", "python3"} and any(arg in {"-c", "-"} for arg in argv[1:]):
+        if Path(str(argv[0])).name in {"python", "python3"} and any(
+            arg in {"-c", "-"} for arg in argv[1:]
+        ):
             raise ValueError("Inline Python is not allowed.")
     elif action == "git":
         if argv[0] == "git":
@@ -1047,6 +1271,111 @@ def command_action(action: str, root: Path, payload: dict) -> dict:
         allow_git_internal=action == "git",
     )
     return {"action": action, "argv": argv, **result}
+
+
+def github_publish_action(root: Path, payload: dict) -> dict:
+    repository_name = str(payload.get("repository_name") or "").strip()
+    description = str(payload.get("description") or "").strip()
+    if not _GITHUB_REPOSITORY_NAME.fullmatch(
+        repository_name
+    ) or repository_name.casefold().endswith(".git"):
+        raise ValueError("GitHub repository name is invalid.")
+    if len(description) > 350 or any(ord(character) < 32 for character in description):
+        raise ValueError("GitHub repository description is invalid.")
+    if GITHUB_OWNER != "chapter-N3xtron":
+        raise ValueError("Custodian GitHub owner is not authorized.")
+
+    def git(*arguments: str) -> dict:
+        return run_broker_argv(["git", *arguments], cwd=root)
+
+    tracked_status = git("status", "--porcelain", "--untracked-files=no")
+    if tracked_status["returncode"] != 0:
+        return {
+            "ok": False,
+            "action": "github_publish",
+            "error": "Custodian could not verify repository status.",
+        }
+    if tracked_status["output"].strip():
+        return {
+            "ok": False,
+            "action": "github_publish",
+            "error": "Commit tracked repository changes before GitHub publication.",
+        }
+    branch = git("symbolic-ref", "--quiet", "--short", "HEAD")
+    branch_name = branch["output"].strip()
+    if branch["returncode"] != 0 or not branch_name:
+        return {
+            "ok": False,
+            "action": "github_publish",
+            "error": "GitHub publication requires an attached local branch.",
+        }
+    head = git("rev-parse", "--verify", "HEAD")
+    if head["returncode"] != 0:
+        return {
+            "ok": False,
+            "action": "github_publish",
+            "error": "GitHub publication requires at least one local commit.",
+        }
+
+    account = run_broker_argv(["gh", "api", "user", "--jq", ".login"], cwd=root)
+    if account["returncode"] != 0 or account["output"].strip() != GITHUB_OWNER:
+        return {
+            "ok": False,
+            "action": "github_publish",
+            "error": "Broker-held GitHub authority is unavailable for chapter-N3xtron.",
+        }
+
+    previous_origin = git("remote", "get-url", "origin")
+    had_previous_origin = previous_origin["returncode"] == 0
+    backup_remote = f"custodian-previous-origin-{secrets.token_hex(4)}"
+    if had_previous_origin:
+        renamed = git("remote", "rename", "origin", backup_remote)
+        if renamed["returncode"] != 0:
+            return {
+                "ok": False,
+                "action": "github_publish",
+                "error": "Custodian could not preserve the existing origin.",
+            }
+
+    full_name = f"{GITHUB_OWNER}/{repository_name}"
+    create_argv = ["gh", "repo", "create", full_name, "--private"]
+    if description:
+        create_argv.extend(["--description", description])
+    create_argv.extend(["--source", ".", "--remote", "origin", "--push"])
+    published = run_broker_argv(create_argv, cwd=root, timeout=300)
+    if published["returncode"] != 0:
+        current_origin = git("remote", "get-url", "origin")
+        if current_origin["returncode"] == 0:
+            git("remote", "remove", "origin")
+        if had_previous_origin:
+            git("remote", "rename", backup_remote, "origin")
+        return {
+            "ok": False,
+            "action": "github_publish",
+            "partial": True,
+            "error": published["output"].strip() or "GitHub publication failed.",
+        }
+
+    if had_previous_origin:
+        removed = git("remote", "remove", backup_remote)
+        if removed["returncode"] != 0:
+            return {
+                "ok": False,
+                "action": "github_publish",
+                "partial": True,
+                "error": "Repository was published, but the previous origin could not be removed.",
+            }
+    return {
+        "ok": True,
+        "action": "github_publish",
+        "owner": GITHUB_OWNER,
+        "repository": repository_name,
+        "visibility": "private",
+        "branch": branch_name,
+        "repository_url": f"https://github.com/{full_name}",
+        "origin_updated": True,
+        "pushed": True,
+    }
 
 
 def preflight_host_file_action(payload: dict) -> dict:
@@ -1105,14 +1434,22 @@ def read_host_file_action(payload: dict) -> dict:
     if not path_value:
         return {"ok": False, "action": "read_host_file", "error": "Missing path."}
     if not reason:
-        return {"ok": False, "action": "read_host_file", "error": "Missing user-visible reason."}
+        return {
+            "ok": False,
+            "action": "read_host_file",
+            "error": "Missing user-visible reason.",
+        }
     try:
         consume_host_file_notice(path_value, reason, payload.get("notice_token"))
     except ValueError as error:
         return {"ok": False, "action": "read_host_file", "error": str(error)}
     candidate = Path(path_value).expanduser()
     if not candidate.is_absolute():
-        return {"ok": False, "action": "read_host_file", "error": "Path must be absolute."}
+        return {
+            "ok": False,
+            "action": "read_host_file",
+            "error": "Path must be absolute.",
+        }
     try:
         target = candidate.resolve(strict=True)
     except OSError:
@@ -1131,14 +1468,22 @@ def read_host_file_action(payload: dict) -> dict:
             "error": "Refusing credential, keychain, token, environment, private-key, or browser-credential material.",
         }
     if not target.is_file():
-        return {"ok": False, "action": "read_host_file", "error": "Path is not a regular file."}
+        return {
+            "ok": False,
+            "action": "read_host_file",
+            "error": "Path is not a regular file.",
+        }
     try:
         with target.open("rb") as file:
             sample = file.read(4096)
     except OSError as error:
         return {"ok": False, "action": "read_host_file", "error": str(error)}
     if b"\0" in sample:
-        return {"ok": False, "action": "read_host_file", "error": "Binary files are not supported."}
+        return {
+            "ok": False,
+            "action": "read_host_file",
+            "error": "Binary files are not supported.",
+        }
     try:
         max_chars = max(1, min(int(payload.get("max_chars") or 50000), 100000))
     except (TypeError, ValueError):
@@ -1170,11 +1515,21 @@ def terminal_command_action(root: Path, payload: dict) -> dict:
     cwd_value = str(payload.get("cwd") or ".").strip() or "."
     cwd = safe_path(cwd_value, root)
     if not cwd.exists() or not cwd.is_dir():
-        return {"ok": False, "action": "terminal_command", "error": "cwd is not a directory.", "cwd": cwd_value}
+        return {
+            "ok": False,
+            "action": "terminal_command",
+            "error": "cwd is not a directory.",
+            "cwd": cwd_value,
+        }
     try:
         assert_terminal_command_allowed(command)
     except ValueError as error:
-        return {"ok": False, "action": "terminal_command", "error": str(error), "command": command}
+        return {
+            "ok": False,
+            "action": "terminal_command",
+            "error": str(error),
+            "command": command,
+        }
     try:
         result = subprocess.run(
             ["/bin/zsh", "-lc", command],
@@ -1206,8 +1561,12 @@ def terminal_command_action(root: Path, payload: dict) -> dict:
             "cwd": str(cwd.relative_to(root)),
             "timeout": timeout,
             "error": f"Command timed out after {timeout} seconds.",
-            "stdout": (error.stdout or "")[-1500:] if isinstance(error.stdout, str) else "",
-            "stderr": (error.stderr or "")[-800:] if isinstance(error.stderr, str) else "",
+            "stdout": (error.stdout or "")[-1500:]
+            if isinstance(error.stdout, str)
+            else "",
+            "stderr": (error.stderr or "")[-800:]
+            if isinstance(error.stderr, str)
+            else "",
         }
 
 
@@ -1266,7 +1625,11 @@ def replace_text_action(root: Path, payload: dict) -> dict:
     if not path_value:
         return {"ok": False, "action": "replace_text", "error": "Missing path."}
     if old_text is None or new_text is None:
-        return {"ok": False, "action": "replace_text", "error": "Missing old_text or new_text."}
+        return {
+            "ok": False,
+            "action": "replace_text",
+            "error": "Missing old_text or new_text.",
+        }
     target = safe_path(path_value, root)
     assert_repo_write_allowed(target, root)
     if not target.exists() or not target.is_file():
@@ -1331,14 +1694,27 @@ def apply_patch_action(root: Path, payload: dict) -> dict:
         return {"ok": False, "action": "apply_patch", "error": "Missing patch."}
     paths = patch_paths(patch_text)
     if not paths:
-        return {"ok": False, "action": "apply_patch", "error": "Patch has no repo-relative paths."}
+        return {
+            "ok": False,
+            "action": "apply_patch",
+            "error": "Patch has no repo-relative paths.",
+        }
     for rel_path in paths:
         if rel_path.startswith("/") or ".." in Path(rel_path).parts:
-            return {"ok": False, "action": "apply_patch", "error": f"Unsafe patch path: {rel_path}"}
+            return {
+                "ok": False,
+                "action": "apply_patch",
+                "error": f"Unsafe patch path: {rel_path}",
+            }
         assert_repo_write_allowed(safe_path(rel_path, root), root)
     check = run_command_input(["git", "apply", "--check", "-"], patch_text, cwd=root)
     if check["returncode"] != 0:
-        return {"ok": False, "action": "apply_patch", "error": "Patch check failed.", "check": check}
+        return {
+            "ok": False,
+            "action": "apply_patch",
+            "error": "Patch check failed.",
+            "check": check,
+        }
     applied = run_command_input(["git", "apply", "-"], patch_text, cwd=root)
     return {
         "ok": applied["returncode"] == 0,
@@ -1353,9 +1729,7 @@ def iter_repo_read_files(root: Path) -> list[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         current = Path(dirpath)
         dirnames[:] = [
-            name
-            for name in dirnames
-            if not is_ignored_path(current / name, root)
+            name for name in dirnames if not is_ignored_path(current / name, root)
         ]
         for filename in filenames:
             path = current / filename
@@ -1392,7 +1766,9 @@ def full_repo_read_review(root: Path, payload: dict) -> dict:
 
         if total_chars >= max_total_chars:
             skipped.append(f"- {rel} (total review character budget reached)")
-            inventory.append(f"- skipped {rel} ({size} bytes; total review character budget reached)")
+            inventory.append(
+                f"- skipped {rel} ({size} bytes; total review character budget reached)"
+            )
             continue
 
         text = path.read_text(errors="replace")
@@ -1404,7 +1780,10 @@ def full_repo_read_review(root: Path, payload: dict) -> dict:
 
         remaining = max_total_chars - total_chars
         if len(chunk) > remaining:
-            chunk = chunk[:remaining] + "\n\n[TRUNCATED: total review character budget reached]"
+            chunk = (
+                chunk[:remaining]
+                + "\n\n[TRUNCATED: total review character budget reached]"
+            )
 
         sections.append(f"## {rel}\n\n```text\n{chunk}\n```")
         inventory.append(f"- read {rel} ({size} bytes)")
@@ -1426,7 +1805,12 @@ def full_repo_read_review(root: Path, payload: dict) -> dict:
         f"- file excerpts truncated: {files_truncated}\n\n"
         "## Git status\n\n"
         "```text\n"
-        + (run_command(["git", "status", "--short"], cwd=root).get("stdout", "").strip() or "Clean")
+        + (
+            run_command(["git", "status", "--short"], cwd=root)
+            .get("stdout", "")
+            .strip()
+            or "Clean"
+        )
         + "\n```\n\n"
         "## File Inventory\n\n"
         "```text\n"
@@ -1435,10 +1819,18 @@ def full_repo_read_review(root: Path, payload: dict) -> dict:
         + "\n```\n\n"
         "## Skipped Files\n\n"
         + ("\n".join(skipped[:250]) if skipped else "No files skipped.")
-        + ("\n- [TRUNCATED: skipped-file list limit reached]" if len(skipped) > 250 else "")
+        + (
+            "\n- [TRUNCATED: skipped-file list limit reached]"
+            if len(skipped) > 250
+            else ""
+        )
         + "\n\n"
         "## Redacted File Excerpts\n\n"
-        + ("\n\n".join(sections) if sections else "No readable text files found within bounds.")
+        + (
+            "\n\n".join(sections)
+            if sections
+            else "No readable text files found within bounds."
+        )
     )
     return {
         "ok": True,
@@ -1453,7 +1845,10 @@ def full_repo_read_review(root: Path, payload: dict) -> dict:
 
 
 def search_patterns(root: Path, pattern: str, max_chars: int = 8000) -> str:
-    result = run_command([RG_BIN, "--line-number", "--no-heading", "--color", "never", "-S", pattern], cwd=root)
+    result = run_command(
+        [RG_BIN, "--line-number", "--no-heading", "--color", "never", "-S", pattern],
+        cwd=root,
+    )
     return result.get("stdout", "").strip()[:max_chars]
 
 
@@ -1513,12 +1908,15 @@ def container_url_check(container: str, urls: list[str]) -> list[dict]:
             "except Exception as error:\n"
             "    print(type(error).__name__ + ': ' + str(error))\n"
         )
-        result = run_host_command(["docker", "exec", name, "python", "-c", script], timeout=10)
+        result = run_host_command(
+            ["docker", "exec", name, "python", "-c", script], timeout=10
+        )
         checks.append(
             {
                 "container": name,
                 "url": url,
-                "ok": result["returncode"] == 0 and result["stdout"].strip().startswith(("2", "3")),
+                "ok": result["returncode"] == 0
+                and result["stdout"].strip().startswith(("2", "3")),
                 "stdout": result["stdout"].strip(),
                 "stderr": result["stderr"].strip(),
             }
@@ -1558,18 +1956,48 @@ def openwebui_theme_check(root: Path) -> dict:
         }
 
     local_hash = run_host_command(["shasum", "-a", "256", str(css_path)])
-    container_hash = run_host_command(["docker", "exec", "open-webui", "sha256sum", "/app/build/static/custom.css"])
-    container_tail = run_host_command(["docker", "exec", "open-webui", "tail", "-n", "35", "/app/build/static/custom.css"])
-    http_check = run_host_command(["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "http://127.0.0.1:3000/static/custom.css"])
+    container_hash = run_host_command(
+        ["docker", "exec", "open-webui", "sha256sum", "/app/build/static/custom.css"]
+    )
+    container_tail = run_host_command(
+        [
+            "docker",
+            "exec",
+            "open-webui",
+            "tail",
+            "-n",
+            "35",
+            "/app/build/static/custom.css",
+        ]
+    )
+    http_check = run_host_command(
+        [
+            "curl",
+            "-sS",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "http://127.0.0.1:3000/static/custom.css",
+        ]
+    )
 
-    local_sha = (local_hash.get("stdout") or "").split()[0] if local_hash.get("stdout") else ""
-    mounted_sha = (container_hash.get("stdout") or "").split()[0] if container_hash.get("stdout") else ""
+    local_sha = (
+        (local_hash.get("stdout") or "").split()[0] if local_hash.get("stdout") else ""
+    )
+    mounted_sha = (
+        (container_hash.get("stdout") or "").split()[0]
+        if container_hash.get("stdout")
+        else ""
+    )
     return {
         "ok": bool(local_sha and mounted_sha and local_sha == mounted_sha),
         "action": "openwebui_theme_check",
         "local_sha": local_sha,
         "mounted_sha": mounted_sha,
-        "mounted_matches_local": bool(local_sha and mounted_sha and local_sha == mounted_sha),
+        "mounted_matches_local": bool(
+            local_sha and mounted_sha and local_sha == mounted_sha
+        ),
         "http_status": (http_check.get("stdout") or "").strip(),
         "tail": container_tail.get("stdout", "")[-2500:],
         "errors": {
@@ -1611,7 +2039,9 @@ def memory_search_action(payload: dict) -> dict:
             "known_collections": sorted(set(MEMORY_COLLECTION_ALIASES.values())),
         }
 
-    request_payload = json.dumps({"limit": 50, "with_payload": True, "with_vector": False}).encode("utf-8")
+    request_payload = json.dumps(
+        {"limit": 50, "with_payload": True, "with_vector": False}
+    ).encode("utf-8")
     request = Request(
         f"http://127.0.0.1:6333/collections/{collection}/points/scroll",
         data=request_payload,
@@ -1641,7 +2071,12 @@ def memory_search_action(payload: dict) -> dict:
                     "title": item.get("title"),
                     "source": item.get("source"),
                     "type": item.get("type"),
-                    "text": (item.get("text") or item.get("assistant_text") or item.get("user_text") or "")[:1200],
+                    "text": (
+                        item.get("text")
+                        or item.get("assistant_text")
+                        or item.get("user_text")
+                        or ""
+                    )[:1200],
                 }
             )
     return {
@@ -1659,7 +2094,9 @@ def graph_query_action(payload: dict) -> dict:
     query = str(payload.get("query") or "").strip()
     if not query:
         return {"ok": False, "action": "graph_query", "error": "Missing query."}
-    blocked = re.search(r"\b(CREATE|MERGE|SET|DELETE|DETACH|DROP|REMOVE|LOAD\s+CSV)\b", query, re.I)
+    blocked = re.search(
+        r"\b(CREATE|MERGE|SET|DELETE|DETACH|DROP|REMOVE|LOAD\s+CSV)\b", query, re.I
+    )
     if blocked:
         return {
             "ok": False,
@@ -1667,7 +2104,15 @@ def graph_query_action(payload: dict) -> dict:
             "error": "Only read-only Cypher queries are allowed through graph_query.",
         }
     result = run_host_command_input(
-        ["docker", "exec", "-i", "memgraph-local", "mgconsole", "-output_format=tabular", "-no_history"],
+        [
+            "docker",
+            "exec",
+            "-i",
+            "memgraph-local",
+            "mgconsole",
+            "-output_format=tabular",
+            "-no_history",
+        ],
         query.rstrip(";") + ";\n",
         timeout=30,
     )
@@ -1680,7 +2125,9 @@ def graph_query_action(payload: dict) -> dict:
 
 
 def repair_deep_research_endpoint() -> dict:
-    qwen35 = container_url_check("local-deep-research", ["http://host.docker.internal:7476/v1/models"])[0]
+    qwen35 = container_url_check(
+        "local-deep-research", ["http://host.docker.internal:7476/v1/models"]
+    )[0]
     if not qwen35["ok"]:
         return {
             "ok": False,
@@ -1757,7 +2204,15 @@ def repair_deep_research_endpoint() -> dict:
                 "steps": steps,
             }
 
-    health = run_host_command(["docker", "inspect", "--format", "{{.State.Health.Status}}", "local-deep-research"])
+    health = run_host_command(
+        [
+            "docker",
+            "inspect",
+            "--format",
+            "{{.State.Health.Status}}",
+            "local-deep-research",
+        ]
+    )
     return {
         "ok": True,
         "action": "repair_deep_research_endpoint",
@@ -1810,7 +2265,19 @@ def register_repo_path(repo_path: Path, name: str | None = None) -> dict:
         "location": "local",
         "repo_path": str(target),
         "privacy": "local-first",
-        "allowed_tools": ["list", "read", "search", "git_status", "git_diff", "terminal_command", "write_file", "append_file", "replace_text", "delete_file", "apply_patch"],
+        "allowed_tools": [
+            "list",
+            "read",
+            "search",
+            "git_status",
+            "git_diff",
+            "terminal_command",
+            "write_file",
+            "append_file",
+            "replace_text",
+            "delete_file",
+            "apply_patch",
+        ],
         "allowed_models": ["local", "codex-by-approval"],
         "approval_required": ["commit", "docker_restart", "ssh"],
     }
@@ -1822,7 +2289,7 @@ def register_repo_path(repo_path: Path, name: str | None = None) -> dict:
 
 def open_native_repo_picker() -> dict:
     script = (
-        'POSIX path of (choose folder with prompt '
+        "POSIX path of (choose folder with prompt "
         '"Choose a git repo folder for The Custodian")'
     )
     result = subprocess.run(
@@ -1836,7 +2303,9 @@ def open_native_repo_picker() -> dict:
         return {
             "ok": False,
             "cancelled": True,
-            "error": (result.stderr or result.stdout or "Folder picker cancelled.").strip(),
+            "error": (
+                result.stderr or result.stdout or "Folder picker cancelled."
+            ).strip(),
         }
     selected_path = Path(result.stdout.strip())
     repo = register_repo_path(selected_path)
@@ -1845,8 +2314,14 @@ def open_native_repo_picker() -> dict:
 
 def open_web_repo_picker() -> dict:
     try:
-        browser_bundle = ENV.get("CUSTODIAN_REPO_PICKER_BROWSER_BUNDLE", "com.brave.Browser").strip()
-        command = ["open", "-b", browser_bundle, repo_picker_url()] if browser_bundle else ["open", repo_picker_url()]
+        browser_bundle = ENV.get(
+            "CUSTODIAN_REPO_PICKER_BROWSER_BUNDLE", "com.brave.Browser"
+        ).strip()
+        command = (
+            ["open", "-b", browser_bundle, repo_picker_url()]
+            if browser_bundle
+            else ["open", repo_picker_url()]
+        )
         subprocess.run(command, timeout=5, check=False)
         return {"opened": True}
     except Exception as error:
@@ -1901,11 +2376,7 @@ def browse_dirs(path_value: str = "") -> dict:
         "current_path": "" if target == root else str(target.relative_to(root)),
         "parent_path": parent,
         "dirs": dirs,
-        "selected_repo": (
-            load_repo()
-            if SELECTED_REPO_PATH.exists()
-            else None
-        ),
+        "selected_repo": (load_repo() if SELECTED_REPO_PATH.exists() else None),
         "repos": list_repos(),
     }
 
@@ -1935,9 +2406,30 @@ def infer_task_action(request: str, mode: str) -> dict:
     request_text = request.strip().lower()
     if request_text == "/repo":
         return {"action": "repo_picker"}
-    if any(term in text for term in ["terminal command", "shell command", "run command", "run test", "run tests", "run lint", "run build", "execute command"]):
+    if any(
+        term in text
+        for term in [
+            "terminal command",
+            "shell command",
+            "run command",
+            "run test",
+            "run tests",
+            "run lint",
+            "run build",
+            "execute command",
+        ]
+    ):
         return {"action": "terminal_command"}
-    if any(term in text for term in ["fix stack", "repair stack", "stack repair", "fix deep research", "fix ldr"]):
+    if any(
+        term in text
+        for term in [
+            "fix stack",
+            "repair stack",
+            "stack repair",
+            "fix deep research",
+            "fix ldr",
+        ]
+    ):
         return {"action": "repair_deep_research_endpoint"}
     if any(term in text for term in ["apply patch", "patch file", "patch the repo"]):
         return {"action": "apply_patch"}
@@ -1949,24 +2441,77 @@ def infer_task_action(request: str, mode: str) -> dict:
         return {"action": "write_file"}
     if any(term in text for term in ["delete file", "remove file"]):
         return {"action": "delete_file"}
-    if any(term in text for term in ["stack health", "container status", "docker status", "check stack", "stack logs"]):
+    if any(
+        term in text
+        for term in [
+            "stack health",
+            "container status",
+            "docker status",
+            "check stack",
+            "stack logs",
+        ]
+    ):
         return {"action": "stack_health_check"}
-    if any(term in text for term in ["theme check", "custom.css", "css bind", "css mount", "openwebui theme", "open webui theme"]):
+    if any(
+        term in text
+        for term in [
+            "theme check",
+            "custom.css",
+            "css bind",
+            "css mount",
+            "openwebui theme",
+            "open webui theme",
+        ]
+    ):
         return {"action": "openwebui_theme_check"}
     if extract_first_url(request):
         return {"action": "fetch_url"}
-    if any(term in text for term in ["full read", "full-read", "read all files", "read everything", "full repo read", "full repository read"]):
+    if any(
+        term in text
+        for term in [
+            "full read",
+            "full-read",
+            "read all files",
+            "read everything",
+            "full repo read",
+            "full repository read",
+        ]
+    ):
         return {"action": "full_repo_read_review"}
-    if any(term in text for term in ["deep review", "standard review", "quick review", "security scan", "secret scan", "todo scan", "dependency audit"]):
+    if any(
+        term in text
+        for term in [
+            "deep review",
+            "standard review",
+            "quick review",
+            "security scan",
+            "secret scan",
+            "todo scan",
+            "dependency audit",
+        ]
+    ):
         return {"action": "deep_repo_review"}
-    llm_terms = ["llm", "local model", "model integration", "model selection", "ollama", "llama.cpp", "lm studio", "openai-compatible", "openai compatible", "qwen"]
+    llm_terms = [
+        "llm",
+        "local model",
+        "model integration",
+        "model selection",
+        "ollama",
+        "llama.cpp",
+        "lm studio",
+        "openai-compatible",
+        "openai compatible",
+        "qwen",
+    ]
     if "repo" in text and any(term in text for term in llm_terms):
         return {"action": "llm_integration_scan"}
     if "read" in text and "repo" in text:
         return {"action": "repo_summary"}
     if any(word in text for word in ["read ", "open ", "show file", "inspect file"]):
         return {"action": "read"}
-    if mode.strip().lower() == "select" or request_text.startswith(("select repo", "change repo", "switch repo")):
+    if mode.strip().lower() == "select" or request_text.startswith(
+        ("select repo", "change repo", "switch repo")
+    ):
         return {"action": "select_repo"}
     if "repo" in text and ("list" in text or "show" in text or "available" in text):
         return {"action": "list_repos"}
@@ -1983,21 +2528,40 @@ def infer_task_action(request: str, mode: str) -> dict:
 
 ACTION_SCHEMAS = {
     "preflight_host_file": {"required": {"path": str, "reason": str}},
-    "read_host_file": {
-        "required": {"path": str, "reason": str, "notice_token": str}
-    },
+    "read_host_file": {"required": {"path": str, "reason": str, "notice_token": str}},
     "fs_ls": {"required": {"repo": str, "path": str}},
     "fs_read": {"required": {"repo": str, "path": str}},
     "fs_revision": {"required": {"repo": str, "path": str}},
     "fs_glob": {"required": {"repo": str, "path": str, "pattern": str}},
     "fs_grep": {"required": {"repo": str, "path": str, "pattern": str}},
-    "fs_write": {"required": {"repo": str, "path": str, "content": str, "expected_revision": str}},
-    "fs_edit": {"required": {"repo": str, "path": str, "old_string": str, "new_string": str, "expected_revision": str}},
+    "fs_write": {
+        "required": {"repo": str, "path": str, "content": str, "expected_revision": str}
+    },
+    "fs_edit": {
+        "required": {
+            "repo": str,
+            "path": str,
+            "old_string": str,
+            "new_string": str,
+            "expected_revision": str,
+        }
+    },
     "fs_delete": {"required": {"repo": str, "path": str, "expected_revision": str}},
+    "stage_ocr_document": {"required": {"repo": str, "path": str}},
+    "write_ocr_output": {
+        "required": {
+            "repo": str,
+            "path": str,
+            "output_format": str,
+        }
+    },
     "command": {"required": {"repo": str, "argv": list}},
     "git": {"required": {"repo": str, "argv": list}},
     "compose_read": {"required": {"repo": str, "argv": list}},
     "compose_change": {"required": {"repo": str, "argv": list}},
+    "github_publish": {
+        "required": {"repo": str, "repository_name": str, "description": str}
+    },
 }
 
 
@@ -2008,7 +2572,9 @@ def validate_action_payload(action: str, payload: dict) -> None:
         raise ValueError("Unsupported agent action.")
     for field, expected_type in schema["required"].items():
         if field not in payload or not isinstance(payload[field], expected_type):
-            raise ValueError(f"{field} is required and must be {expected_type.__name__}.")
+            raise ValueError(
+                f"{field} is required and must be {expected_type.__name__}."
+            )
 
 
 def _execute_safe_action(action: str, payload: dict) -> dict:
@@ -2047,10 +2613,16 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
             "message": "Selected repo updated.",
         }
     repo, root = bind_agent_workspace(payload)
+    if action == "stage_ocr_document":
+        return stage_ocr_document_action(root, payload)
+    if action == "write_ocr_output":
+        return write_ocr_output_action(root, payload)
     if action.startswith("fs_"):
         return fs_action(action, root, payload)
     if action in {"command", "git", "compose_read", "compose_change"}:
         return command_action(action, root, payload)
+    if action == "github_publish":
+        return github_publish_action(root, payload)
     if action == "context":
         return {
             "ok": True,
@@ -2066,14 +2638,18 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
                 readme = path.read_text(errors="replace")[:12000]
                 break
         items = []
-        for item in sorted(root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        for item in sorted(
+            root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+        ):
             if item.name in {".git", "__pycache__"}:
                 continue
-            items.append({
-                "name": item.name,
-                "path": str(item.relative_to(root)),
-                "type": "dir" if item.is_dir() else "file",
-            })
+            items.append(
+                {
+                    "name": item.name,
+                    "path": str(item.relative_to(root)),
+                    "type": "dir" if item.is_dir() else "file",
+                }
+            )
         return {
             "ok": True,
             "action": action,
@@ -2084,7 +2660,9 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
         }
     if action == "llm_integration_scan":
         top_level = []
-        for item in sorted(root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        for item in sorted(
+            root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+        ):
             if item.name in {".git", "__pycache__"}:
                 continue
             top_level.append(f"- [{'dir' if item.is_dir() else 'file'}] {item.name}")
@@ -2105,12 +2683,22 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
         search_sections = []
         for pattern in patterns:
             result = run_command(
-                [RG_BIN, "--line-number", "--no-heading", "--color", "never", "-S", pattern],
+                [
+                    RG_BIN,
+                    "--line-number",
+                    "--no-heading",
+                    "--color",
+                    "never",
+                    "-S",
+                    pattern,
+                ],
                 cwd=root,
             )
             stdout = result.get("stdout", "").strip()
             if stdout:
-                search_sections.append(f"## Matches: {pattern}\n\n```text\n{stdout[:5000]}\n```")
+                search_sections.append(
+                    f"## Matches: {pattern}\n\n```text\n{stdout[:5000]}\n```"
+                )
 
         key_files = []
         for rel in [
@@ -2124,16 +2712,14 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
         ]:
             path = root / rel
             if path.exists() and path.is_file():
-                key_files.append(f"## {rel}\n\n```text\n{path.read_text(errors='replace')[:3000]}\n```")
+                key_files.append(
+                    f"## {rel}\n\n```text\n{path.read_text(errors='replace')[:3000]}\n```"
+                )
 
         content = (
             "# FrnT_DESK LLM Integration Scan\n\n"
-            "## Top-level repo layout\n\n"
-            + "\n".join(top_level)
-            + "\n\n"
-            "## Key config/docs excerpts\n\n"
-            + "\n\n".join(key_files)
-            + "\n\n"
+            "## Top-level repo layout\n\n" + "\n".join(top_level) + "\n\n"
+            "## Key config/docs excerpts\n\n" + "\n\n".join(key_files) + "\n\n"
             "## Search findings\n\n"
             + ("\n\n".join(search_sections) or "No LLM integration matches found.")
         )
@@ -2146,7 +2732,14 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
             "git_status": run_command(["git", "status", "--short"], cwd=root),
         }
     if action == "deep_repo_review":
-        include_dirs = ["custodian", "deep-research", "ocr-service", "scripts", "searxng", "telegram-bridge"]
+        include_dirs = [
+            "custodian",
+            "deep-research",
+            "ocr-service",
+            "scripts",
+            "searxng",
+            "telegram-bridge",
+        ]
         key_file_patterns = [
             ".gitignore",
             "docker-compose*.yml",
@@ -2172,18 +2765,30 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
             "Non-destructive inspection only: tree walk, key file reads, TODO/FIXME/HACK scan, redacted secret-pattern scan, and git status.\n\n"
             "## Tree walk, depth 3\n\n"
             "```text\n"
-            + ("\n".join(tree_lines(root, include_dirs, max_depth=3)) or "No scoped directories found.")
+            + (
+                "\n".join(tree_lines(root, include_dirs, max_depth=3))
+                or "No scoped directories found."
+            )
             + "\n```\n\n"
             "## Git status\n\n"
             "```text\n"
-            + (run_command(["git", "status", "--short"], cwd=root).get("stdout", "").strip() or "Clean")
+            + (
+                run_command(["git", "status", "--short"], cwd=root)
+                .get("stdout", "")
+                .strip()
+                or "Clean"
+            )
             + "\n```\n\n"
             "## TODO / FIXME / HACK matches\n\n"
             "```text\n"
             + (todo_matches or "No TODO/FIXME/HACK matches found.")
             + "\n```\n\n"
             "## Secret-pattern findings, redacted\n\n"
-            + ("\n".join(secret_findings) if secret_findings else "No non-env secret-pattern findings found.")
+            + (
+                "\n".join(secret_findings)
+                if secret_findings
+                else "No non-env secret-pattern findings found."
+            )
             + "\n\n"
             "## Key file excerpts\n\n"
             + ("\n\n".join(key_sections) if key_sections else "No key files found.")
@@ -2215,7 +2820,9 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
             "ok": True,
             "action": action,
             "container": frontdesk_container_name(str(payload.get("container", ""))),
-            "logs": docker_logs_frontdesk(str(payload.get("container", "")), int(payload.get("tail", 120))),
+            "logs": docker_logs_frontdesk(
+                str(payload.get("container", "")), int(payload.get("tail", 120))
+            ),
         }
     if action == "repair_deep_research_endpoint":
         return repair_deep_research_endpoint()
@@ -2236,17 +2843,23 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
         if not target.exists() or not target.is_dir():
             return {"ok": False, "error": "Directory not found.", "action": action}
         items = []
-        for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        for item in sorted(
+            target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+        ):
             if item.name in {".git", "__pycache__"}:
                 continue
-            items.append({
-                "name": item.name,
-                "path": str(item.relative_to(root)),
-                "type": "dir" if item.is_dir() else "file",
-            })
+            items.append(
+                {
+                    "name": item.name,
+                    "path": str(item.relative_to(root)),
+                    "type": "dir" if item.is_dir() else "file",
+                }
+            )
         return {"ok": True, "action": action, "items": items}
     if action == "read":
-        path_value = payload.get("path") or extract_path_from_request(str(payload.get("request", "")))
+        path_value = payload.get("path") or extract_path_from_request(
+            str(payload.get("request", ""))
+        )
         if not path_value:
             return {"ok": False, "error": "Missing file path.", "action": action}
         target = safe_path(path_value, root)
@@ -2262,7 +2875,9 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
             "truncated": target.stat().st_size > len(text.encode("utf-8")),
         }
     if action == "fetch_url":
-        url = str(payload.get("url") or extract_first_url(str(payload.get("request", "")))).strip()
+        url = str(
+            payload.get("url") or extract_first_url(str(payload.get("request", "")))
+        ).strip()
         if not url:
             return {"ok": False, "error": "Missing URL.", "action": action}
         req = Request(url, headers={"User-Agent": "FrnT_DESK-Custodian/0.1"})
@@ -2271,9 +2886,13 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
             response = urlopen(req, timeout=20)
         except (ssl.SSLError, URLError) as error:
             reason = getattr(error, "reason", error)
-            if isinstance(reason, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(error):
+            if isinstance(reason, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(
+                error
+            ):
                 tls_verified = False
-                response = urlopen(req, timeout=20, context=ssl._create_unverified_context())
+                response = urlopen(
+                    req, timeout=20, context=ssl._create_unverified_context()
+                )
             else:
                 raise
         with response:
@@ -2298,13 +2917,28 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
         pattern = str(payload.get("q") or payload.get("query") or "").strip()
         if not pattern:
             return {"ok": False, "error": "Missing q.", "action": action}
-        output = run_command([RG_BIN, "--line-number", "--no-heading", "--color", "never", pattern], cwd=root)
+        output = run_command(
+            [RG_BIN, "--line-number", "--no-heading", "--color", "never", pattern],
+            cwd=root,
+        )
         return {"ok": True, "action": action, "query": pattern, **output}
     if action == "git_status":
-        return {"ok": True, "action": action, **run_command(["git", "status", "--short"], cwd=root)}
+        return {
+            "ok": True,
+            "action": action,
+            **run_command(["git", "status", "--short"], cwd=root),
+        }
     if action == "git_diff":
-        return {"ok": True, "action": action, **run_command(["git", "diff", "--stat"], cwd=root)}
-    return {"ok": False, "error": f"Unsupported safe action: {action}", "action": action}
+        return {
+            "ok": True,
+            "action": action,
+            **run_command(["git", "diff", "--stat"], cwd=root),
+        }
+    return {
+        "ok": False,
+        "error": f"Unsupported safe action: {action}",
+        "action": action,
+    }
 
 
 def execute_safe_action(action: str, payload: dict) -> dict:
@@ -2653,7 +3287,9 @@ class CustodianHandler(BaseHTTPRequestHandler):
             if parsed.path == "/repo/register-select":
                 rel_path = str(body.get("path") or "").strip()
                 name = str(body.get("name") or "").strip()
-                target = (ALLOWED_ROOT / rel_path).resolve() if rel_path else ALLOWED_ROOT
+                target = (
+                    (ALLOWED_ROOT / rel_path).resolve() if rel_path else ALLOWED_ROOT
+                )
                 repo = register_repo_path(target, name or None)
                 json_response(self, 200, {"ok": True, "repo": repo})
                 return
@@ -2661,11 +3297,15 @@ class CustodianHandler(BaseHTTPRequestHandler):
             if parsed.path == "/workspace/select":
                 workspace_id = str(body.get("workspace_id", "")).strip()
                 if not workspace_id:
-                    json_response(self, 400, {"ok": False, "error": "Missing workspace_id."})
+                    json_response(
+                        self, 400, {"ok": False, "error": "Missing workspace_id."}
+                    )
                     return
                 repo = find_repo(workspace_id)
                 SELECTED_REPO_PATH.write_text(f"{repo['id']}\n")
-                json_response(self, 200, {"ok": True, "workspace": load_repo(repo["id"])})
+                json_response(
+                    self, 200, {"ok": True, "workspace": load_repo(repo["id"])}
+                )
                 return
 
             if parsed.path == "/task":
@@ -2699,7 +3339,9 @@ class CustodianHandler(BaseHTTPRequestHandler):
             json_response(self, 400, {"ok": False, "error": str(error)})
             return
         except Exception:
-            json_response(self, 500, {"ok": False, "error": "Internal Custodian error."})
+            json_response(
+                self, 500, {"ok": False, "error": "Internal Custodian error."}
+            )
             return
 
         json_response(

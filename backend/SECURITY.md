@@ -27,21 +27,27 @@ the subsequent bounded text read applies the same refusal and redaction policy.
 ## Commands
 
 There is no `LocalShellBackend`, generic host-worker tool, or arbitrary shell-string
-API. Coder receives three typed argv-only tools:
+API. Coder receives typed Custodian tools:
 
 - `custodian_command` for a narrow project-executable allowlist;
-- `custodian_git` for allowlisted Git subcommands;
-- `custodian_compose` for allowlisted Docker Compose subcommands.
+- `custodian_git` for allowlisted local Git subcommands;
+- `custodian_compose_read` and `custodian_compose_change` for bounded Docker Compose
+  inspection and deployment changes;
+- `custodian_github_publish` to create one private repository in the fixed
+  `chapter-N3xtron` account, push the selected committed branch, and replace `origin`.
 
 Custodian uses no shell, a sanitized environment and isolated `HOME`, bounded argv,
 time, and output, and process-group termination on timeout. Provider credentials are
 not inherited. Sensitive or out-of-repository path arguments are refused. Docker
-Compose automatic `.env` loading is disabled.
+Compose automatic `.env` loading is disabled. The GitHub publication action runs only
+fixed Git and GitHub CLI operations. It uses broker-held macOS authority without
+forwarding environment tokens to Coder and refuses dirty tracked changes, detached
+branches, another owner, or public visibility.
 
-In approval mode, `write_file`, `edit_file`, `delete`, and all three command tools
-produce normal LangGraph human-in-the-loop interrupts. Autonomous mode uses the same
-Custodian policy without those interrupts. Read-only mode exposes no command tools and
-its backend refuses every mutation.
+In approval mode, repository mutations and all command tools produce normal LangGraph
+human-in-the-loop interrupts. Autonomous mode retains explicit approval boundaries for
+Docker Compose deployment changes and GitHub publication. Read-only mode exposes no
+command tools and its backend refuses every mutation.
 
 ## Container mounts
 

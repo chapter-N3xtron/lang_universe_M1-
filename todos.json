@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-23T02:45:16Z",
+  "updated_at": "2026-08-24T00:38:50Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2835,6 +2835,78 @@
           "completed_by_model": null,
           "completed_at": null,
           "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "restore-ocr-agent-server-wiring",
+      "title": "Restore OCR Agent Server Wiring",
+      "created_at": "2026-08-23T22:13:39Z",
+      "planned_by_model": "openai/gpt-5.6-sol",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "restore-ocr-agent-and-handoff",
+          "content": "Restore the prior bounded OCR specialist, Jasper handoff, Agent Server graph node, approved upload-reference bridge, runtime dependencies, and focused tests. Preserve workspace confinement and the 25 MB document limit. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-23T22:13:39Z",
+          "notes": "Restored the Docling and sequential Ollama OCR specialist from commit 044c642, adapted it to the current graph, exposed Jasper and supervisor routing, preserved validated uploads for the shared OCR directory, carried the opaque reference into the browser message, and declared runtime dependencies through uv. Focused OCR tests passed 6/6; changed Python files passed Ruff; the changed TypeScript file passed Prettier; and the uv lock is current. Rebuilt jasper-langgraph:current, recreated only langgraph-api, confirmed Docker health and the /info endpoint, matched the running container to the new image ID, and verified the deployed OCR node plus Docling import inside the container. Sidecar and frontend were not rebuilt or restarted. Governance reference: GOVERNANCE_FRAMEWORK.md."
+        }
+      ]
+    },
+    {
+      "id": "docling-authoritative-ocr-and-image-harvest",
+      "title": "Docling-Authoritative OCR and Deferred Document Image Harvest",
+      "created_at": "2026-08-23T23:50:40Z",
+      "planned_by_model": "openai/gpt-5.6-sol",
+      "planned_by_agent": "deep-agent",
+      "todos": [
+        {
+          "id": "write-document-image-harvest-openspec",
+          "content": "Write and strictly validate a separate OpenSpec change for Docling-directed PDF page-image harvesting, bounded Custodian workspace assets, and a future authenticated document-image Visboard artifact. Relate it to visualization-board-alignment without silently broadening that concept-map change. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-23T23:50:40Z",
+          "notes": "Created openspec/changes/document-image-harvest with proposal, design, tasks, and capability requirements. Strict OpenSpec validation passed. The change defers image harvesting, authenticated delivery, and Visboard rendering so they do not derail the current OCR correction."
+        },
+        {
+          "id": "enforce-docling-layout-authority",
+          "content": "Make Docling the sole authority for OCR layout, reading order, and paragraph structure in code; keep Surya and GLM-OCR outputs as verification diagnostics only; write Docling Markdown and DOCX outputs beside the source PDF through Custodian; and emit only a concise completion/disagreement summary into chat. Do not add document-specific layout rules. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "completed",
+          "agent": "coding",
+          "completed_by_model": "openai/gpt-5.6-sol",
+          "completed_at": "2026-08-24T00:38:50Z",
+          "notes": "Docling Markdown is the final output; model failures cannot replace or block it; paragraph whitespace is preserved; and OCR writes both the selected text output and a DOCX preserving Docling heading and paragraph boundaries through the typed Custodian action. OCR returns a short deterministic summary without a second Jasper model pass. Focused tests passed 17/17 and the changed Python files passed Ruff."
+        },
+        {
+          "id": "deploy-and-verify-docling-authority",
+          "content": "After explicit approval, restart the native Custodian worker, rebuild and recreate only the Agent Server container, then verify the deployed OCR graph and a repository PDF end to end without modifying the source PDF.",
+          "status": "in_progress",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Restarted the native Custodian worker, rebuilt jasper-langgraph:current, recreated only langgraph-api, matched the healthy running container to image sha256:e3021e05a0d98588c73ec82b852cdb2cb210509de291f258faf7cc9577f89ff8, verified the deployed OCR graph and DOCX generation inside the container, and exercised a real bounded Custodian DOCX write with temporary files that were removed. Frontend and sidecar were untouched. A full OCR run on a repository PDF remains pending."
+        },
+        {
+          "id": "implement-document-image-harvest",
+          "content": "Later, implement the validated document-image-harvest OpenSpec change with bounded Docling page-image preservation and typed Custodian workspace writes. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Explicitly deferred to protect the current session from a heavy binary-artifact debugging scope."
+        },
+        {
+          "id": "add-document-images-and-text-to-visboard",
+          "content": "Later, add the compatibility-reviewed authenticated document-image renderer and then specify text-plus-image Visboard composition using retained Docling identifiers. Governance reference: GOVERNANCE_FRAMEWORK.md.",
+          "status": "pending",
+          "agent": "coding",
+          "completed_by_model": null,
+          "completed_at": null,
+          "notes": "Related to openspec/changes/visualization-board-alignment, but requires a separate visual schema/version and authenticated asset boundary."
         }
       ]
     }

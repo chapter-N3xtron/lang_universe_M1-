@@ -22,6 +22,7 @@ from src.document_attachments import (
     MAX_ATTACHMENT_BYTES,
     DocumentAttachmentError,
     load_selected_document,
+    preserve_ocr_upload,
     supported_extensions,
 )
 from src.epub_attachments import (
@@ -213,7 +214,21 @@ async def extract_document_attachment(document: UploadFile) -> dict:
 
     data = await document.read(MAX_ATTACHMENT_BYTES + 1)
     try:
-        return load_selected_document(data, document.filename or "attachment")
+        filename = document.filename or "attachment"
+        try:
+            normalized = load_selected_document(data, filename)
+        except DocumentAttachmentError as exc:
+            if str(exc) != "No readable text was found in the selected file":
+                raise
+            normalized = {
+                "filename": Path(filename).name,
+                "format": Path(filename).suffix.removeprefix("."),
+                "text": "",
+                "segments": [],
+                "truncated": False,
+            }
+        normalized["ocr_upload"] = preserve_ocr_upload(data, filename)
+        return normalized
     except DocumentAttachmentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

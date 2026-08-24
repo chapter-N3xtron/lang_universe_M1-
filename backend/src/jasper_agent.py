@@ -29,6 +29,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.ui import AnyUIMessage, push_ui_message, ui_message_reducer
 from langgraph.types import Command
+from pydantic import BaseModel, Field
 
 from src.agent_utils import get_user_query
 from src.custodian_backend import CustodianBackend, CustodianClient, CustodianError
@@ -115,8 +116,62 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     execution_manifest: ExecutionManifest
     coding_task: str
     librarian_task: str
+    ocr_task: str
+    ocr_document_ref: str
+    ocr_output_format: str
     session_evidence: list[dict]
     ui: Annotated[list[AnyUIMessage], ui_message_reducer]
+
+
+OCR_OUTPUT_FORMATS = Literal["markdown", "json", "structured"]
+
+
+class TransferOCRInput(BaseModel):
+    task: str = Field(description="The OCR task to perform")
+    document_ref: str = Field(description="Approved upload reference or workspace path")
+    output_format: OCR_OUTPUT_FORMATS = Field(default="markdown")
+
+
+def _last_ai_message(runtime: ToolRuntime) -> AIMessage:
+    return next(
+        message
+        for message in reversed(runtime.state.get("messages", []))
+        if isinstance(message, AIMessage)
+    )
+
+
+@tool(args_schema=TransferOCRInput)
+def transfer_to_ocr(
+    task: str,
+    document_ref: str,
+    output_format: OCR_OUTPUT_FORMATS = "markdown",
+    *,
+    runtime: ToolRuntime,
+) -> Command[Literal["ocr"]]:
+    """Hand an approved document to the top-level OCR specialist."""
+    if output_format not in {"markdown", "json", "structured"}:
+        raise ValueError("output_format must be markdown, json, or structured")
+    if not task.strip() or not document_ref.strip():
+        raise ValueError("task and document_ref are required")
+    state = runtime.state
+    return Command(
+        goto="ocr",
+        update={
+            "ocr_task": task,
+            "ocr_document_ref": document_ref,
+            "ocr_output_format": output_format,
+            "workspace": state.get("workspace", ""),
+            "model": state.get("model"),
+            "messages": [
+                _last_ai_message(runtime),
+                ToolMessage(
+                    content=f"OCR task: {task}\nDocument: {document_ref}",
+                    tool_call_id=runtime.tool_call_id,
+                ),
+            ],
+        },
+        graph=Command.PARENT,
+    )
 
 
 def _specialists(_model) -> list[CompiledSubAgent]:
@@ -267,6 +322,7 @@ ACTIVE_TOOLS = [
     draw_concept_map,
     transfer_to_coding,
     transfer_to_librarian,
+    transfer_to_ocr,
 ]
 
 
@@ -349,7 +405,8 @@ OPERATIONAL GUIDANCE
 Use tools when they materially improve correctness. Use list_todos for project task
 status and attribution. Use draw_concept_map when the user asks for a diagram or a
 visual map would materially improve understanding. Do not create a visual merely to
-decorate a simple answer.
+decorate a simple answer. For explicit document OCR, delegate with transfer_to_ocr
+and set output_format to markdown, json, or structured.
 
 Use Deep Agents filesystem tools ls, glob, grep, and read_file to inspect only the
 exact selected repository through native Custodian. To read an ordinary text file
@@ -372,11 +429,12 @@ extra approval request.
 Use read_repository_file for every repository file whose
 contents support a grounded visual so its evidence ID can be cited. Delegate external
 research with transfer_to_librarian. Delegate repository
-analysis and coding work with transfer_to_coding. Do not perform either specialist's
-restricted work directly. In approval mode, approved_write_file, approved_edit_file,
+analysis and coding work with transfer_to_coding. Delegate explicit document OCR with
+transfer_to_ocr. Do not perform a specialist's restricted work directly. In approval mode, approved_write_file, approved_edit_file,
 and run_workspace_command are available, and every call pauses for human review.
-They are unavailable in read-only and autonomous modes. Call transfer_to_coding or
-transfer_to_librarian by itself, never in parallel with another tool call.
+They are unavailable in read-only and autonomous modes. Call transfer_to_coding,
+transfer_to_librarian, or transfer_to_ocr by itself, never in parallel with another tool
+call.
 
 When an assistant message named coding returns from the top-level Coding node,
 relay its result to the human. Treat a question, blocker, cancellation, or error as

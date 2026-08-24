@@ -257,6 +257,7 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
         "custodian_git",
         "custodian_compose_read",
         "custodian_compose_change",
+        "custodian_github_publish",
     ]
     assert set(captured["agent"]["interrupt_on"]) == {
         "write_file",
@@ -266,6 +267,7 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
         "custodian_git",
         "custodian_compose_read",
         "custodian_compose_change",
+        "custodian_github_publish",
     }
     assert captured["agent"]["permissions"] is None
     assert captured["agent"]["skills"] is None
@@ -275,6 +277,8 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
     assert "direct Custodian worker: available" in system_prompt
     assert "request_macos_host_operation interfaces" in system_prompt
     assert "/opt/coding-tools" in system_prompt
+    assert "custodian_github_publish" in system_prompt
+    assert "chapter-N3xtron" in system_prompt
     assert "write_todos" in system_prompt
     assert "15-minute report" in system_prompt
     assert "Completion report" in system_prompt
@@ -287,7 +291,8 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
 
     assert captured["agent"]["permissions"] is None
     assert set(captured["agent"]["interrupt_on"]) == {
-        "custodian_compose_change"
+        "custodian_compose_change",
+        "custodian_github_publish",
     }
 
 

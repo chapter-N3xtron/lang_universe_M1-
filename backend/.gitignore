@@ -5,5 +5,7 @@
 # Test environment
 .testenv/
 
-# Local Custodian capability
+# Local Custodian capability and selector state
 .custodian_api_token
+repos/
+selected_repo.txt

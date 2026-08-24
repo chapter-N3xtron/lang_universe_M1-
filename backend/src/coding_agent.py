@@ -79,6 +79,17 @@ class ArgvTask(BaseModel):
     timeout: int = Field(default=60, ge=1, le=300)
 
 
+class GitHubPublishTask(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    repository_name: str = Field(
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+    )
+    description: str = Field(default="", max_length=350)
+
+
 def create_custodian_command_tools(workspace: Path) -> list[StructuredTool]:
     client = CustodianClient(str(workspace), base_url=_HOST_WORKER_URL, timeout=305)
 
@@ -91,6 +102,23 @@ def create_custodian_command_tools(workspace: Path) -> list[StructuredTool]:
         return (
             f"exit_code={result.get('exit_code')} truncated={bool(result.get('truncated'))}\n"
             f"{output}"
+        )
+
+    def publish(repository_name: str, description: str = "") -> str:
+        try:
+            result = client.action(
+                "github_publish",
+                repository_name=repository_name,
+                description=description,
+            )
+        except CustodianError:
+            return "Custodian GitHub publication request failed."
+        if result.get("ok") is not True:
+            return str(result.get("error") or "GitHub publication failed.")
+        return (
+            f"Published private repository {result['owner']}/{result['repository']} "
+            f"from branch {result['branch']} and set it as origin: "
+            f"{result['repository_url']}"
         )
 
     return [
@@ -134,6 +162,18 @@ def create_custodian_command_tools(workspace: Path) -> list[StructuredTool]:
             ),
             args_schema=ArgvTask,
         ),
+        StructuredTool.from_function(
+            func=publish,
+            name="custodian_github_publish",
+            description=(
+                "After the human explicitly requests external publication, create one private "
+                "repository in the fixed chapter-N3xtron GitHub account, push the selected "
+                "repository's committed current branch, and set the new repository as origin. "
+                "Tracked changes must already be committed. GitHub credentials remain with "
+                "Custodian and are never available to the coding agent."
+            ),
+            args_schema=GitHubPublishTask,
+        ),
     ]
 
 
@@ -166,13 +206,27 @@ _LOCAL_APPROVAL_INTERRUPT_ON = {
         "allowed_decisions": ["approve", "edit", "reject"],
         "description": "Approve or reject this Docker Compose deployment change.",
     },
+    "custodian_github_publish": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": (
+            "Approve or reject creating a private chapter-N3xtron repository, pushing "
+            "the selected branch, and replacing origin."
+        ),
+    },
 }
 
 _AUTONOMOUS_BOUNDARY_INTERRUPT_ON = {
     "custodian_compose_change": {
         "allowed_decisions": ["approve", "edit", "reject"],
         "description": "Approve or reject this Docker Compose deployment change.",
-    }
+    },
+    "custodian_github_publish": {
+        "allowed_decisions": ["approve", "edit", "reject"],
+        "description": (
+            "Approve or reject creating a private chapter-N3xtron repository, pushing "
+            "the selected branch, and replacing origin."
+        ),
+    },
 }
 
 
@@ -288,7 +342,10 @@ def _build_deep_agent(
             "boundary. Use custodian_command for allowlisted project argv, custodian_git "
             "for Git argv, custodian_compose_read for Compose inspection, and "
             "custodian_compose_change for deployment changes that always require explicit "
-            "operator approval. Do not request executor, broker, docker_sandbox, or "
+            "operator approval. Use custodian_github_publish only after the human explicitly "
+            "requests a new private repository in chapter-N3xtron; it publishes the committed "
+            "current branch and replaces origin after explicit approval. Do not request "
+            "executor, broker, docker_sandbox, or "
             "request_macos_host_operation interfaces; they are not part of this architecture. "
             "Pass host command executable basenames, never Agent Server paths such as "
             "/opt/coding-tools. Never construct shell strings or claim that commands ran "

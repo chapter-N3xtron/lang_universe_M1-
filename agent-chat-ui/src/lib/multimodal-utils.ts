@@ -123,6 +123,10 @@ export async function fileToContentBlock(
       text?: string;
       segments?: Array<Record<string, unknown>>;
       truncated?: boolean;
+      ocr_upload?: {
+        reference?: string;
+        filename?: string;
+      };
     };
     if (!response.ok) {
       const message = result.detail || "The document could not be read safely.";
@@ -130,6 +134,8 @@ export async function fileToContentBlock(
       throw new Error(message);
     }
     const title = result.filename || file.name;
+    const ocrReference = result.ocr_upload?.reference;
+    const ocrContext = ocrReference ? ` OCR reference: ${ocrReference}.` : "";
     const limitation = result.truncated
       ? " The extracted text was truncated at the attachment safety limit."
       : "";
@@ -140,7 +146,7 @@ export async function fileToContentBlock(
       type: "text-plain",
       text: result.text || "",
       title,
-      context: `Selected ${result.format || "document"} file ${title}.${limitation}`,
+      context: `Selected ${result.format || "document"} file ${title}.${limitation}${ocrContext}`,
       mimeType: "text/markdown",
       metadata: {
         filename: result.filename || file.name,
@@ -148,6 +154,7 @@ export async function fileToContentBlock(
         format: result.format || "document",
         segments: result.segments || [],
         truncated: Boolean(result.truncated),
+        ...(ocrReference ? { ocrReference } : {}),
       },
     } as unknown as ContentBlock.Multimodal.PlainText;
   }

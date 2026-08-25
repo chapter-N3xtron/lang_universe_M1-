@@ -4,6 +4,17 @@ Defines a future human-controlled integration boundary where self-hosted Plane r
 
 ## ADDED Requirements
 
+### Requirement: First local deployment foundation
+The first implementation phase SHALL deploy Plane and Temporal as separate Docker services with their documented dependencies, named persistent volumes, trusted internal-only networks, deployment-specific environment secrets, pinned image references, and independent process-health and dependency-readiness checks. It MUST keep the LangGraph Agent Server disconnected and MUST NOT enable PM mutations, integration workers, dashboard projections, or production migration.
+
+#### Scenario: Local foundation is started
+- **WHEN** an operator starts the approved local Compose file with deployment-specific secrets
+- **THEN** the Plane and Temporal service domains start in dependency order, internal dependencies have no public bindings, and only reviewed localhost UI or diagnostic bindings are available
+
+#### Scenario: Foundation is accepted
+- **WHEN** verification runs after startup
+- **THEN** every selected image has tag and immutable digest evidence, dependency readiness is checked independently from application health, named volumes are present, and the evidence records that Agent Server integration is disconnected
+
 ### Requirement: Plane authority and human editing boundary
 The future system SHALL treat self-hosted Plane as the source of truth for PM records and SHALL keep Plane's native browser UI available for complete human editing. Jasper, TanStack, LangGraph checkpoints, and Temporal workflow state MUST NOT silently become a competing PM database.
 

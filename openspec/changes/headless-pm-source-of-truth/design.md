@@ -1,6 +1,6 @@
 ## Context
 
-A headless project-management authority is needed for durable work records, while the LangGraph Agent Server remains the execution boundary and TanStack/Jasper remains a projection and explanation surface. This change selects Plane and Temporal, but authorizes planning only. Existing changes separately describe visualization presentation/editing, durable interaction records, session anatomy, and human-centered session review. None establishes a PM authority or integration contract.
+A headless project-management authority is needed for durable work records, while the LangGraph Agent Server remains the execution boundary and TanStack/Jasper remains a projection and explanation surface. This change selects Plane and Temporal and authorizes a first local Docker Compose deployment phase. The phase is infrastructure-only: it does not connect either service to the LangGraph Agent Server or enable PM mutations. Existing changes separately describe visualization presentation/editing, durable interaction records, session anatomy, and human-centered session review. None establishes a PM authority or integration contract.
 
 ## Goals / Non-Goals
 
@@ -8,14 +8,15 @@ A headless project-management authority is needed for durable work records, whil
 
 - Establish Plane as the authoritative self-hosted project-management system and keep Plane's native browser UI first-class for complete human editing.
 - Establish Temporal as the self-hosted workflow/orchestration system for future integration jobs, retries, schedules, and durable workflow history; it is not a PM record store.
-- Capture a reviewable dependency, persistence, security, configuration, readiness, image provenance, rollback, and verification plan before implementation.
+- Establish a reviewable first local Compose deployment with documented dependencies, persistence, security, configuration, readiness, image provenance, rollback, and verification evidence.
 - Preserve explicit attribution, audit, preview, approval, revision/conflict, and deep-link requirements.
 - Keep OpenSpec and agent-run relationships reference-based and rebuildable.
 
 **Non-Goals:**
 
-- Installing or starting Plane, Temporal, Docker Compose, or any dependency.
-- Building deployment files, a PM engine, an integration adapter, a dashboard, a ticket database, or a synchronization job.
+- Connecting Plane or Temporal to the LangGraph Agent Server.
+- Building a PM engine, integration adapter, dashboard, ticket database, or synchronization job.
+- Treating local Compose acceptance as production readiness or production migration.
 - Moving PM data into LangGraph checkpoints, Temporal workflow history, todos, governance artifacts, or the existing session catalog.
 - Inventing exact image tags, service health endpoints, licensing conclusions, or production guarantees.
 
@@ -55,7 +56,7 @@ A headless project-management authority is needed for durable work records, whil
 
 ## Migration Plan
 
-No migration or runtime change is authorized. A future implementation must first confirm Plane and Temporal versions, supported API and workflow boundaries, identity/authorization and revision contracts, persistence and backup strategy, network exposure, and health/readiness probes. It should then validate read-only links and projections before enabling attributed writes. Rollback must disable new integration workflows and writes, stop or drain future work according to the selected Temporal policy, preserve authoritative Plane records and audit evidence, and never delete PM data or checkpoint references as an automatic rollback side effect.
+The first phase makes only a local runtime deployment change. It confirms the selected Plane and Temporal image inputs, supported dependency topology, persistence, network exposure, and process/readiness probes. No Agent Server integration, PM mutation, identity/authorization contract, or production migration is enabled. A later implementation must confirm those boundaries before enabling attributed writes. It should then validate read-only links and projections before enabling attributed writes. Rollback must disable new integration workflows and writes, stop or drain future work according to the selected Temporal policy, preserve authoritative Plane records and audit evidence, and never delete PM data or checkpoint references as an automatic rollback side effect.
 
 ## Open Questions / Decision Tasks
 

@@ -1,18 +1,16 @@
 name: langgraph-local-topology
 
-# Local evaluation topology only. Plane and Temporal are separate trust domains and
-# are not connected to the LangGraph Agent Server in this phase.
-# Image tags are overridden by the deployment manifest; use immutable digests for release.
+# Local evaluation only. Plane and Temporal remain separate trust domains and are
+# disconnected from the LangGraph Agent Server in this phase.
 services:
   plane-db:
     image: postgres:15.7-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PLANE_DB_USER:-plane}
-      POSTGRES_PASSWORD: ${PLANE_DB_PASSWORD:?copy .env.example to .env and set a local value}
+      POSTGRES_PASSWORD: ${PLANE_DB_PASSWORD:?set in .env}
       POSTGRES_DB: ${PLANE_DB_NAME:-plane}
-    volumes:
-      - plane-postgres:/var/lib/postgresql/data
+    volumes: [plane-postgres:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${PLANE_DB_USER:-plane} -d ${PLANE_DB_NAME:-plane}"]
       interval: 10s
@@ -24,8 +22,7 @@ services:
     image: redis:7.2.5-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - plane-redis:/data
+    volumes: [plane-redis:/data]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -36,8 +33,7 @@ services:
   plane-rabbitmq:
     image: rabbitmq:3.13.7-management-alpine
     restart: unless-stopped
-    volumes:
-      - plane-rabbitmq:/var/lib/rabbitmq
+    volumes: [plane-rabbitmq:/var/lib/rabbitmq]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -48,12 +44,11 @@ services:
   plane-minio:
     image: minio/minio:RELEASE.2024-08-17T01-24-54Z
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${PLANE_OBJECT_STORAGE_USER:-plane-local}
       MINIO_ROOT_PASSWORD: ${PLANE_OBJECT_STORAGE_PASSWORD:?set in .env}
-    volumes:
-      - plane-minio:/data
+    volumes: [plane-minio:/data]
     expose: ["9000", "9001"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
@@ -62,8 +57,6 @@ services:
       retries: 10
     networks: [plane]
 
-  # Plane application images are official makeplane images. The selected
-  # release's API contract is isolated here; no LangGraph integration is wired.
   plane-api:
     image: makeplane/plane-backend:${PLANE_VERSION:-v1.26.0}
     restart: unless-stopped
@@ -84,11 +77,11 @@ services:
   plane-web:
     image: makeplane/plane-frontend:${PLANE_VERSION:-v1.26.0}
     restart: unless-stopped
-    depends_on: [plane-api]
+    depends_on:
+      plane-api: {condition: service_healthy}
     environment:
       API_BASE_URL: http://plane-api:8000
-    ports:
-      - "127.0.0.1:${PLANE_UI_PORT:-8080}:80"
+    ports: ["127.0.0.1:${PLANE_UI_PORT:-8080}:80"]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80 || exit 1"]
       interval: 15s
@@ -101,10 +94,9 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
-      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:?copy .env.example to .env and set a local value}
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:?set in .env}
       POSTGRES_DB: ${TEMPORAL_DB_NAME:-temporal}
-    volumes:
-      - temporal-postgres:/var/lib/postgresql/data
+    volumes: [temporal-postgres:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_DB_USER:-temporal} -d ${TEMPORAL_DB_NAME:-temporal}"]
       interval: 10s
@@ -124,8 +116,7 @@ services:
       POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:?set in .env}
       POSTGRES_SEEDS: temporal-db
       DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development.yaml
-    ports:
-      - "127.0.0.1:${TEMPORAL_GRPC_PORT:-7233}:7233"
+    ports: ["127.0.0.1:${TEMPORAL_GRPC_PORT:-7233}:7233"]
     healthcheck:
       test: ["CMD-SHELL", "temporal operator cluster health --address 127.0.0.1:7233"]
       interval: 15s
@@ -136,11 +127,11 @@ services:
   temporal-ui:
     image: temporalio/ui:2.34.0
     restart: unless-stopped
-    depends_on: [temporal]
+    depends_on:
+      temporal: {condition: service_healthy}
     environment:
       TEMPORAL_ADDRESS: temporal:7233
-    ports:
-      - "127.0.0.1:${TEMPORAL_UI_PORT:-8088}:8080"
+    ports: ["127.0.0.1:${TEMPORAL_UI_PORT:-8088}:8080"]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080 || exit 1"]
       interval: 15s
@@ -151,8 +142,7 @@ services:
   placeholder-ui:
     build: {context: ./frontend}
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${PLACEHOLDER_UI_PORT:-8090}:8080"
+    ports: ["127.0.0.1:${PLACEHOLDER_UI_PORT:-8090}:8080"]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz || exit 1"]
       interval: 10s

@@ -25,7 +25,7 @@ cp .env.example .env
 # edit .env locally; do not paste values into source files
 
 docker compose config
-docker compose up -d --build
+docker compose up --detach --build
 docker compose ps
 docker compose logs --tail=100 plane-api temporal temporal-ui placeholder-ui
 

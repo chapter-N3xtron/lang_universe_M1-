@@ -16,11 +16,11 @@ This record is safe to commit and contains no credentials.
 Run through the approved Docker sandbox route from the repository root:
 
 1. `docker compose -f local-deployment-sandbox/compose.yaml config`
-2. `docker compose -f local-deployment-sandbox/compose.yaml up -d --build --wait`
+2. `docker compose -f local-deployment-sandbox/compose.yaml up --detach --build --wait`
 3. `docker compose -f local-deployment-sandbox/compose.yaml ps`
 4. Verify the health checks and the localhost-only Plane, Temporal UI, and placeholder health endpoints.
 5. Record every resolved image digest in the host receipt and retain named volumes across a stop/start check.
 
 ## Current run
 
-OpenSpec strict validation passed. The requested Docker action was attempted once through the available typed Compose boundary, but the boundary invoked the Docker command without the Compose subcommand and returned exit code 125 (`unknown shorthand flag: 'd'`). Therefore no containers were created or started, no runtime digests or service health evidence exists, and this record must not be treated as deployment acceptance. The exact blocker is the unavailable/incompatible requested `docker_sandbox` / `request_macos_host_operation` execution interface in this run.
+OpenSpec 1.7.0 strict validation passed. The typed Compose deployment action produced the exact command order `docker compose -f local-deployment-sandbox/compose.yaml up --detach`, but Compose stopped before container creation because the required local `.env` values were absent: `PLANE_DB_PASSWORD`, `PLANE_OBJECT_STORAGE_PASSWORD`, and `TEMPORAL_DB_PASSWORD`. No containers, runtime digests, health evidence, endpoint evidence, or persistence evidence exists; this record is not deployment acceptance. The credentials were not printed or recorded. A local `.env` with unique values must be supplied before retrying the one deployment action; it is ignored by Git and is not part of the committed deployment artifacts.

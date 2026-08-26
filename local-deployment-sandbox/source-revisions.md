@@ -4,8 +4,9 @@ Selected for the first local Compose evaluation on 2026-08-23. The repository re
 
 | Component | Image/tag | Immutable digest | Official source | Upgrade/rollback note |
 |---|---|---|---|---|
-| Plane API | `makeplane/plane-backend:stable` | Host receipt | https://developers.plane.so/self-hosting/methods/docker-compose | Re-pin after release compatibility review; stop and preserve volumes to roll back |
-| Plane web | `makeplane/plane-frontend:stable` | Host receipt | https://developers.plane.so/self-hosting/methods/docker-compose | Re-pin with API; do not mix release lines |
+| Plane API, migrator, worker, and beat | `makeplane/plane-backend:stable` | Host receipt | https://developers.plane.so/self-hosting/methods/docker-compose; https://hub.docker.com/r/makeplane/plane-backend/tags | Public Community Edition backend selected after rejecting the missing/stale image reference; re-pin after release compatibility review; stop and preserve volumes to roll back |
+| Plane admin | `makeplane/plane-admin:stable` | Host receipt | https://developers.plane.so/self-hosting/methods/docker-compose | Community Edition admin image; keep on the same stable release channel as the backend |
+| Plane web | `makeplane/plane-frontend:stable` | Host receipt | https://developers.plane.so/self-hosting/methods/docker-compose | Community Edition frontend; keep on the same stable release channel as the backend |
 | Plane database | `postgres:15.7-alpine` | Host receipt | https://hub.docker.com/_/postgres | Logical backup before upgrade; preserve named volume |
 | Plane Redis | `redis:7.2.5-alpine` | Host receipt | https://hub.docker.com/_/redis | Preserve append-only volume; verify restore |
 | Plane RabbitMQ | `rabbitmq:3.13.7-management-alpine` | Host receipt | https://hub.docker.com/_/rabbitmq | Drain/stop before upgrade; preserve broker volume |

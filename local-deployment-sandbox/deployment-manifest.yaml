@@ -44,11 +44,11 @@ images:
     image: minio/minio:RELEASE.2024-08-17T01-24-54Z
     source: https://hub.docker.com/r/minio/minio
   - service: plane-api
-    image: makeplane/plane-backend:v1.26.0
-    source: https://github.com/makeplane/plane
+    image: makeplane/plane-backend:stable
+    source: https://developers.plane.so/self-hosting/methods/docker-compose
   - service: plane-web
-    image: makeplane/plane-frontend:v1.26.0
-    source: https://github.com/makeplane/plane
+    image: makeplane/plane-frontend:stable
+    source: https://developers.plane.so/self-hosting/methods/docker-compose
   - service: temporal-db
     image: postgres:16.4-alpine
     source: https://hub.docker.com/_/postgres

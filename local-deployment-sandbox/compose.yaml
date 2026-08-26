@@ -51,14 +51,14 @@ services:
     volumes: [plane-minio:/data]
     expose: ["9000", "9001"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 10
     networks: [plane]
 
   plane-api:
-    image: makeplane/plane-backend:${PLANE_VERSION:-v1.26.0}
+    image: makeplane/plane-backend:stable
     restart: unless-stopped
     depends_on:
       plane-db: {condition: service_healthy}
@@ -66,6 +66,9 @@ services:
       plane-rabbitmq: {condition: service_healthy}
       plane-minio: {condition: service_healthy}
     env_file: [.env]
+    environment:
+      REDIS_URL: redis://plane-redis:6379/0
+      DATABASE_URL: postgresql://${PLANE_DB_USER:-plane}:${PLANE_DB_PASSWORD:?set in .env}@plane-db:5432/${PLANE_DB_NAME:-plane}
     expose: ["8000"]
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/api/health/\")'"]
@@ -75,7 +78,7 @@ services:
     networks: [plane]
 
   plane-web:
-    image: makeplane/plane-frontend:${PLANE_VERSION:-v1.26.0}
+    image: makeplane/plane-frontend:stable
     restart: unless-stopped
     depends_on:
       plane-api: {condition: service_healthy}
@@ -110,12 +113,11 @@ services:
     depends_on:
       temporal-db: {condition: service_healthy}
     environment:
-      DB: postgresql
+      DB: postgres12
       DB_PORT: 5432
       POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
       POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:?set in .env}
       POSTGRES_SEEDS: temporal-db
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development.yaml
     ports: ["127.0.0.1:${TEMPORAL_GRPC_PORT:-7233}:7233"]
     healthcheck:
       test: ["CMD-SHELL", "temporal operator cluster health --address 127.0.0.1:7233"]

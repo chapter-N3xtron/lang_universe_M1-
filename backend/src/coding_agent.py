@@ -8,7 +8,7 @@ import operator
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypeAlias
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -22,6 +22,7 @@ from langgraph.graph.ui import (
     ui_message_reducer,
 )
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import TypedDict
 
 from src.coding_persistence import coding_session_id, export_coding_session
 from src.custodian_backend import CustodianBackend, CustodianClient, CustodianError
@@ -37,17 +38,44 @@ from src.workspace_policy import (
 InvalidWorkspaceError = WorkspacePolicyError
 
 
-class CodingAgentState(TypedDict, total=False):
-    messages: Annotated[list[Any], operator.add]
+CoderMessages: TypeAlias = Annotated[list[Any], operator.add]
+CoderUIEvents: TypeAlias = Annotated[list[AnyUIMessage], ui_message_reducer]
+CoderStatus: TypeAlias = Literal["completed", "blocked", "error"]
+
+
+class CoderInputState(TypedDict, total=False):
+    messages: CoderMessages
     workspace: str
     model: str | None
     execution_mode: str
     thread_identity: str
     user_identity: str
     coding_session_id: str
-    coding_status: str
+
+
+class CoderOutputState(TypedDict, total=False):
+    messages: CoderMessages
+    workspace: str
     execution_manifest: ExecutionManifest
-    ui: Annotated[list[AnyUIMessage], ui_message_reducer]
+    coding_session_id: str
+    coding_status: CoderStatus
+    ui: CoderUIEvents
+
+
+class CoderState(TypedDict, total=False):
+    messages: CoderMessages
+    workspace: str
+    model: str | None
+    execution_mode: str
+    thread_identity: str
+    user_identity: str
+    coding_session_id: str
+    coding_status: CoderStatus
+    execution_manifest: ExecutionManifest
+    ui: CoderUIEvents
+
+
+CodingAgentState = CoderState
 
 
 logger = logging.getLogger(__name__)
@@ -55,7 +83,9 @@ logger = logging.getLogger(__name__)
 _SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str, str], Any] = OrderedDict()
 _SESSION_AGENT_CACHE_SIZE = 8
 _CODING_PROGRESS_INTERVAL_SECONDS = 15 * 60
-_HOST_WORKER_URL = os.getenv("CUSTODIAN_WORKER_URL", "http://host.docker.internal:8765").rstrip("/")
+_HOST_WORKER_URL = os.getenv(
+    "CUSTODIAN_WORKER_URL", "http://host.docker.internal:8765"
+).rstrip("/")
 
 
 class ComposeTask(BaseModel):
@@ -703,8 +733,8 @@ async def _stream_session(
 
 
 async def deep_agents_coding_node(
-    state: CodingAgentState, config: RunnableConfig = None
-) -> dict[str, Any]:
+    state: CoderState, config: RunnableConfig = None
+) -> CoderOutputState:
     session_id = ""
     manifest: ExecutionManifest | None = None
     workspace: Path | None = None
@@ -793,7 +823,11 @@ async def deep_agents_coding_node(
 
 
 def create_coding_agent_graph():
-    graph = StateGraph(CodingAgentState)
+    graph = StateGraph(
+        CoderState,
+        input_schema=CoderInputState,
+        output_schema=CoderOutputState,
+    )
     graph.add_node("coding_agent", deep_agents_coding_node)
     graph.add_edge(START, "coding_agent")
     graph.add_edge("coding_agent", END)

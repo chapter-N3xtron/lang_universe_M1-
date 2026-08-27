@@ -7,7 +7,9 @@ import os
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal
+
+from typing_extensions import TypedDict
 
 
 class WorkspacePolicyError(ValueError):
@@ -79,7 +81,9 @@ def host_worker_available() -> bool:
     if not base_url:
         return False
     try:
-        with urllib.request.urlopen(f"{base_url.rstrip('/')}/health", timeout=1.0) as response:
+        with urllib.request.urlopen(
+            f"{base_url.rstrip('/')}/health", timeout=1.0
+        ) as response:
             payload = json.loads(response.read(4096).decode("utf-8"))
         return response.status == 200 and (
             payload.get("ok") is True or payload.get("status") == "ok"

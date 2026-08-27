@@ -220,7 +220,9 @@ def test_documented_execute_tool_requires_approval(monkeypatch, tmp_path):
         app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
     )
 
-    tool_messages = [message for message in result["messages"] if message.type == "tool"]
+    tool_messages = [
+        message for message in result["messages"] if message.type == "tool"
+    ]
     assert str(tmp_path.resolve()) in tool_messages[-1].content
 
 
@@ -436,8 +438,9 @@ def test_production_wrapper_surfaces_and_resumes_approval(monkeypatch, tmp_path)
 
     monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
 
-    graph = StateGraph(coding_agent.CodingAgentState)
-    graph.add_node("coding", coding_agent.deep_agents_coding_node)
+    coder_graph = coding_agent.create_coding_agent_graph()
+    graph = StateGraph(coding_agent.CoderState)
+    graph.add_node("coding", coder_graph)
     graph.add_edge(START, "coding")
     app = graph.compile(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "outer-approval"}}
@@ -519,9 +522,7 @@ def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_directly(
     assert result["coding_status"] == "completed"
 
 
-def test_native_wrapper_resumes_ordered_chained_approval_batches(
-    monkeypatch, tmp_path
-):
+def test_native_wrapper_resumes_ordered_chained_approval_batches(monkeypatch, tmp_path):
     from src import coding_agent
 
     nested = _approval_app(monkeypatch, tmp_path, _chained_approval_model())
@@ -530,8 +531,9 @@ def test_native_wrapper_resumes_ordered_chained_approval_batches(
         return nested
 
     monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
-    graph = StateGraph(coding_agent.CodingAgentState)
-    graph.add_node("coding", coding_agent.deep_agents_coding_node)
+    coder_graph = coding_agent.create_coding_agent_graph()
+    graph = StateGraph(coding_agent.CoderState)
+    graph.add_node("coding", coder_graph)
     graph.add_edge(START, "coding")
     app = graph.compile(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "outer-chained-approvals"}}
@@ -547,11 +549,7 @@ def test_native_wrapper_resumes_ordered_chained_approval_batches(
 
     second = asyncio.run(
         app.ainvoke(
-            Command(
-                resume={
-                    "decisions": [{"type": "approve"}, {"type": "approve"}]
-                }
-            ),
+            Command(resume={"decisions": [{"type": "approve"}, {"type": "approve"}]}),
             config=config,
         )
     )

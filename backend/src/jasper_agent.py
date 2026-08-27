@@ -9,12 +9,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal, TypedDict
 from uuid import uuid4
 
-from deepagents import (
-    CompiledSubAgent,
-    DeepAgentState,
-    FilesystemPermission,
-    create_deep_agent,
-)
+from deepagents import CompiledSubAgent, DeepAgentState, create_deep_agent
 from deepagents.middleware import FilesystemMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -520,34 +515,9 @@ def _middleware():
     ]
 
 
-def _workspace_backend(
-    workspace: str | None,
-) -> tuple[CustodianBackend, list[FilesystemPermission]]:
+def _workspace_backend(workspace: str | None) -> CustodianBackend:
     root = canonical_workspace(workspace)
-    backend = CustodianBackend(str(root), read_only=True)
-    permissions = [
-        FilesystemPermission(
-            operations=["read", "write"],
-            paths=[
-                "/.env",
-                "/.env.*",
-                "/**/.env",
-                "/**/.env.*",
-                "/.git",
-                "/.git/**",
-                "/**/.git",
-                "/**/.git/**",
-                "/**/*.key",
-                "/**/*.pem",
-                "/**/*.p12",
-                "/**/*.pfx",
-            ],
-            mode="deny",
-        ),
-        FilesystemPermission(operations=["read"], paths=["/**"], mode="allow"),
-        FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
-    ]
-    return backend, permissions
+    return CustodianBackend(str(root), read_only=True)
 
 
 def _build_agent(
@@ -578,7 +548,7 @@ def _build_agent(
             name="jasper",
         )
 
-    backend, permissions = _workspace_backend(workspace)
+    backend = _workspace_backend(workspace)
     root = canonical_workspace(workspace)
     approval_mode = execution_mode == "approval"
     active_tools = list(ACTIVE_TOOLS if tools is None else tools)
@@ -597,7 +567,7 @@ def _build_agent(
         ],
         subagents=_specialists(model),
         backend=backend,
-        permissions=permissions,
+        permissions=None,
         interrupt_on=APPROVAL_INTERRUPT_ON if approval_mode else None,
         response_format=response_format,
         state_schema=JasperDeepAgentState,

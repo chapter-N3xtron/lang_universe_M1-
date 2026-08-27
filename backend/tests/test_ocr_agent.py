@@ -203,6 +203,16 @@ def test_docx_preserves_docling_headings_and_paragraph_boundaries():
     assert document.paragraphs[0].style.name == "Heading 1"
 
 
+def test_langgraph_image_installs_docling_shared_libraries():
+    config_path = Path(__file__).parents[1] / "langgraph.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    dockerfile = "\n".join(config["dockerfile_lines"])
+
+    assert "libxcb1" in dockerfile
+    assert "libgl1" in dockerfile
+    assert "libglib2.0-0" in dockerfile
+
+
 def test_ocr_runs_surya_phase_before_glm_verification(monkeypatch, tmp_path):
     document = tmp_path / "scan.pdf"
     document.write_bytes(b"pdf")

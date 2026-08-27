@@ -19,7 +19,7 @@ dependencies = [
     "firecrawl-py>=1.0.0",
     "langchain-ollama>=0.2.0,<1",
     "langchain-huggingface>=1.2.2,<2",
-    "deepagents==0.7.0b2",
+    "deepagents==0.7.8",
     "fastapi>=0.115.0,<1",
     "uvicorn[standard]>=0.32.0,<1",
     "python-dotenv>=1.0.0",

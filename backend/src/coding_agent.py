@@ -8,7 +8,7 @@ import operator
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -50,20 +50,6 @@ class CodingAgentState(TypedDict, total=False):
     ui: Annotated[list[AnyUIMessage], ui_message_reducer]
 
 
-_SENSITIVE_VIRTUAL_PATHS = [
-    "/.env",
-    "/.env.*",
-    "/**/.env",
-    "/**/.env.*",
-    "/.git",
-    "/.git/**",
-    "/**/.git",
-    "/**/.git/**",
-    "/**/*.key",
-    "/**/*.pem",
-    "/**/*.p12",
-    "/**/*.pfx",
-]
 logger = logging.getLogger(__name__)
 
 _SESSION_AGENT_CACHE: OrderedDict[tuple[str, str, str, str], Any] = OrderedDict()
@@ -72,11 +58,51 @@ _CODING_PROGRESS_INTERVAL_SECONDS = 15 * 60
 _HOST_WORKER_URL = os.getenv("CUSTODIAN_WORKER_URL", "http://host.docker.internal:8765").rstrip("/")
 
 
-class ArgvTask(BaseModel):
+class ComposeTask(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    argv: list[str] = Field(min_length=1, max_length=128)
+    compose_files: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description=(
+            "Repository-relative Compose file paths. Omit this field to use the "
+            "repository's default Compose file."
+        ),
+    )
+    arguments: list[str] = Field(
+        default_factory=list,
+        max_length=128,
+        description=(
+            "Options and service names that follow the Compose subcommand. Do not include "
+            "docker, compose, --file, or the subcommand here."
+        ),
+    )
     timeout: int = Field(default=60, ge=1, le=300)
+
+
+class ComposeReadTask(ComposeTask):
+    subcommand: Literal["config", "logs", "ps"] = Field(
+        description="The read-only Docker Compose subcommand to execute."
+    )
+
+
+class ComposeChangeTask(ComposeTask):
+    subcommand: Literal["build", "pull", "start", "stop", "restart", "up", "down"] = (
+        Field(description="The Docker Compose deployment subcommand to execute.")
+    )
+
+
+class ComposeEnvironmentTask(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    compose_file: str = Field(
+        min_length=1,
+        max_length=4096,
+        description=(
+            "Repository-relative Docker Compose file whose explicitly required local "
+            "variables Custodian should generate beside it."
+        ),
+    )
 
 
 class GitHubPublishTask(BaseModel):
@@ -90,7 +116,7 @@ class GitHubPublishTask(BaseModel):
     description: str = Field(default="", max_length=350)
 
 
-def create_custodian_command_tools(workspace: Path) -> list[StructuredTool]:
+def create_custodian_boundary_tools(workspace: Path) -> list[StructuredTool]:
     client = CustodianClient(str(workspace), base_url=_HOST_WORKER_URL, timeout=305)
 
     def invoke(action: str, argv: list[str], timeout: int = 60) -> str:
@@ -102,6 +128,36 @@ def create_custodian_command_tools(workspace: Path) -> list[StructuredTool]:
         return (
             f"exit_code={result.get('exit_code')} truncated={bool(result.get('truncated'))}\n"
             f"{output}"
+        )
+
+    def invoke_compose(
+        action: str,
+        subcommand: str,
+        compose_files: list[str] | None = None,
+        arguments: list[str] | None = None,
+        timeout: int = 60,
+    ) -> str:
+        argv = [
+            item
+            for compose_file in (compose_files or [])
+            for item in ("--file", compose_file)
+        ]
+        argv.extend([subcommand, *(arguments or [])])
+        return invoke(action, argv, timeout)
+
+    def prepare_compose_environment(compose_file: str) -> str:
+        try:
+            result = client.action(
+                "compose_prepare_environment", compose_file=compose_file
+            )
+        except CustodianError:
+            return "Custodian Compose environment preparation failed."
+        if result.get("ok") is not True:
+            return str(result.get("error") or "Compose environment preparation failed.")
+        return (
+            "Custodian prepared the broker-held Compose environment with "
+            f"{int(result.get('generated') or 0)} newly generated value(s). "
+            "No credential values were returned to the coding agent."
         )
 
     def publish(repository_name: str, description: str = "") -> str:
@@ -123,44 +179,54 @@ def create_custodian_command_tools(workspace: Path) -> list[StructuredTool]:
 
     return [
         StructuredTool.from_function(
-            func=lambda argv, timeout=60: invoke("command", argv, timeout),
-            name="custodian_command",
+            func=prepare_compose_environment,
+            name="custodian_compose_prepare_environment",
             description=(
-                "Run one allowlisted host project command in the exact selected repository. "
-                "Begin argv with an executable basename such as pnpm, never an absolute "
-                "Agent Server path such as /opt/coding-tools. For OpenSpec 1.7, use pnpm "
-                "dlx @fission-ai/openspec@1.7.0. Shell strings, pipes, redirects, and "
-                "expansion are not supported."
+                "Generate any explicitly required local Docker Compose variables through "
+                "Custodian and write them to an ignored .env file beside the selected Compose "
+                "file. Values remain broker-held and are never returned to the coding agent. "
+                "Use this when Compose reports missing local environment values; do not ask the "
+                "human to create or reveal them."
             ),
-            args_schema=ArgvTask,
+            args_schema=ComposeEnvironmentTask,
         ),
         StructuredTool.from_function(
-            func=lambda argv, timeout=60: invoke("git", argv, timeout),
-            name="custodian_git",
-            description=(
-                "Run an allowlisted Git subcommand in the selected repository. Pass argv "
-                "beginning with the Git subcommand, not a shell command."
+            func=lambda subcommand, compose_files=None, arguments=None, timeout=60: (
+                invoke_compose(
+                    "compose_read",
+                    subcommand,
+                    compose_files,
+                    arguments,
+                    timeout,
+                )
             ),
-            args_schema=ArgvTask,
-        ),
-        StructuredTool.from_function(
-            func=lambda argv, timeout=60: invoke("compose_read", argv, timeout),
             name="custodian_compose_read",
             description=(
-                "Inspect Docker Compose state with config, logs, or ps in the selected "
-                "repository. Pass argv beginning with the Compose subcommand."
+                "Inspect Docker Compose state in the selected repository. Select config, logs, "
+                "or ps as subcommand; provide Compose files and trailing arguments in their "
+                "separate typed fields."
             ),
-            args_schema=ArgvTask,
+            args_schema=ComposeReadTask,
         ),
         StructuredTool.from_function(
-            func=lambda argv, timeout=60: invoke("compose_change", argv, timeout),
+            func=lambda subcommand, compose_files=None, arguments=None, timeout=60: (
+                invoke_compose(
+                    "compose_change",
+                    subcommand,
+                    compose_files,
+                    arguments,
+                    timeout,
+                )
+            ),
             name="custodian_compose_change",
             description=(
-                "Request an explicitly reviewed Docker Compose deployment change. This "
-                "always pauses for operator approval before build, pull, start, stop, "
-                "restart, up, or down."
+                "Run a Docker Compose deployment change requested by the human. Select build, "
+                "pull, start, stop, restart, up, or down as subcommand; provide Compose files "
+                "and trailing options or service names in their separate typed fields. The "
+                "explicit task request authorizes the requested sequence without a second "
+                "per-command interruption."
             ),
-            args_schema=ArgvTask,
+            args_schema=ComposeChangeTask,
         ),
         StructuredTool.from_function(
             func=publish,
@@ -190,21 +256,13 @@ _LOCAL_APPROVAL_INTERRUPT_ON = {
         "allowed_decisions": ["approve", "reject"],
         "description": "Review a file deletion in the selected repository.",
     },
-    "custodian_command": {
+    "execute": {
         "allowed_decisions": ["approve", "edit", "reject"],
-        "description": "Review an argv-only project command in the selected repository.",
-    },
-    "custodian_git": {
-        "allowed_decisions": ["approve", "edit", "reject"],
-        "description": "Review an argv-only Git command in the selected repository.",
+        "description": "Review a native Custodian shell command in the selected repository.",
     },
     "custodian_compose_read": {
         "allowed_decisions": ["approve", "edit", "reject"],
         "description": "Review a read-only Docker Compose inspection.",
-    },
-    "custodian_compose_change": {
-        "allowed_decisions": ["approve", "edit", "reject"],
-        "description": "Approve or reject this Docker Compose deployment change.",
     },
     "custodian_github_publish": {
         "allowed_decisions": ["approve", "edit", "reject"],
@@ -216,10 +274,6 @@ _LOCAL_APPROVAL_INTERRUPT_ON = {
 }
 
 _AUTONOMOUS_BOUNDARY_INTERRUPT_ON = {
-    "custodian_compose_change": {
-        "allowed_decisions": ["approve", "edit", "reject"],
-        "description": "Approve or reject this Docker Compose deployment change.",
-    },
     "custodian_github_publish": {
         "allowed_decisions": ["approve", "edit", "reject"],
         "description": (
@@ -251,11 +305,10 @@ def _tool_calls(message: Any) -> list[dict[str, Any]]:
 
 
 def _deep_agent_components():
-    # Lazy imports let the rollback backend and unit tests start without loading
-    # the comparatively large Deep Agents dependency tree.
-    from deepagents import FilesystemPermission, create_deep_agent
+    from deepagents import create_deep_agent
+    from langchain.agents.middleware import TodoListMiddleware
 
-    return FilesystemPermission, create_deep_agent
+    return TodoListMiddleware, create_deep_agent
 
 
 def _execution_mode(raw_mode: str | None) -> str:
@@ -270,30 +323,13 @@ def _build_deep_agent(
     execution_mode: str = "read_only",
     checkpointer: Any = None,
 ):
-    permission_type, create_deep_agent = _deep_agent_components()
+    todo_middleware_type, create_deep_agent = _deep_agent_components()
     mode = _execution_mode(execution_mode)
     approval_mode = mode == "approval"
     autonomous_mode = mode == "autonomous"
-    permissions = [
-        permission_type(
-            operations=["read", "write"],
-            paths=_SENSITIVE_VIRTUAL_PATHS,
-            mode="deny",
-        ),
-    ]
-    permissions.extend(
-        [
-            permission_type(operations=["read"], paths=["/**"], mode="allow"),
-            permission_type(
-                operations=["write"],
-                paths=["/**"],
-                mode="allow" if approval_mode or autonomous_mode else "deny",
-            ),
-        ]
-    )
     mutable_mode = approval_mode or autonomous_mode
     backend = CustodianBackend(str(workspace), read_only=not mutable_mode)
-    tools = create_custodian_command_tools(workspace) if mutable_mode else []
+    tools = create_custodian_boundary_tools(workspace) if mutable_mode else []
     interrupt_on = (
         _LOCAL_APPROVAL_INTERRUPT_ON
         if approval_mode
@@ -303,20 +339,20 @@ def _build_deep_agent(
     )
     if approval_mode:
         mutation_prompt = (
-            "Use the built-in repository file tools and typed Custodian command tools. "
-            "Every write, edit, deletion, or command pauses for human review. "
-            "Commands start in the selected repository. Never read or modify secrets "
-            "or edit .git files directly. Use normal Git commands for repository "
-            "management; commit only when the human explicitly requests it. Remote Git "
-            "operations are unavailable."
+            "Use the built-in repository file tools and the built-in execute tool. "
+            "Repository writes, edits, deletions, and execute calls pause for human review. "
+            "Commands run through native Custodian and start in the selected repository. "
+            "Never read or modify secrets or edit .git files directly. Use normal Git commands "
+            "for repository management; commit only when the human explicitly requests it. "
+            "Remote Git operations are unavailable."
         )
     elif autonomous_mode:
         mutation_prompt = (
-            "Work autonomously in the selected repository using the native Custodian "
-            "filesystem backend and typed command tools. Follow repository instructions and validate "
-            "your work with the available project commands. Never read or modify secrets "
-            "or edit .git files directly. Commit only when the human explicitly requests it; "
-            "remote Git operations are unavailable."
+            "Work autonomously in the selected repository using the native Custodian filesystem "
+            "backend and built-in execute tool. Follow repository instructions and validate your "
+            "work with normal shell commands. Never read or modify secrets or edit .git files "
+            "directly. Commit only when the human explicitly requests it; remote Git operations "
+            "are unavailable."
         )
     else:
         mutation_prompt = (
@@ -333,27 +369,34 @@ def _build_deep_agent(
         tools=tools,
         name="coding_agent",
         system_prompt=(
-            "You are the repository coding agent. The exact selected repository is "
-            "authoritative, including when it is empty. Never search parent, child, "
-            "or sibling directories for another repository; never substitute the "
-            "home directory, current working directory, /workspace, or another "
-            "checkout. Use absolute virtual paths rooted at /, which maps only to "
-            "the selected repository. Native Custodian is the sole filesystem and command "
-            "boundary. Use custodian_command for allowlisted project argv, custodian_git "
-            "for Git argv, custodian_compose_read for Compose inspection, and "
-            "custodian_compose_change for deployment changes that always require explicit "
-            "operator approval. Use custodian_github_publish only after the human explicitly "
-            "requests a new private repository in chapter-N3xtron; it publishes the committed "
-            "current branch and replaces origin after explicit approval. Do not request "
-            "executor, broker, docker_sandbox, or "
-            "request_macos_host_operation interfaces; they are not part of this architecture. "
-            "Pass host command executable basenames, never Agent Server paths such as "
-            "/opt/coding-tools. Never construct shell strings or claim that commands ran "
-            "in the Agent Server container. "
-            f"Every operation is bound to the exact host repository {workspace}. "
+            "You are the repository coding agent. The exact selected repository is authoritative, "
+            "including when it is empty. Never search parent, child, or sibling directories for "
+            "another repository or substitute another checkout. The built-in filesystem uses "
+            "absolute virtual paths rooted at /, which maps only to the selected repository. "
+            "Native Custodian is the sole filesystem and command boundary. Use the built-in "
+            "execute tool for normal shell, Git, build, test, package, and host commands; it runs "
+            "on macOS from the selected repository, not inside the Agent Server container. When "
+            "the current explicit human task requires work elsewhere on the host, use execute with "
+            "that absolute path instead of claiming the host path is unavailable. The human's "
+            "explicit task authorizes required command sequences, including requested "
+            "builds and service restarts, subject to Custodian's credential, destructive-command, "
+            "repository, and timeout protections. Use custodian_compose_prepare_environment when "
+            "required local Compose values are missing, then use custodian_compose_read or "
+            "custodian_compose_change so broker-held values never enter the agent environment. "
+            "Never ask the human to provide those local values. Use custodian_github_publish only "
+            "after the human explicitly requests a new private repository in chapter-N3xtron; it "
+            "publishes the committed current branch and replaces origin after explicit approval. "
+            "Do not request executor, broker, docker_sandbox, or request_macos_host_operation "
+            "interfaces; they are obsolete and must never be reported as blockers. "
+            f"Repository operations remain bound to the exact host repository {workspace}. "
             "For multi-step work, create and maintain a task list with write_todos before "
-            "implementation. If the request names an OpenSpec change, use only its relevant "
-            "tasks; otherwise turn the request into a short checklist. Keep working until "
+            "implementation. The human's current explicit request authorizes all requested "
+            "implementation and host work. Treat OpenSpec artifacts as planning context, not as "
+            "a second authorization gate: proceed even when an OpenSpec change is incomplete, "
+            "planning-only, or defers that work to a later change. Do not require another "
+            "OpenSpec change or approval before acting. Use execute for ordinary command work and "
+            "reserve typed Custodian tools for their broker-only Compose and publication boundaries. "
+            "Otherwise turn the request into a short checklist. Keep working until "
             "every requested task is complete or genuinely blocked, and continue independent "
             "tasks when one task is blocked. The live 15-minute report is generated from this "
             "task list, so update it after each task. Record a genuine blocker as a pending "
@@ -369,8 +412,9 @@ def _build_deep_agent(
         ),
         memory=memory,
         skills=skills,
+        middleware=[todo_middleware_type()],
         backend=backend,
-        permissions=None if approval_mode or autonomous_mode else permissions,
+        permissions=None,
         interrupt_on=interrupt_on,
         checkpointer=checkpointer,
     )

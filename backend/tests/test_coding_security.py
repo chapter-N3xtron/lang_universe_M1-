@@ -1,13 +1,13 @@
 """Security and human-approval tests for the Deep Agents coding backend."""
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
@@ -57,9 +57,9 @@ def _openspec_install_model():
                 content="",
                 tool_calls=[
                     {
-                        "name": "custodian_command",
+                        "name": "execute",
                         "args": {
-                            "argv": ["npm", "install", "--global", "@fission-ai/openspec"]
+                            "command": "npm install --global @fission-ai/openspec"
                         },
                         "id": "install-openspec-1",
                     }
@@ -72,15 +72,15 @@ def _openspec_install_model():
     )
 
 
-def _execute_model(argv: list[str]):
+def _execute_model(command: str):
     return ToolCallingModel(
         [
             AIMessage(
                 content="",
                 tool_calls=[
                     {
-                        "name": "custodian_command",
-                        "args": {"argv": argv},
+                        "name": "execute",
+                        "args": {"command": command},
                         "id": "execute-1",
                     }
                 ],
@@ -112,8 +112,8 @@ def _chained_approval_model():
                 content="",
                 tool_calls=[
                     {
-                        "name": "custodian_command",
-                        "args": {"argv": ["pwd"]},
+                        "name": "execute",
+                        "args": {"command": "pwd"},
                         "id": "execute-after-writes",
                     }
                 ],
@@ -124,34 +124,24 @@ def _chained_approval_model():
 
 
 def _approval_app(monkeypatch, tmp_path: Path, model):
-    from deepagents.backends import FilesystemBackend
+    from deepagents.backends import LocalShellBackend
 
     from src import coding_agent
 
-    def local_command(argv: list[str], timeout: int = 60) -> str:
-        del timeout
-        if argv == ["pwd"]:
-            return str(tmp_path.resolve())
-        return "test command completed"
-
-    command_tool = StructuredTool.from_function(
-        func=local_command,
-        name="custodian_command",
-        description="Test double for the typed Custodian command tool.",
-        args_schema=coding_agent.ArgvTask,
-    )
     monkeypatch.setattr(coding_agent, "get_coding_llm", lambda _name: model)
     monkeypatch.setattr(
         coding_agent,
         "CustodianBackend",
-        lambda workspace, read_only: FilesystemBackend(
-            root_dir=workspace, virtual_mode=True
+        lambda workspace, read_only: LocalShellBackend(
+            root_dir=workspace,
+            virtual_mode=True,
+            env={"PATH": os.environ["PATH"]},
         ),
     )
     monkeypatch.setattr(
         coding_agent,
-        "create_custodian_command_tools",
-        lambda _workspace: [command_tool],
+        "create_custodian_boundary_tools",
+        lambda _workspace: [],
     )
     return coding_agent._build_deep_agent(
         tmp_path,
@@ -220,12 +210,12 @@ def test_reject_decision_does_not_write(monkeypatch, tmp_path):
     assert not (tmp_path / "approved.txt").exists()
 
 
-def test_typed_custodian_command_requires_approval(monkeypatch, tmp_path):
-    app = _approval_app(monkeypatch, tmp_path, _execute_model(["pwd"]))
+def test_documented_execute_tool_requires_approval(monkeypatch, tmp_path):
+    app = _approval_app(monkeypatch, tmp_path, _execute_model("pwd"))
     config, request = _first_interrupt(app, "approve-execute")
 
-    assert request["action_requests"][0]["name"] == "custodian_command"
-    assert request["action_requests"][0]["args"] == {"argv": ["pwd"]}
+    assert request["action_requests"][0]["name"] == "execute"
+    assert request["action_requests"][0]["args"] == {"command": "pwd"}
     result = asyncio.run(
         app.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config=config)
     )
@@ -234,13 +224,12 @@ def test_typed_custodian_command_requires_approval(monkeypatch, tmp_path):
     assert str(tmp_path.resolve()) in tool_messages[-1].content
 
 
-def test_typed_custodian_command_uses_argv_not_shell_syntax(monkeypatch, tmp_path):
-    argv = ["pytest", "-q"]
-    app = _approval_app(monkeypatch, tmp_path, _execute_model(argv))
-    config, request = _first_interrupt(app, "approve-native-command")
+def test_documented_execute_tool_accepts_shell_command_syntax(monkeypatch, tmp_path):
+    command = "pytest -q && git status --short"
+    app = _approval_app(monkeypatch, tmp_path, _execute_model(command))
+    _config, request = _first_interrupt(app, "approve-native-command")
 
-    assert request["action_requests"][0]["args"]["argv"] == argv
-    assert "command" not in request["action_requests"][0]["args"]
+    assert request["action_requests"][0]["args"]["command"] == command
 
 
 def test_edited_action_cannot_escape_workspace(monkeypatch, tmp_path):
@@ -502,13 +491,10 @@ def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_directly(
     first = asyncio.run(app.ainvoke(initial, config=config))
     request = first["__interrupt__"][0].value
 
-    assert request["action_requests"][0]["name"] == "custodian_command"
-    assert request["action_requests"][0]["args"]["argv"] == [
-        "npm",
-        "install",
-        "--global",
-        "@fission-ai/openspec",
-    ]
+    assert request["action_requests"][0]["name"] == "execute"
+    assert request["action_requests"][0]["args"]["command"] == (
+        "npm install --global @fission-ai/openspec"
+    )
 
     result = asyncio.run(
         app.ainvoke(

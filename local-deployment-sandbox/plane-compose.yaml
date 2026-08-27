@@ -1,0 +1,175 @@
+name: plane-pm
+
+x-plane-backend-environment: &plane-backend-environment
+  DATABASE_URL: postgresql://${PLANE_DB_USER:-plane}:${PLANE_DB_PASSWORD:?set in .env}@plane-db:5432/${PLANE_DB_NAME:-plane}
+  REDIS_URL: redis://plane-redis:6379/0
+  RABBITMQ_HOST: plane-rabbitmq
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: ${PLANE_RABBITMQ_USER:-plane}
+  RABBITMQ_PASSWORD: ${PLANE_RABBITMQ_PASSWORD:?set in .env}
+  RABBITMQ_VHOST: ${PLANE_RABBITMQ_VHOST:-plane}
+  AWS_ACCESS_KEY_ID: ${PLANE_OBJECT_STORAGE_USER:-plane-local}
+  AWS_SECRET_ACCESS_KEY: ${PLANE_OBJECT_STORAGE_PASSWORD:?set in .env}
+  AWS_S3_ENDPOINT_URL: http://plane-minio:9000
+  AWS_S3_BUCKET_NAME: uploads
+  USE_MINIO: "1"
+  MINIO_ENDPOINT_SSL: "0"
+  WEB_URL: http://localhost:${PLANE_UI_PORT:-8080}
+  APP_BASE_URL: http://localhost:${PLANE_UI_PORT:-8080}
+  CORS_ALLOWED_ORIGINS: "http://localhost:${PLANE_UI_PORT:-8080},http://127.0.0.1:${PLANE_UI_PORT:-8080}"
+  GUNICORN_WORKERS: "2"
+  SECRET_KEY: ${PLANE_SECRET_KEY:?set in .env}
+
+services:
+  plane-db:
+    image: postgres:15.7-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PLANE_DB_USER:-plane}
+      POSTGRES_PASSWORD: ${PLANE_DB_PASSWORD:?set in .env}
+      POSTGRES_DB: ${PLANE_DB_NAME:-plane}
+    volumes: [plane-postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PLANE_DB_USER:-plane} -d ${PLANE_DB_NAME:-plane}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  plane-redis:
+    image: redis:7.2.5-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [plane-redis:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  plane-rabbitmq:
+    image: rabbitmq:3.13.7-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${PLANE_RABBITMQ_USER:-plane}
+      RABBITMQ_DEFAULT_PASS: ${PLANE_RABBITMQ_PASSWORD:?set in .env}
+      RABBITMQ_DEFAULT_VHOST: ${PLANE_RABBITMQ_VHOST:-plane}
+    volumes: [plane-rabbitmq:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  plane-minio:
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${PLANE_OBJECT_STORAGE_USER:-plane-local}
+      MINIO_ROOT_PASSWORD: ${PLANE_OBJECT_STORAGE_PASSWORD:?set in .env}
+    volumes: [plane-minio:/data]
+    expose: ["9000", "9001"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  plane-migrator:
+    image: makeplane/plane-backend:stable
+    restart: "no"
+    command: ./bin/docker-entrypoint-migrator.sh
+    depends_on:
+      plane-db: {condition: service_healthy}
+    env_file: [.env]
+    environment: *plane-backend-environment
+    networks: [plane]
+
+  plane-api:
+    image: makeplane/plane-backend:stable
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-api.sh
+    depends_on:
+      plane-migrator: {condition: service_completed_successfully}
+      plane-redis: {condition: service_healthy}
+      plane-rabbitmq: {condition: service_healthy}
+      plane-minio: {condition: service_healthy}
+    env_file: [.env]
+    environment: *plane-backend-environment
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/\")'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks: [plane]
+
+  plane-worker:
+    image: makeplane/plane-backend:stable
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-worker.sh
+    depends_on:
+      plane-api: {condition: service_healthy}
+    env_file: [.env]
+    environment: *plane-backend-environment
+    networks: [plane]
+
+  plane-beat:
+    image: makeplane/plane-backend:stable
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-beat.sh
+    depends_on:
+      plane-api: {condition: service_healthy}
+    env_file: [.env]
+    environment: *plane-backend-environment
+    networks: [plane]
+
+  plane-admin:
+    image: makeplane/plane-admin:stable
+    restart: unless-stopped
+    depends_on:
+      plane-api: {condition: service_healthy}
+    expose: ["3000"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/god-mode/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [plane]
+
+  plane-web:
+    image: makeplane/plane-frontend:stable
+    restart: unless-stopped
+    depends_on:
+      plane-api: {condition: service_healthy}
+      plane-admin: {condition: service_healthy}
+    volumes: [./plane-web.conf:/etc/nginx/nginx.conf:ro]
+    ports: ["127.0.0.1:${PLANE_UI_PORT:-8080}:3000"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [plane, plane-public]
+
+volumes:
+  plane-postgres:
+    external: true
+    name: langgraph-local-topology_plane-postgres
+  plane-redis:
+    external: true
+    name: langgraph-local-topology_plane-redis
+  plane-rabbitmq:
+    external: true
+    name: langgraph-local-topology_plane-rabbitmq
+  plane-minio:
+    external: true
+    name: langgraph-local-topology_plane-minio
+
+networks:
+  plane: {internal: true}
+  plane-public: {}

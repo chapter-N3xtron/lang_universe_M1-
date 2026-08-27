@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import shlex
 import subprocess
 import tempfile
 from io import BytesIO
@@ -310,7 +311,483 @@ def test_commands_are_argv_only_allowlisted_and_environment_is_sanitized(
 
     assert shell["ok"] is False
     assert inline_python["ok"] is False
-    assert "OPENAI_API_KEY" not in custodian_worker.sanitized_environment()
+    environment = custodian_worker.sanitized_environment()
+    assert "OPENAI_API_KEY" not in environment
+    assert environment["DOCKER_CONFIG"] == "/Applications/Docker.app/Contents/Resources"
+    assert environment["DOCKER_CONFIG"] != str(Path.home() / ".docker")
+
+
+def test_execute_action_uses_bounded_native_shell_with_project_paths(
+    monkeypatch, tmp_path
+):
+    payload = _bind(monkeypatch, tmp_path)
+    captured = {}
+
+    def bounded(root, argv, timeout, **kwargs):
+        captured.update(root=root, argv=argv, timeout=timeout, **kwargs)
+        return {
+            "ok": True,
+            "error": None,
+            "exit_code": 0,
+            "output": "tests passed",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(custodian_worker, "bounded_argv", bounded)
+    result = custodian_worker.execute_safe_action(
+        "execute",
+        {**payload, "command": "pytest -q && git status --short", "timeout": 180},
+    )
+
+    assert result["ok"] is True
+    assert captured["argv"] == [
+        "/bin/zsh",
+        "-lc",
+        "pytest -q && git status --short",
+    ]
+    assert captured["timeout"] == 180
+    assert captured["allow_git_internal"] is True
+    assert captured["unrestricted_host_access"] is True
+    path = captured["environment_overrides"]["PATH"].split(os.pathsep)
+    assert path[:2] == [
+        str(tmp_path / ".venv" / "bin"),
+        str(tmp_path / "node_modules" / ".bin"),
+    ]
+
+
+def test_execute_action_sanitizes_environment_and_refuses_protected_commands(
+    monkeypatch, tmp_path
+):
+    payload = _bind(monkeypatch, tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
+    (tmp_path / ".env").write_text("TOKEN=workspace-secret\n")
+    (tmp_path / "probe.py").write_text(
+        'from pathlib import Path\nprint(Path(".env").read_text())\n'
+    )
+
+    environment = custodian_worker.execute_safe_action(
+        "execute", {**payload, "command": "env", "timeout": 10}
+    )
+    privileged = custodian_worker.execute_safe_action(
+        "execute", {**payload, "command": "sudo whoami"}
+    )
+    sensitive = custodian_worker.execute_safe_action(
+        "execute", {**payload, "command": "cat .env"}
+    )
+    indirect_sensitive = custodian_worker.execute_safe_action(
+        "execute", {**payload, "command": "python3 probe.py"}
+    )
+
+    assert environment["ok"] is True
+    assert "provider-secret" not in environment["output"]
+    assert "OPENAI_API_KEY" not in environment["output"]
+    assert privileged["ok"] is False
+    assert sensitive["ok"] is False
+    assert indirect_sensitive["ok"] is False
+    assert "workspace-secret" not in str(sensitive)
+    assert "workspace-secret" not in str(indirect_sensitive)
+
+
+def test_execute_action_supports_explicit_host_paths_but_blocks_credentials(
+    monkeypatch, tmp_path
+):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    host_directory = tmp_path / "host-task"
+    host_directory.mkdir()
+    payload = _bind(monkeypatch, repository)
+    quoted_host = shlex.quote(str(host_directory))
+
+    outside = custodian_worker.execute_safe_action(
+        "execute",
+        {
+            **payload,
+            "command": f"cd {quoted_host} && printf complete > result.txt",
+        },
+    )
+    credential_directory = host_directory / ".ssh"
+    credential_directory.mkdir()
+    (credential_directory / "id_test").write_text("host-credential-secret")
+    (host_directory / "probe.py").write_text(
+        'from pathlib import Path\nprint(Path(".ssh/id_test").read_text())\n'
+    )
+    credential_probe = custodian_worker.execute_safe_action(
+        "execute",
+        {**payload, "command": f"cd {quoted_host} && python3 probe.py"},
+    )
+
+    assert outside["ok"] is True
+    assert (host_directory / "result.txt").read_text() == "complete"
+    assert credential_probe["ok"] is False
+    assert "host-credential-secret" not in str(credential_probe)
+
+
+def test_compose_action_keeps_file_options_before_the_allowlisted_subcommand(
+    monkeypatch, tmp_path
+):
+    payload = _bind(monkeypatch, tmp_path)
+    captured = {}
+
+    def bounded(root, argv, timeout, **kwargs):
+        captured.update(root=root, argv=argv, timeout=timeout, **kwargs)
+        return {
+            "ok": True,
+            "error": None,
+            "exit_code": 0,
+            "output": "created",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(custodian_worker, "bounded_argv", bounded)
+    result = custodian_worker.execute_safe_action(
+        "compose_change",
+        {
+            **payload,
+            "argv": [
+                "--file",
+                "local-deployment-sandbox/compose.yaml",
+                "up",
+                "-d",
+                "--build",
+                "--wait",
+            ],
+            "timeout": 300,
+        },
+    )
+
+    assert result["ok"] is True
+    assert captured["argv"] == [
+        "docker",
+        "compose",
+        "--file",
+        "local-deployment-sandbox/compose.yaml",
+        "up",
+        "-d",
+        "--build",
+        "--wait",
+    ]
+    assert captured["environment_overrides"] == {}
+    assert captured["redacted_values"] == ()
+    assert captured["sensitive_read_paths"] == ()
+
+
+def test_compose_action_receives_broker_environment_without_returning_values(
+    monkeypatch, tmp_path
+):
+    payload = _bind(monkeypatch, tmp_path)
+    deployment = tmp_path / "local-deployment-sandbox"
+    deployment.mkdir()
+    (deployment / "compose.yaml").write_text("services: {}\n")
+    (deployment / ".env").write_text(
+        "PLANE_DB_PASSWORD=fake-unit-password\nLOCAL_PORT=8080\n"
+    )
+    captured = {}
+
+    def bounded(root, argv, timeout, **kwargs):
+        captured.update(root=root, argv=argv, timeout=timeout, **kwargs)
+        return {
+            "ok": True,
+            "error": None,
+            "exit_code": 0,
+            "output": "valid",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(custodian_worker, "bounded_argv", bounded)
+    monkeypatch.setattr(
+        custodian_worker,
+        "run_broker_argv",
+        lambda *_args, **_kwargs: {"returncode": 0, "output": ""},
+    )
+    result = custodian_worker.execute_safe_action(
+        "compose_read",
+        {
+            **payload,
+            "argv": [
+                "--file",
+                "local-deployment-sandbox/compose.yaml",
+                "config",
+                "--quiet",
+            ],
+        },
+    )
+
+    assert result["ok"] is True
+    assert captured["environment_overrides"] == {
+        "PLANE_DB_PASSWORD": "fake-unit-password",
+        "LOCAL_PORT": "8080",
+    }
+    assert set(captured["redacted_values"]) == {"fake-unit-password", "8080"}
+    assert captured["sensitive_read_paths"] == ((deployment / ".env").resolve(),)
+    assert "fake-unit-password" not in str(result)
+
+
+def test_bounded_command_redacts_broker_environment_values(tmp_path):
+    result = custodian_worker.bounded_argv(
+        tmp_path,
+        ["/usr/bin/printf", "fake-unit-password"],
+        environment_overrides={"PLANE_DB_PASSWORD": "fake-unit-password"},
+        redacted_values=("fake-unit-password",),
+    )
+
+    assert result["ok"] is True
+    assert result["output"] == "[REDACTED]"
+
+
+def test_unrestricted_execute_profile_replaces_repository_confinement_with_secret_denies(
+    tmp_path,
+):
+    argv = custodian_worker.sandboxed_argv(
+        tmp_path,
+        ["/usr/bin/true"],
+        unrestricted_host_access=True,
+    )
+    profile = argv[2]
+
+    assert '(subpath "/Users")' not in profile
+    assert '(subpath "/Volumes")' not in profile
+    assert '(deny file-read* file-write* (regex #"' in profile
+    assert "[.]ssh" in profile
+
+
+def test_compose_sensitive_environment_exception_remains_read_only(tmp_path):
+    environment_file = tmp_path / ".env"
+    environment_file.write_text("PASSWORD=fake-unit-password\n")
+
+    argv = custodian_worker.sandboxed_argv(
+        tmp_path,
+        ["/usr/bin/true"],
+        sensitive_read_paths=(environment_file,),
+    )
+    profile = argv[2]
+    path = str(environment_file)
+
+    assert f'(deny file-write* (subpath "{path}"))' in profile
+    assert f'(deny file-read* file-write* (subpath "{path}"))' not in profile
+
+
+def test_compose_environment_is_generated_broker_side_without_exposing_values(
+    monkeypatch, tmp_path
+):
+    payload = _bind(monkeypatch, tmp_path)
+    deployment = tmp_path / "local-deployment-sandbox"
+    deployment.mkdir()
+    (deployment / "compose.yaml").write_text(
+        "services:\n"
+        "  db:\n"
+        "    environment:\n"
+        "      PASSWORD: ${DB_PASSWORD:?set in .env}\n"
+        "      TOKEN: ${LOCAL_TOKEN:?set in .env}\n"
+    )
+    monkeypatch.setattr(
+        custodian_worker,
+        "run_broker_argv",
+        lambda *_args, **_kwargs: {"returncode": 0, "output": ""},
+    )
+
+    first = custodian_worker.execute_safe_action(
+        "compose_prepare_environment",
+        {**payload, "compose_file": "local-deployment-sandbox/compose.yaml"},
+    )
+    environment_file = deployment / ".env"
+    first_content = environment_file.read_text()
+    second = custodian_worker.execute_safe_action(
+        "compose_prepare_environment",
+        {**payload, "compose_file": "local-deployment-sandbox/compose.yaml"},
+    )
+
+    assert first == {
+        "ok": True,
+        "action": "compose_prepare_environment",
+        "generated": 2,
+        "required": 2,
+        "values_exposed": False,
+    }
+    assert second["generated"] == 0
+    assert environment_file.read_text() == first_content
+    assert {line.split("=", 1)[0] for line in first_content.splitlines()} == {
+        "DB_PASSWORD",
+        "LOCAL_TOKEN",
+    }
+    assert environment_file.stat().st_mode & 0o777 == 0o600
+    generated_values = [line.split("=", 1)[1] for line in first_content.splitlines()]
+    assert not any(value in str(first) for value in generated_values)
+
+
+def test_compose_environment_requires_an_ignored_target(monkeypatch, tmp_path):
+    payload = _bind(monkeypatch, tmp_path)
+    (tmp_path / "compose.yaml").write_text(
+        "services:\n  db:\n    environment:\n      PASSWORD: ${DB_PASSWORD:?required}\n"
+    )
+    monkeypatch.setattr(
+        custodian_worker,
+        "run_broker_argv",
+        lambda *_args, **_kwargs: {"returncode": 1, "output": ""},
+    )
+
+    result = custodian_worker.execute_safe_action(
+        "compose_prepare_environment",
+        {**payload, "compose_file": "compose.yaml"},
+    )
+
+    assert result["ok"] is False
+    assert not (tmp_path / ".env").exists()
+
+
+def test_host_command_can_use_an_explicit_directory_outside_the_repository(
+    monkeypatch, tmp_path
+):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    host_directory = tmp_path / "host-task"
+    host_directory.mkdir()
+    payload = _bind(monkeypatch, repository)
+    captured = {}
+
+    def bounded(root, argv, timeout, **kwargs):
+        captured.update(root=root, argv=argv, timeout=timeout, **kwargs)
+        return {
+            "ok": True,
+            "error": None,
+            "exit_code": 0,
+            "output": "installed",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(custodian_worker, "bounded_argv", bounded)
+    result = custodian_worker.execute_safe_action(
+        "host_command",
+        {
+            **payload,
+            "argv": ["brew", "install", "example"],
+            "cwd": str(host_directory),
+            "timeout": 120,
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["cwd"] == str(host_directory)
+    assert captured["root"] == repository
+    assert captured["cwd"] == host_directory
+    assert captured["additional_roots"] == (host_directory,)
+
+
+def test_host_command_can_run_a_cwd_contained_virtual_environment_executable(
+    monkeypatch, tmp_path
+):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    executable = repository / ".venv" / "bin" / "pytest"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o700)
+    payload = _bind(monkeypatch, repository)
+    captured = {}
+
+    def bounded(root, argv, timeout, **kwargs):
+        captured.update(root=root, argv=argv, timeout=timeout, **kwargs)
+        return {
+            "ok": True,
+            "error": None,
+            "exit_code": 0,
+            "output": "tests passed",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(custodian_worker, "bounded_argv", bounded)
+    result = custodian_worker.execute_safe_action(
+        "host_command",
+        {
+            **payload,
+            "argv": [".venv/bin/pytest", "-q"],
+            "cwd": str(repository),
+        },
+    )
+
+    assert result["ok"] is True
+    assert captured["argv"] == [str(executable), "-q"]
+
+
+def test_host_command_can_run_a_safe_cwd_contained_executable_symlink(
+    monkeypatch, tmp_path
+):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    runtime = tmp_path / "runtime" / "python3.11"
+    runtime.parent.mkdir()
+    runtime.write_text("#!/bin/sh\nexit 0\n")
+    runtime.chmod(0o700)
+    executable = repository / ".venv" / "bin" / "python"
+    executable.parent.mkdir(parents=True)
+    executable.symlink_to(runtime)
+    payload = _bind(monkeypatch, repository)
+    captured = {}
+
+    def bounded(root, argv, timeout, **kwargs):
+        captured.update(root=root, argv=argv, timeout=timeout, **kwargs)
+        return {
+            "ok": True,
+            "error": None,
+            "exit_code": 0,
+            "output": "Python 3.11",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(custodian_worker, "bounded_argv", bounded)
+    result = custodian_worker.execute_safe_action(
+        "host_command",
+        {
+            **payload,
+            "argv": [".venv/bin/python", "--version"],
+            "cwd": str(repository),
+        },
+    )
+
+    assert result["ok"] is True
+    assert captured["argv"] == [str(executable), "--version"]
+
+
+def test_host_command_keeps_privileged_and_sensitive_access_blocked(
+    monkeypatch, tmp_path
+):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    payload = _bind(monkeypatch, repository)
+
+    privileged = custodian_worker.execute_safe_action(
+        "host_command",
+        {**payload, "argv": ["sudo", "whoami"], "cwd": str(tmp_path)},
+    )
+    sensitive = custodian_worker.execute_safe_action(
+        "host_command",
+        {**payload, "argv": ["cat", ".env"], "cwd": str(tmp_path)},
+    )
+    outside_executable = tmp_path / "outside-tool"
+    outside_executable.write_text("#!/bin/sh\nexit 0\n")
+    outside_executable.chmod(0o700)
+    outside = custodian_worker.execute_safe_action(
+        "host_command",
+        {
+            **payload,
+            "argv": [str(outside_executable)],
+            "cwd": str(repository),
+        },
+    )
+    shell_link = repository / "safe-looking-tool"
+    shell_link.symlink_to("/bin/sh")
+    disguised_shell = custodian_worker.execute_safe_action(
+        "host_command",
+        {
+            **payload,
+            "argv": ["./safe-looking-tool", "-c", "true"],
+            "cwd": str(repository),
+        },
+    )
+
+    assert privileged["ok"] is False
+    assert sensitive["ok"] is False
+    assert outside["ok"] is False
+    assert disguised_shell["ok"] is False
 
 
 def test_github_publish_uses_fixed_private_account_and_broker_authority(

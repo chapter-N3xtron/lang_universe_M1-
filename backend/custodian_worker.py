@@ -83,6 +83,7 @@ API_TOKEN_FILE = Path(
 ).expanduser()
 _NOTICE_TTL_SECONDS = 300
 _NOTICE_LOCK = threading.Lock()
+_COMPOSE_ENV_LOCK = threading.Lock()
 _PENDING_HOST_FILE_NOTICES: dict[str, tuple[str, str, float]] = {}
 RG_BIN = (
     shutil.which("rg")
@@ -588,6 +589,12 @@ SENSITIVE_NAMES = {
     "logins.json",
 }
 SENSITIVE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
+_GLOBAL_SENSITIVE_PATH_REGEX = (
+    r".*[/]([.]env[^/]*|[.]ssh|[.]aws|[.]gnupg|[.]docker|[.]kube|[.]azure|"
+    r"[Kk]eychains|[Cc]redentials|[.]netrc|[.]npmrc|[.]pypirc|[Cc]ookies|"
+    r"[Cc]redentials[.]json|[Ll]ogin [Dd]ata|[Ll]ogins[.]json)([/].*|$)|"
+    r".*[.]([Kk][Ee][Yy]|[Pp][Ee][Mm]|[Pp]12|[Pp][Ff][Xx])$"
+)
 MAX_TEXT_OUTPUT = 100_000
 GITHUB_OWNER = ENV.get("CUSTODIAN_GITHUB_OWNER", "chapter-N3xtron").strip()
 _GITHUB_REPOSITORY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
@@ -1011,6 +1018,7 @@ def sanitized_environment() -> dict[str, str]:
     home.mkdir(parents=True, exist_ok=True)
     return {
         "COMPOSE_DISABLE_ENV_FILE": "true",
+        "DOCKER_CONFIG": "/Applications/Docker.app/Contents/Resources",
         "HOME": str(home),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
@@ -1110,31 +1118,55 @@ def linked_worktree_git_paths(root: Path) -> list[Path]:
 
 
 def sandboxed_argv(
-    root: Path, argv: list[str], *, allow_git_internal: bool = False
+    root: Path,
+    argv: list[str],
+    *,
+    allow_git_internal: bool = False,
+    additional_roots: tuple[Path, ...] = (),
+    additional_read_roots: tuple[Path, ...] = (),
+    sensitive_read_paths: tuple[Path, ...] = (),
+    unrestricted_host_access: bool = False,
 ) -> list[str]:
     sandbox = Path("/usr/bin/sandbox-exec")
     if not sandbox.is_file():
         raise RuntimeError("Native command containment is unavailable.")
     command_home = Path(sanitized_environment()["HOME"]).resolve()
-    exceptions = [root, command_home]
+    exceptions = list(dict.fromkeys((root, command_home, *additional_roots)))
     if allow_git_internal:
         exceptions.extend(linked_worktree_git_paths(root))
-    exception_rules = " ".join(
+    write_exception_rules = " ".join(
         f'(require-not (subpath "{_sandbox_string(path)}"))' for path in exceptions
     )
-    rules = [
-        "(version 1)",
-        "(allow default)",
-        f'(deny file-read-data (require-all (subpath "/Users") {exception_rules}))',
-        f'(deny file-read-data (require-all (subpath "/Volumes") {exception_rules}))',
-        f'(deny file-write* (require-all (subpath "/Users") {exception_rules}))',
-        f'(deny file-write* (require-all (subpath "/Volumes") {exception_rules}))',
-    ]
-    for sensitive_path in _existing_sensitive_repo_paths(root):
-        if allow_git_internal and sensitive_path == root / ".git":
-            continue
-        path_text = _sandbox_string(sensitive_path)
-        rules.append(f'(deny file-read* file-write* (subpath "{path_text}"))')
+    read_exception_rules = " ".join(
+        f'(require-not (subpath "{_sandbox_string(path)}"))'
+        for path in dict.fromkeys((*exceptions, *additional_read_roots))
+    )
+    rules = ["(version 1)", "(allow default)"]
+    if unrestricted_host_access:
+        rules.append(
+            f'(deny file-read* file-write* (regex #"{_GLOBAL_SENSITIVE_PATH_REGEX}"))'
+        )
+    else:
+        rules.extend(
+            [
+                f'(deny file-read-data (require-all (subpath "/Users") {read_exception_rules}))',
+                f'(deny file-read-data (require-all (subpath "/Volumes") {read_exception_rules}))',
+                f'(deny file-write* (require-all (subpath "/Users") {write_exception_rules}))',
+                f'(deny file-write* (require-all (subpath "/Volumes") {write_exception_rules}))',
+            ]
+        )
+    read_only_sensitive_paths = {
+        path.resolve(strict=False) for path in sensitive_read_paths
+    }
+    for scope in dict.fromkeys((root, *additional_roots)):
+        for sensitive_path in _existing_sensitive_repo_paths(scope):
+            if allow_git_internal and sensitive_path == root / ".git":
+                continue
+            path_text = _sandbox_string(sensitive_path)
+            if sensitive_path.resolve(strict=False) in read_only_sensitive_paths:
+                rules.append(f'(deny file-write* (subpath "{path_text}"))')
+            else:
+                rules.append(f'(deny file-read* file-write* (subpath "{path_text}"))')
     return [str(sandbox), "-p", " ".join(rules), *argv]
 
 
@@ -1144,6 +1176,13 @@ def bounded_argv(
     timeout_value: object = 60,
     *,
     allow_git_internal: bool = False,
+    cwd: Path | None = None,
+    additional_roots: tuple[Path, ...] = (),
+    additional_read_roots: tuple[Path, ...] = (),
+    sensitive_read_paths: tuple[Path, ...] = (),
+    environment_overrides: dict[str, str] | None = None,
+    redacted_values: tuple[str, ...] = (),
+    unrestricted_host_access: bool = False,
 ) -> dict:
     if (
         not isinstance(argv, list)
@@ -1154,10 +1193,21 @@ def bounded_argv(
     if len(argv) > 128 or any(len(item) > 4096 for item in argv):
         raise ValueError("argv exceeds the command bounds.")
     timeout = max(1, min(int(timeout_value), 300))
+    working_directory = cwd or root
+    command_environment = sanitized_environment()
+    command_environment.update(environment_overrides or {})
     process = subprocess.Popen(
-        sandboxed_argv(root, argv, allow_git_internal=allow_git_internal),
-        cwd=root,
-        env=sanitized_environment(),
+        sandboxed_argv(
+            root,
+            argv,
+            allow_git_internal=allow_git_internal,
+            additional_roots=additional_roots,
+            additional_read_roots=additional_read_roots,
+            sensitive_read_paths=sensitive_read_paths,
+            unrestricted_host_access=unrestricted_host_access,
+        ),
+        cwd=working_directory,
+        env=command_environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -1202,6 +1252,9 @@ def bounded_argv(
         process.wait(timeout=2)
     selector.close()
     output = b"".join(chunks)[:MAX_TEXT_OUTPUT].decode("utf-8", errors="replace")
+    for value in sorted(set(redacted_values), key=len, reverse=True):
+        if value:
+            output = output.replace(value, "[REDACTED]")
     return {
         "ok": not error and process.returncode == 0,
         "error": error or None,
@@ -1209,6 +1262,274 @@ def bounded_argv(
         "output": output,
         "truncated": bool(error and size > MAX_TEXT_OUTPUT),
     }
+
+
+def execute_action(root: Path, payload: dict) -> dict:
+    command = payload.get("command")
+    if not isinstance(command, str) or not command.strip():
+        raise ValueError("command must be a non-empty string.")
+    if len(command) > 20_000 or "\0" in command:
+        raise ValueError("command exceeds the execution bounds.")
+    assert_terminal_command_allowed(command)
+
+    environment = sanitized_environment()
+    environment["PATH"] = os.pathsep.join(
+        (
+            str(root / ".venv" / "bin"),
+            str(root / "node_modules" / ".bin"),
+            environment["PATH"],
+        )
+    )
+    result = bounded_argv(
+        root,
+        ["/bin/zsh", "-lc", command],
+        payload.get("timeout", 120),
+        allow_git_internal=True,
+        environment_overrides={"PATH": environment["PATH"]},
+        unrestricted_host_access=True,
+    )
+    return {"action": "execute", **result}
+
+
+def compose_prepare_environment_action(root: Path, payload: dict) -> dict:
+    raw_compose_file = str(payload.get("compose_file") or "").strip()
+    if not raw_compose_file or Path(raw_compose_file).is_absolute():
+        raise ValueError("Compose file must be a repository-relative path.")
+    try:
+        compose_file = (root / raw_compose_file).resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("Compose file does not exist.") from exc
+    if compose_file != root and root not in compose_file.parents:
+        raise ValueError("Compose file is outside the selected repository.")
+    assert_not_sensitive(compose_file, root)
+    if (
+        not compose_file.is_file()
+        or compose_file.suffix.casefold() not in {".yaml", ".yml"}
+        or "compose" not in compose_file.name.casefold()
+    ):
+        raise ValueError("A Docker Compose YAML file is required.")
+    if compose_file.stat().st_size > 1_000_000:
+        raise ValueError("Compose file exceeds the preparation limit.")
+
+    compose_text = compose_file.read_text(encoding="utf-8")
+    required_variables = sorted(
+        set(
+            re.findall(
+                r"\$\{([A-Za-z_][A-Za-z0-9_]*)\:\?[^}]*\}",
+                compose_text,
+            )
+        )
+    )
+    if not required_variables:
+        raise ValueError("Compose file has no explicitly required local variables.")
+
+    environment_file = compose_file.parent / ".env"
+    if environment_file.is_symlink():
+        raise ValueError("Refusing a symbolic-link Compose environment file.")
+    ignored = run_broker_argv(
+        ["git", "check-ignore", "--quiet", "--", str(environment_file.relative_to(root))],
+        cwd=root,
+        timeout=30,
+    )
+    if ignored["returncode"] != 0:
+        raise ValueError("Compose environment file must be ignored by Git.")
+
+    with _COMPOSE_ENV_LOCK:
+        if environment_file.is_symlink():
+            raise ValueError("Refusing a symbolic-link Compose environment file.")
+        existing_text = ""
+        if environment_file.exists():
+            if not environment_file.is_file() or environment_file.stat().st_size > 100_000:
+                raise ValueError("Compose environment file is invalid or too large.")
+            existing_text = environment_file.read_text(encoding="utf-8")
+        existing_variables = set(
+            re.findall(
+                r"(?m)^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=",
+                existing_text,
+            )
+        )
+        missing_variables = [
+            name for name in required_variables if name not in existing_variables
+        ]
+        if missing_variables:
+            content = existing_text
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += "".join(
+                f"{name}={secrets.token_urlsafe(32)}\n"
+                for name in missing_variables
+            )
+            atomic_write(environment_file, content)
+        if environment_file.exists():
+            environment_file.chmod(0o600)
+
+    return {
+        "ok": True,
+        "action": "compose_prepare_environment",
+        "generated": len(missing_variables),
+        "required": len(required_variables),
+        "values_exposed": False,
+    }
+
+
+def host_command_action(root: Path, payload: dict) -> dict:
+    argv = payload.get("argv")
+    if (
+        not isinstance(argv, list)
+        or not argv
+        or not all(isinstance(item, str) and item for item in argv)
+    ):
+        raise ValueError("argv must be a non-empty array of strings.")
+
+    cwd_value = str(payload.get("cwd") or "").strip()
+    candidate = Path(cwd_value).expanduser()
+    if not candidate.is_absolute():
+        raise ValueError("Host command cwd must be an absolute path.")
+    try:
+        cwd = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("Host command cwd does not exist.") from exc
+    if not cwd.is_dir():
+        raise ValueError("Host command cwd must be a directory.")
+    assert_not_sensitive(cwd)
+
+    executable_name = Path(argv[0]).name
+    if executable_name in {
+        "bash",
+        "dash",
+        "doas",
+        "fish",
+        "security",
+        "sh",
+        "su",
+        "sudo",
+        "zsh",
+    }:
+        raise ValueError("Privileged, shell, and keychain executables are not allowed.")
+    if "/" in argv[0] or argv[0].startswith("."):
+        executable_candidate = Path(argv[0]).expanduser()
+        unresolved_executable = (
+            executable_candidate
+            if executable_candidate.is_absolute()
+            else cwd / executable_candidate
+        )
+        try:
+            executable = unresolved_executable.parent.resolve(strict=True) / unresolved_executable.name
+            executable_target = executable.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("Host command executable does not exist.") from exc
+        if executable != cwd and cwd not in executable.parents:
+            raise ValueError("Host command executable must remain inside cwd.")
+        assert_not_sensitive(executable)
+        assert_not_sensitive(executable_target)
+        if Path(executable_target).name in {
+            "bash",
+            "dash",
+            "doas",
+            "fish",
+            "security",
+            "sh",
+            "su",
+            "sudo",
+            "zsh",
+        }:
+            raise ValueError("Privileged, shell, and keychain executables are not allowed.")
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise ValueError("Host command executable is not executable.")
+        assert_terminal_command_allowed(" ".join([str(executable_target), *argv[1:]]))
+        argv = [str(executable), *argv[1:]]
+    assert_terminal_command_allowed(" ".join(argv))
+
+    for argument in argv:
+        lowered = argument.casefold()
+        if (
+            any(
+                marker in lowered
+                for marker in (".env", ".ssh", ".aws", "keychain", "credential")
+            )
+            or Path(argument).suffix.casefold() in SENSITIVE_SUFFIXES
+        ):
+            raise ValueError("Host command arguments may not reference sensitive paths.")
+        argument_path = Path(argument).expanduser()
+        if argument_path.is_absolute() or "/" in argument or argument.startswith("."):
+            resolved = (
+                argument_path.resolve(strict=False)
+                if argument_path.is_absolute()
+                else (cwd / argument_path).resolve(strict=False)
+            )
+            assert_not_sensitive(resolved)
+
+    uv_python_root = Path.home() / ".local" / "share" / "uv" / "python"
+    trusted_read_roots = (
+        (uv_python_root.resolve(),) if uv_python_root.is_dir() else ()
+    )
+    result = bounded_argv(
+        root,
+        argv,
+        payload.get("timeout", 60),
+        cwd=cwd,
+        additional_roots=(cwd,),
+        additional_read_roots=trusted_read_roots,
+    )
+    return {"action": "host_command", "argv": argv, "cwd": str(cwd), **result}
+
+
+def compose_broker_environment(
+    root: Path, compose_options: list[str]
+) -> tuple[dict[str, str], tuple[str, ...], tuple[Path, ...]]:
+    compose_files = [
+        str(compose_options[index + 1])
+        for index in range(0, len(compose_options), 2)
+    ]
+    if compose_files:
+        raw_compose_file = compose_files[0]
+        if Path(raw_compose_file).is_absolute():
+            raise ValueError("Compose file must be a repository-relative path.")
+        compose_file = (root / raw_compose_file).resolve(strict=False)
+    else:
+        compose_file = next(
+            (
+                candidate
+                for candidate in (
+                    root / "compose.yaml",
+                    root / "compose.yml",
+                    root / "docker-compose.yaml",
+                    root / "docker-compose.yml",
+                )
+                if candidate.is_file()
+            ),
+            None,
+        )
+        if compose_file is None:
+            return {}, (), ()
+    if compose_file != root and root not in compose_file.parents:
+        raise ValueError("Compose file is outside the selected repository.")
+
+    environment_file = compose_file.parent / ".env"
+    if not environment_file.exists():
+        return {}, (), ()
+    if environment_file.is_symlink() or not environment_file.is_file():
+        raise ValueError("Compose environment file must be a regular file.")
+    if environment_file.stat().st_size > 100_000:
+        raise ValueError("Compose environment file exceeds the preparation limit.")
+    ignored = run_broker_argv(
+        ["git", "check-ignore", "--quiet", "--", str(environment_file.relative_to(root))],
+        cwd=root,
+        timeout=30,
+    )
+    if ignored["returncode"] != 0:
+        raise ValueError("Compose environment file must be ignored by Git.")
+
+    values = {
+        key: value
+        for key, value in load_env(environment_file).items()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+    }
+    return (
+        values,
+        tuple(value for value in values.values() if value),
+        (environment_file.resolve(strict=True),),
+    )
 
 
 def command_action(action: str, root: Path, payload: dict) -> dict:
@@ -1240,6 +1561,9 @@ def command_action(action: str, root: Path, payload: dict) -> dict:
                 raise ValueError(
                     "Command arguments may not reference paths outside the selected repository."
                 )
+    environment_overrides: dict[str, str] = {}
+    redacted_values: tuple[str, ...] = ()
+    sensitive_read_paths: tuple[Path, ...] = ()
     if action == "command":
         if "/" in str(argv[0]) or str(argv[0]) not in COMMAND_ALLOWLIST:
             raise ValueError("Command executable is not allowlisted.")
@@ -1256,6 +1580,12 @@ def command_action(action: str, root: Path, payload: dict) -> dict:
     elif action in {"compose_read", "compose_change"}:
         if argv[:2] == ["docker", "compose"]:
             argv = argv[2:]
+        compose_options = []
+        while argv and argv[0] in {"-f", "--file"}:
+            if len(argv) < 2 or not str(argv[1]).strip():
+                raise ValueError("Compose file option requires a repository-relative path.")
+            compose_options.extend(argv[:2])
+            argv = argv[2:]
         allowed = (
             COMPOSE_READ_SUBCOMMANDS
             if action == "compose_read"
@@ -1263,12 +1593,20 @@ def command_action(action: str, root: Path, payload: dict) -> dict:
         )
         if not argv or argv[0] not in allowed:
             raise ValueError("Compose subcommand is not allowlisted for this action.")
-        argv = ["docker", "compose", *argv]
+        (
+            environment_overrides,
+            redacted_values,
+            sensitive_read_paths,
+        ) = compose_broker_environment(root, compose_options)
+        argv = ["docker", "compose", *compose_options, *argv]
     result = bounded_argv(
         root,
         argv,
         payload.get("timeout", 60),
         allow_git_internal=action == "git",
+        sensitive_read_paths=sensitive_read_paths,
+        environment_overrides=environment_overrides,
+        redacted_values=redacted_values,
     )
     return {"action": action, "argv": argv, **result}
 
@@ -2555,8 +2893,13 @@ ACTION_SCHEMAS = {
             "output_format": str,
         }
     },
+    "execute": {"required": {"repo": str, "command": str}},
     "command": {"required": {"repo": str, "argv": list}},
+    "host_command": {"required": {"repo": str, "argv": list, "cwd": str}},
     "git": {"required": {"repo": str, "argv": list}},
+    "compose_prepare_environment": {
+        "required": {"repo": str, "compose_file": str}
+    },
     "compose_read": {"required": {"repo": str, "argv": list}},
     "compose_change": {"required": {"repo": str, "argv": list}},
     "github_publish": {
@@ -2619,6 +2962,12 @@ def _execute_safe_action(action: str, payload: dict) -> dict:
         return write_ocr_output_action(root, payload)
     if action.startswith("fs_"):
         return fs_action(action, root, payload)
+    if action == "execute":
+        return execute_action(root, payload)
+    if action == "compose_prepare_environment":
+        return compose_prepare_environment_action(root, payload)
+    if action == "host_command":
+        return host_command_action(root, payload)
     if action in {"command", "git", "compose_read", "compose_change"}:
         return command_action(action, root, payload)
     if action == "github_publish":

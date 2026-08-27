@@ -18,6 +18,100 @@ class _FakeApp:
         return {"messages": [*payload["messages"], *self.output_messages]}
 
 
+def test_compose_change_tool_builds_global_file_options_before_subcommand(
+    monkeypatch, tmp_path
+):
+    from src import coding_agent
+
+    calls = []
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def action(self, action, **payload):
+            calls.append((action, payload))
+            return {
+                "ok": True,
+                "exit_code": 0,
+                "output": "created",
+                "truncated": False,
+            }
+
+    monkeypatch.setattr(coding_agent, "CustodianClient", Client)
+    tools = coding_agent.create_custodian_boundary_tools(tmp_path)
+    compose_tool = next(
+        tool for tool in tools if tool.name == "custodian_compose_change"
+    )
+
+    result = compose_tool.invoke(
+        {
+            "compose_files": ["local-deployment-sandbox/compose.yaml"],
+            "subcommand": "up",
+            "arguments": ["-d", "--build", "--wait"],
+            "timeout": 300,
+        }
+    )
+
+    assert "created" in result
+    assert calls == [
+        (
+            "compose_change",
+            {
+                "argv": [
+                    "--file",
+                    "local-deployment-sandbox/compose.yaml",
+                    "up",
+                    "-d",
+                    "--build",
+                    "--wait",
+                ],
+                "timeout": 300,
+            },
+        )
+    ]
+
+
+def test_compose_environment_tool_never_returns_generated_values(monkeypatch, tmp_path):
+    from src import coding_agent
+
+    calls = []
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def action(self, action, **payload):
+            calls.append((action, payload))
+            return {
+                "ok": True,
+                "generated": 3,
+                "required": 3,
+                "values_exposed": False,
+            }
+
+    monkeypatch.setattr(coding_agent, "CustodianClient", Client)
+    tools = coding_agent.create_custodian_boundary_tools(tmp_path)
+    environment_tool = next(
+        tool
+        for tool in tools
+        if tool.name == "custodian_compose_prepare_environment"
+    )
+
+    result = environment_tool.invoke(
+        {"compose_file": "local-deployment-sandbox/compose.yaml"}
+    )
+
+    assert "3 newly generated value(s)" in result
+    assert "credential values were returned" in result
+    assert calls == [
+        (
+            "compose_prepare_environment",
+            {"compose_file": "local-deployment-sandbox/compose.yaml"},
+        )
+    ]
+
+
 def test_deep_agents_node_returns_neutral_messages_events_and_session(
     monkeypatch, tmp_path
 ):
@@ -157,11 +251,8 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
 
     captured = {}
 
-    class Permission:
-        def __init__(self, **kwargs):
-            self.operations = kwargs["operations"]
-            self.paths = kwargs["paths"]
-            self.mode = kwargs["mode"]
+    class TodoMiddleware:
+        pass
 
     class Backend:
         def __init__(self, workspace, *, read_only):
@@ -178,7 +269,7 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
     monkeypatch.setattr(
         coding_agent,
         "_deep_agent_components",
-        lambda: (Permission, create_agent),
+        lambda: (TodoMiddleware, create_agent),
     )
     monkeypatch.setattr(coding_agent, "get_coding_llm", lambda _name: model)
     monkeypatch.setattr(coding_agent, "CustodianBackend", Backend)
@@ -194,20 +285,9 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
     assert captured["agent"]["checkpointer"] is None
     assert captured["agent"]["tools"] == []
     assert captured["agent"]["interrupt_on"] is None
-    permissions = captured["agent"]["permissions"]
-    assert permissions[0].operations == ["read", "write"]
-    assert "/.env" in permissions[0].paths
-    assert permissions[0].mode == "deny"
-    assert (permissions[1].operations, permissions[1].paths, permissions[1].mode) == (
-        ["read"],
-        ["/**"],
-        "allow",
-    )
-    assert (permissions[2].operations, permissions[2].paths, permissions[2].mode) == (
-        ["write"],
-        ["/**"],
-        "deny",
-    )
+    assert captured["agent"]["permissions"] is None
+    assert len(captured["agent"]["middleware"]) == 1
+    assert isinstance(captured["agent"]["middleware"][0], TodoMiddleware)
 
 
 def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, tmp_path):
@@ -216,11 +296,8 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
     (tmp_path / ".agents" / "skills").mkdir(parents=True)
     captured = {}
 
-    class Permission:
-        def __init__(self, **kwargs):
-            self.operations = kwargs["operations"]
-            self.paths = kwargs["paths"]
-            self.mode = kwargs["mode"]
+    class TodoMiddleware:
+        pass
 
     class Backend:
         def __init__(self, workspace, *, read_only):
@@ -236,7 +313,7 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
     monkeypatch.setattr(
         coding_agent,
         "_deep_agent_components",
-        lambda: (Permission, create_agent),
+        lambda: (TodoMiddleware, create_agent),
     )
     monkeypatch.setattr(coding_agent, "get_coding_llm", lambda _name: SimpleNamespace())
     monkeypatch.setattr(coding_agent, "CustodianBackend", Backend)
@@ -253,8 +330,7 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
         "read_only": False,
     }
     assert [tool.name for tool in captured["agent"]["tools"]] == [
-        "custodian_command",
-        "custodian_git",
+        "custodian_compose_prepare_environment",
         "custodian_compose_read",
         "custodian_compose_change",
         "custodian_github_publish",
@@ -263,23 +339,34 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
         "write_file",
         "edit_file",
         "delete",
-        "custodian_command",
-        "custodian_git",
+        "execute",
         "custodian_compose_read",
-        "custodian_compose_change",
         "custodian_github_publish",
     }
     assert captured["agent"]["permissions"] is None
     assert captured["agent"]["skills"] is None
+    assert len(captured["agent"]["middleware"]) == 1
+    assert isinstance(captured["agent"]["middleware"][0], TodoMiddleware)
     system_prompt = captured["agent"]["system_prompt"]
     assert "Never search parent, child, or sibling" in system_prompt
     assert "native_custodian_host" in system_prompt
     assert "direct Custodian worker: available" in system_prompt
-    assert "request_macos_host_operation interfaces" in system_prompt
-    assert "/opt/coding-tools" in system_prompt
+    assert "request_macos_host_operation" in system_prompt
+    assert "built-in execute tool" in system_prompt
+    assert "normal shell, Git, build, test, package, and host commands" in system_prompt
+    assert "not inside the Agent Server container" in system_prompt
+    assert "explicit human task requires work elsewhere on the host" in system_prompt
+    assert "use execute with that absolute path" in system_prompt
     assert "custodian_github_publish" in system_prompt
     assert "chapter-N3xtron" in system_prompt
     assert "write_todos" in system_prompt
+    assert "OpenSpec artifacts as planning context, not as a second" in system_prompt
+    assert "proceed even when an OpenSpec change is incomplete" in system_prompt
+    assert "including requested builds and service restarts" in system_prompt
+    assert "custodian_compose_prepare_environment" in system_prompt
+    assert "Never ask the human to provide those local values" in system_prompt
+    assert "must never be reported as blockers" in system_prompt
+    assert "Use execute for ordinary command work" in system_prompt
     assert "15-minute report" in system_prompt
     assert "Completion report" in system_prompt
 
@@ -291,7 +378,6 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
 
     assert captured["agent"]["permissions"] is None
     assert set(captured["agent"]["interrupt_on"]) == {
-        "custodian_compose_change",
         "custodian_github_publish",
     }
 

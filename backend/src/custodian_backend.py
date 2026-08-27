@@ -11,13 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from deepagents.backends.protocol import (
-    BackendProtocol,
     DeleteResult,
     EditResult,
+    ExecuteResponse,
     GlobResult,
     GrepResult,
     LsResult,
     ReadResult,
+    SandboxBackendProtocol,
     WriteResult,
 )
 
@@ -91,8 +92,8 @@ class CustodianClient:
         return result
 
 
-class CustodianBackend(BackendProtocol):
-    """BackendProtocol implementation rooted only at one host workspace."""
+class CustodianBackend(SandboxBackendProtocol):
+    """Deep Agents sandbox backend delegated to the native host Custodian."""
 
     def __init__(
         self,
@@ -104,6 +105,37 @@ class CustodianBackend(BackendProtocol):
         self.workspace = workspace
         self.read_only = read_only
         self.client = client or CustodianClient(workspace)
+
+    @property
+    def id(self) -> str:
+        return f"custodian:{self.workspace}"
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+    ) -> ExecuteResponse:
+        if self.read_only:
+            return ExecuteResponse(
+                output="Custodian backend is read-only.",
+                exit_code=126,
+                truncated=False,
+            )
+        try:
+            result = self.client.action(
+                "execute",
+                command=command,
+                timeout=120 if timeout is None else timeout,
+            )
+        except CustodianError as exc:
+            return ExecuteResponse(output=str(exc), exit_code=None, truncated=False)
+        output = str(result.get("output") or result.get("error") or "")
+        return ExecuteResponse(
+            output=output,
+            exit_code=result.get("exit_code"),
+            truncated=bool(result.get("truncated")),
+        )
 
     @staticmethod
     def _error(result: dict[str, Any]) -> str | None:

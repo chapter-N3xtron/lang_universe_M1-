@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-24T00:38:50Z",
+  "updated_at": "2026-08-24T03:20:00Z",
   "updated_by": "deep-agent",
   "sections": [
     {
@@ -2793,7 +2793,7 @@
       "todos": [
         {
           "id": "inspect-validated-change-and-tree",
-          "content": "Inspect validated OpenSpec change headless-pm-source-of-truth and current working tree; reconcile its planning-only scope with the requested deployment work.",
+          "content": "Inspect validated OpenSpec change headless-pm-source-of-truth and current working tree; reconcile its former planning-only scope with the requested deployment work.",
           "status": "in_progress",
           "agent": "coding",
           "completed_by_model": null,
@@ -2820,7 +2820,7 @@
         },
         {
           "id": "docker-deployment-verification",
-          "content": "Use the single permitted typed Docker sandbox action to create/start and verify required services if authorized and available; otherwise record the exact blocker.",
+          "content": "BLOCKER: Use the single permitted typed Docker sandbox action to create/start and verify required services; the requested docker_sandbox/request_macos_host_operation interface is not available in this run.",
           "status": "pending",
           "agent": "coding",
           "completed_by_model": null,

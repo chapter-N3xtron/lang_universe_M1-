@@ -4,6 +4,8 @@ import io
 import urllib.error
 
 from src import custodian_backend
+from deepagents.backends.protocol import SandboxBackendProtocol
+
 from src.custodian_backend import CustodianBackend, CustodianClient
 
 
@@ -29,6 +31,13 @@ class FakeClient:
             return {"ok": True, "path": payload["path"]}
         if action == "fs_edit":
             return {"ok": True, "path": payload["path"], "occurrences": 1}
+        if action == "execute":
+            return {
+                "ok": True,
+                "output": "tests passed",
+                "exit_code": 0,
+                "truncated": False,
+            }
         return {"ok": True, "entries": []}
 
 
@@ -107,6 +116,20 @@ def test_backend_implements_protocol_results_and_revision_preconditions():
     assert all(call[1]["expected_revision"] == "revision-1" for call in mutation_calls)
 
 
+def test_backend_exposes_documented_execute_through_sandbox_protocol():
+    client = FakeClient()
+    backend = CustodianBackend("/Volumes/Storage/repo", client=client)
+
+    result = backend.execute("pytest -q", timeout=90)
+
+    assert isinstance(backend, SandboxBackendProtocol)
+    assert backend.id == "custodian:/Volumes/Storage/repo"
+    assert result.output == "tests passed"
+    assert result.exit_code == 0
+    assert result.truncated is False
+    assert client.calls == [("execute", {"command": "pytest -q", "timeout": 90})]
+
+
 def test_backend_maps_only_selected_physical_workspace_paths_to_virtual_paths():
     client = FakeClient()
     workspace = "/Volumes/Storage/selected-repo"
@@ -134,4 +157,7 @@ def test_read_only_backend_refuses_all_mutations_without_worker_call():
     assert backend.write("/x", "x").error == "Custodian backend is read-only"
     assert backend.edit("/x", "x", "y").error == "Custodian backend is read-only"
     assert backend.delete("/x").error == "Custodian backend is read-only"
+    execution = backend.execute("pytest -q")
+    assert execution.exit_code == 126
+    assert execution.output == "Custodian backend is read-only."
     assert client.calls == []

@@ -35,6 +35,7 @@ dependencies = [
     "python-docx>=1.2,<2",
     "python-pptx>=1,<2",
     "striprtf>=0.0.29,<1",
+    "temporalio[langgraph]>=1.27,<2",
 ]
 
 [project.optional-dependencies]

@@ -1,46 +1,38 @@
-## 1. Confirm Runtime Contracts
+## 1. Confirm Plugin Contracts
 
-- [ ] 1.1 Verify the installed Agent Server API supports caller-stable thread and run identities with atomic existing-identity conflict behavior; record the supported request/read/cancel operations and stop implementation if they cannot satisfy idempotent start-or-reattach.
-- [ ] 1.2 Identify the single authoritative Coder graph export and the existing Jasper graph registration path, confirming that the new entry can reference Coder without a copied wrapper or implementation fork.
-- [ ] 1.3 Confirm the bridge can use the supported Agent Server client/API without adding or enabling the public-preview native LangGraph plugin or prerelease Deep Agents plugin.
+- [ ] 1.1 Add the official `temporalio[langgraph]` dependency through the project package manager at a version compatible with the installed LangGraph release; confirm `LangGraphPlugin`, `graph`, Workflow, Activity, retry, timeout, and cancellation APIs without using private plugin internals.
+- [ ] 1.2 Verify that the plugin accepts the authoritative Coder `StateGraph` builder, that the Coder node can run as an Activity, and that the real Coder input and output contract round-trips through the supported Temporal payload converter; stop if these contracts cannot be satisfied.
+- [ ] 1.3 Record and test the plugin's public-preview status, one-node durability boundary, at-least-once Activity behavior, and cancellation behavior before enabling retries beyond one attempt.
 
-## 2. Register and Protect the Coder Graph
+## 2. Expose the Authoritative Builder
 
-- [ ] 2.1 Add the stable standalone Coder graph entry to Agent Server configuration while leaving Jasper independently registered and unchanged as the product-facing graph.
-- [ ] 2.2 Add graph-resource authorization rules that permit the designated Temporal/service and focused-test identities while denying browser, normal-user, and unauthenticated direct Coder invocation before thread/run creation.
-- [ ] 2.3 Filter or deny standalone Coder graph listing and metadata access for browser and normal-user identities, retaining direct metadata denial even when list filtering is active.
-- [ ] 2.4 Add focused registration and authorization tests covering authoritative graph resolution, Jasper separation, authorized service access, direct denial, and normal-user non-enumeration.
+- [ ] 2.1 Refactor Coder graph construction into one authoritative function that returns the uncompiled `StateGraph` and one thin existing compile function used by the supervisor.
+- [ ] 2.2 Mark `deep_agents_coding_node` with plugin-required `execute_in: activity` metadata without changing its normal supervisor behavior, schemas, topology, persistence ownership, or Custodian boundaries.
+- [ ] 2.3 Update focused graph contract tests to prove the supervisor and Temporal use the same builder, the supervisor can still route to and run Coder as a subagent, and no copied or wrapper Coder implementation exists.
 
-## 3. Define Stable Bridge Identity
+## 3. Define the Temporal Contract
 
-- [ ] 3.1 Define the activity bridge request/result contract for `operation_id`, `workflow_id`, `thread_id`, `run_id`, immutable request fingerprint, graph input, and terminal or unresolved outcomes.
-- [ ] 3.2 Implement deterministic, API-compatible thread/run identity derivation from the stable workflow and operation key, excluding activity attempt numbers from identity generation.
-- [ ] 3.3 Attach the complete correlation tuple and immutable fingerprint to Agent Server run metadata and structured bridge observations without logging credentials or sensitive graph input.
-- [ ] 3.4 Add unit tests proving identical logical operations retain all four IDs across activity retries and reconnects, while distinct operation keys produce distinct identities.
+- [ ] 3.1 Define a serializable internal request/result contract containing `operation_id`, graph input, terminal status, and sanitized failure information using the existing Coder field names verbatim.
+- [ ] 3.2 Use `operation_id` as the Temporal Workflow ID and pass it unchanged as Coder's `thread_identity`; keep Activity attempt numbers and Temporal Run IDs out of the logical operation identity.
+- [ ] 3.3 Define explicit Workflow ID conflict/reuse behavior so an equivalent repeated request addresses the existing operation and a conflicting request does not silently start unrelated work.
+- [ ] 3.4 Add tests proving stable identity across Workflow replay and Activity retry and distinct identity for distinct operations.
 
-## 4. Implement Activity Start, Reattach, and Observation
+## 4. Register and Run Coder with Temporal
 
-- [ ] 4.1 Implement the explicit Temporal activity adapter over supported Agent Server create, read, observe, and cancel APIs without running graph code inside the Temporal worker.
-- [ ] 4.2 Implement create-or-reattach using the preassigned thread/run identities, equivalent existing-identity conflicts as success, and immutable tuple/fingerprint mismatches as non-retryable errors.
-- [ ] 4.3 Return recorded terminal outcomes for repeated completed operations and prevent rerun under an existing operation identity.
-- [ ] 4.4 Implement reconnectable run observation with activity heartbeats while preserving Temporal ownership of activity retries, timers, and outer scheduling.
-- [ ] 4.5 Add tests for first start, lost create response, retried start, existing terminal run, reconnect, conflicting identity reuse, retryable transport failure, and terminal inner failure.
+- [ ] 4.1 Implement a Temporal Workflow that retrieves `graph("coder")`, compiles it inside the Workflow, invokes it with validated input, and returns the Coder terminal result.
+- [ ] 4.2 Implement a Temporal worker entrypoint that registers the Workflow and `LangGraphPlugin(graphs={"coder": authoritative_builder()})`.
+- [x] 4.3 Configure finite Activity and heartbeat timeouts, an explicit retry policy, and a public worker interceptor scoped to the generated `coder.coding_agent` Activity; do not modify the authoritative Coder graph configuration, claim exactly-once execution, or enable unsafe retries for side-effecting Coder work.
+- [ ] 4.4 Keep Agent Server out of the Temporal execution path and leave its Jasper registration unchanged.
 
-## 5. Propagate Cancellation
+## 5. Verify Outcomes and Lifecycle
 
-- [ ] 5.1 Implement the activity cancellation path that requests cancellation of the correlated nonterminal Agent Server run and performs a bounded authoritative status check.
-- [ ] 5.2 Return distinct outcomes for confirmed cancellation, prior terminal completion, and unresolved cancellation delivery without rewriting an existing terminal state.
-- [ ] 5.3 Add tests for running cancellation, repeated cancellation delivery, transport failure during cancellation, and completion racing with cancellation.
+- [ ] 5.1 Add focused tests for first execution, successful terminal result, sanitized terminal failure, timeout, retry policy, Workflow replay, and worker restart behavior supported by the plugin test environment.
+- [x] 5.2 Add focused cancellation tests proving worker-boundary heartbeats deliver a cancelled Workflow to the running Coder Activity and report the actual terminal state.
+- [ ] 5.3 Test Activity re-execution against existing repository mutations; permit retries beyond one attempt only if repeated entry safely resumes from current state and does not duplicate unsafe external effects.
+- [ ] 5.4 Verify completed node results are not rerun during ordinary Workflow replay.
 
-## 6. Reconcile Orphaned Operations
+## 6. Verify Scope
 
-- [ ] 6.1 Implement repeatable reconciliation classification using the complete stable identity tuple and authoritative Temporal workflow and Agent Server run states.
-- [ ] 6.2 Implement safe actions for reattaching an active operation, allowing the normal idempotent start path when no run was accepted, cancelling an ownerless nonterminal run, and recovering a disconnected terminal outcome.
-- [ ] 6.3 Record incomplete, conflicting, or failed handoffs as actionable unresolved reconciliation results without guessing identities, cancelling unrelated work, or silently starting replacements.
-- [ ] 6.4 Add tests for every reconciliation class, repeated reconciliation, malformed correlation, stale observations, and cancellation of an inner run whose outer owner is absent or terminal.
-
-## 7. Verify Scope and Capability
-
-- [ ] 7.1 Run focused integration tests proving the Temporal activity is the outer scheduler/retry/timer/cancellation owner and Agent Server remains the inner run/thread-state owner.
-- [ ] 7.2 Verify product-facing agent discovery still exposes only Jasper and that no UI, Jasper embedding, persistence implementation, MCP, or deployment changes were introduced.
-- [ ] 7.3 Verify dependency manifests and runtime configuration contain neither excluded preview plugin, then run the repository's applicable graph, authorization, bridge, and static checks.
+- [ ] 6.1 Verify Agent Server still registers only Jasper and normal product discovery exposes no standalone Coder graph.
+- [ ] 6.2 Verify no Activity-to-Agent-Server bridge, Agent Server Coder authorization policy, synthetic Agent Server IDs, custom plugin infrastructure, prerelease Deep Agents plugin, UI change, Jasper routing change, persistence implementation, MCP change, or deployment change was introduced.
+- [ ] 6.3 Run the focused Coder graph and Temporal tests plus applicable backend static checks, then record the public-preview and deployment/restart boundaries without claiming deployed behavior.

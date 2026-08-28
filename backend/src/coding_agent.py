@@ -822,13 +822,21 @@ async def deep_agents_coding_node(
     return response
 
 
-def create_coding_agent_graph():
+def create_coding_agent_graph_builder():
     graph = StateGraph(
         CoderState,
         input_schema=CoderInputState,
         output_schema=CoderOutputState,
     )
-    graph.add_node("coding_agent", deep_agents_coding_node)
+    graph.add_node(
+        "coding_agent",
+        deep_agents_coding_node,
+        metadata={"execute_in": "activity"},
+    )
     graph.add_edge(START, "coding_agent")
     graph.add_edge("coding_agent", END)
-    return graph.compile()
+    return graph
+
+
+def create_coding_agent_graph():
+    return create_coding_agent_graph_builder().compile()

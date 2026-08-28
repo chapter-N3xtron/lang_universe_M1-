@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 from typing import Annotated, Literal, TypedDict
 
-from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.ui import AnyUIMessage, ui_message_reducer
@@ -13,8 +12,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
 from src.agent_utils import get_conversation_history, get_user_query
-from src.coding_agent import create_coding_agent_graph
-from src.jasper_agent import STANDARD_SESSION_GREETING, call_jasper
+from src.jasper_agent import STANDARD_SESSION_GREETING, create_jasper_graph
 from src.librarian_agent import librarian_agent
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
@@ -41,6 +39,9 @@ class State(TypedDict):
     coding_status: str
     execution_manifest: ExecutionManifest
     coding_task: str
+    jasper_request: dict
+    jasper_result: dict
+    jasper_response: str
     jasper_structured_response: dict
     visual_artifacts: list[dict]
     layout_suggestion: dict | None
@@ -103,9 +104,9 @@ def session_opening_node(state: State) -> dict:
 
 
 AGENT_ROUTING = {
-    "coding": "coding",
-    "deep-agent": "coding",
-    "deepagents": "coding",
+    "coding": "jasper",
+    "deep-agent": "jasper",
+    "deepagents": "jasper",
     "research": "librarian",
     "librarian": "librarian",
     "jasper": "jasper",
@@ -114,6 +115,11 @@ AGENT_ROUTING = {
     "ocr": "ocr",
     "uncensored-coder": "magic-coder",
 }
+
+
+def _entry_node(agent: str) -> str:
+    return "prepare_jasper" if agent == "jasper" else agent
+
 
 SUPERVISOR_PROMPT = """You are a supervisor agent managing a team of specialists. Your job is to decide which specialist should handle the user's request.
 
@@ -142,8 +148,7 @@ def supervisor_node(
         Literal[
             "session_opening",
             "approval",
-            "jasper",
-            "coding",
+            "prepare_jasper",
             "librarian",
             "magic-coder",
             "ocr",
@@ -176,7 +181,7 @@ def supervisor_node(
     if target in AGENT_ROUTING:
         node_name = AGENT_ROUTING[target]
         return Command(
-            goto=node_name,
+            goto=_entry_node(node_name),
             update={
                 "active_agent": node_name,
                 "handoff_history": [
@@ -228,7 +233,7 @@ def supervisor_node(
 
     if state.get("execution_mode") == "autonomous":
         return Command(
-            goto=node_name,
+            goto=_entry_node(node_name),
             update={
                 "active_agent": decision,
                 "pending_agent": "",
@@ -278,7 +283,7 @@ def _is_approved(resume_value) -> bool:
 
 def approval_node(
     state: State,
-) -> Command[Literal["jasper", "coding", "librarian", "magic-coder", "ocr"]] | dict:
+) -> Command[Literal["prepare_jasper", "librarian", "magic-coder", "ocr"]] | dict:
     agent = state.get("pending_agent", "")
     approved = interrupt(
         {
@@ -316,7 +321,7 @@ def approval_node(
         }
     node_name = AGENT_ROUTING.get(agent, "jasper")
     return Command(
-        goto=node_name,
+        goto=_entry_node(node_name),
         update={
             "active_agent": node_name,
             "handoff_history": [
@@ -357,19 +362,12 @@ def _base_messages_to_dicts(messages: list) -> list[dict]:
 def create_chat_ui():
     graph = StateGraph(State)
 
-    coding_app = create_coding_agent_graph()
+    jasper_app = create_jasper_graph()
     magic_coder_app = create_magic_coder_graph()
 
-    async def run_jasper(
+    def prepare_jasper(
         state, config: RunnableConfig
-    ) -> Command[Literal["coding", "librarian", "ocr", "record_session"]]:
-        latest = state.get("messages", [])[-1:] or [{}]
-        latest = latest[0]
-        latest_role = latest.get("role") if isinstance(latest, dict) else latest.type
-        latest_name = latest.get("name") if isinstance(latest, dict) else latest.name
-        if latest_role in {"assistant", "ai"} and latest_name == "coding":
-            return Command(goto="record_session")
-
+    ) -> Command[Literal["jasper", "record_session"]]:
         configurable = config.get("configurable", {})
         try:
             workspace = (
@@ -394,123 +392,52 @@ def create_chat_ui():
                 },
             )
         manifest = execution_manifest(workspace) if workspace is not None else None
-        result = await call_jasper(
-            {
-                "messages": state["messages"],
-                "todos": state.get("todos", []),
-                "model": state.get("model", ""),
-                "workspace": str(workspace) if workspace is not None else "",
-                "execution_manifest": manifest,
-                "execution_mode": state.get("execution_mode") or state.get("mode"),
-                "thread_identity": state.get("thread_identity")
-                or configurable.get("thread_id", ""),
-                "user_identity": state.get("user_identity", "anonymous"),
-                "coding_session_id": state.get("coding_session_id", ""),
-                "session_evidence": state.get("session_evidence", []),
-            }
-        )
-        return Command(
-            goto="record_session",
-            update={
-                **result,
-                "messages": _base_messages_to_dicts(result.get("messages", [])),
-            },
-        )
-
-    async def run_coding(state, config: RunnableConfig) -> Command[Literal["jasper"]]:
-        configurable = config.get("configurable", {})
-        handed_off_task = (state.get("coding_task") or "").strip()
-        task = handed_off_task or get_user_query(state.get("messages", []))
-        execution_mode = state.get("execution_mode") or state.get("mode")
-        if handed_off_task and execution_mode not in {
-            "read_only",
-            "approval",
-            "autonomous",
-        }:
-            result = {
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": (
-                            "The coding handoff is blocked because no explicit "
-                            "execution mode was selected."
-                        ),
-                    }
-                ],
-                "coding_status": "error",
-            }
-        else:
-            task_messages = [HumanMessage(content=task)]
-            result = await coding_app.ainvoke(
-                {
-                    "messages": task_messages,
-                    "workspace": state.get("workspace"),
-                    "execution_mode": execution_mode or "approval",
-                    "model": state.get("model"),
-                    "thread_identity": state.get("thread_identity")
-                    or configurable.get("thread_id", ""),
-                    "user_identity": state.get("user_identity")
-                    or configurable.get("user_id")
-                    or configurable.get("owner_id")
-                    or "anonymous",
-                    "coding_session_id": state.get("coding_session_id") or "",
-                },
-                config=config,
-            )
-            result["messages"] = result.get("messages", [])[len(task_messages) :]
-        final_messages = [
-            message
-            for message in result.get("messages", [])
-            if (
-                (message.get("role") if isinstance(message, dict) else message.type)
-                in {"assistant", "ai"}
-                and not (
-                    message.get("tool_calls", [])
-                    if isinstance(message, dict)
-                    else getattr(message, "tool_calls", [])
-                )
-            )
-        ][-1:]
-        coding_status = result.get("coding_status", "error")
-        if not final_messages:
-            final_messages = [
-                {
-                    "role": "assistant",
-                    "content": (
-                        "The coding agent did not return a final result "
-                        "(missing_final_result)."
-                    ),
-                }
-            ]
-            coding_status = "error"
-        outer_messages = _base_messages_to_dicts(final_messages)
-        for message in outer_messages:
-            message["name"] = "coding"
-        update = {
-            "messages": outer_messages,
-            "coding_task": "",
-            "coding_session_id": result.get("coding_session_id", ""),
-            "coding_status": coding_status,
-            **(
-                {"workspace": result["workspace"]}
-                if result.get("workspace") is not None
-                else {}
-            ),
-            **(
-                {"execution_manifest": result["execution_manifest"]}
-                if result.get("execution_manifest") is not None
-                else {}
-            ),
+        request = {
+            "messages": state["messages"],
+            "todos": state.get("todos", []),
+            "model": state.get("model"),
+            "workspace": str(workspace) if workspace is not None else "",
+            "execution_mode": state.get("execution_mode") or state.get("mode"),
+            "thread_identity": state.get("thread_identity")
+            or configurable.get("thread_id", ""),
+            "user_identity": state.get("user_identity")
+            or configurable.get("user_id")
+            or configurable.get("owner_id")
+            or "anonymous",
+            "coding_session_id": state.get("coding_session_id", ""),
+            "session_evidence": state.get("session_evidence", []),
         }
-        return Command(goto="jasper", update=update)
+        if manifest is not None:
+            request["execution_manifest"] = manifest
+        return Command(goto="jasper", update={"jasper_request": request})
+
+    def route_jasper_result(
+        state,
+    ) -> Command[Literal["librarian", "ocr", "record_session"]]:
+        result = dict(state.get("jasper_result") or {})
+        route = result.pop("route", "record_session")
+        messages = result.pop("messages", [])
+        update = {
+            **result,
+            "messages": messages,
+            "jasper_request": {},
+            "jasper_result": {},
+        }
+        if "coding_status" in result:
+            update["coding_task"] = ""
+        if route == "librarian":
+            return Command(goto="librarian", update=update)
+        if route == "ocr":
+            return Command(goto="ocr", update=update)
+        return Command(goto="record_session", update=update)
 
     async def run_librarian(
         state, config: RunnableConfig
-    ) -> Command[Literal["jasper", "record_session"]]:
+    ) -> Command[Literal["prepare_jasper", "record_session"]]:
         handed_off_task = bool((state.get("librarian_task") or "").strip())
         result = await librarian_agent(state, config)
         return Command(
-            goto="jasper" if handed_off_task else "record_session",
+            goto="prepare_jasper" if handed_off_task else "record_session",
             update={
                 "messages": _base_messages_to_dicts(result.get("messages", [])),
                 "librarian_task": "",
@@ -596,8 +523,9 @@ def create_chat_ui():
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("session_opening", session_opening_node)
     graph.add_node("approval", approval_node)
-    graph.add_node("jasper", run_jasper)
-    graph.add_node("coding", run_coding)
+    graph.add_node("prepare_jasper", prepare_jasper)
+    graph.add_node("jasper", jasper_app)
+    graph.add_node("route_jasper_result", route_jasper_result)
     graph.add_node("librarian", run_librarian)
     graph.add_node("ocr", run_ocr_node)
     graph.add_node("magic-coder", run_magic_coder_node)
@@ -605,6 +533,7 @@ def create_chat_ui():
 
     graph.add_edge(START, "supervisor")
     graph.add_edge("session_opening", "record_session")
+    graph.add_edge("jasper", "route_jasper_result")
 
     graph.add_edge("magic-coder", "record_session")
     graph.add_edge("record_session", END)
@@ -631,7 +560,7 @@ async def chat():
     )
     print(f"{dark_mode['header']}{'=' * 70}{dark_mode['reset']}")
     print(
-        f"{dark_mode['dim']}  Agents: Jasper | Coding | The Librarian | Magic Coder{dark_mode['reset']}"
+        f"{dark_mode['dim']}  Agents: Jasper | The Librarian | Magic Coder{dark_mode['reset']}"
     )
     print(
         f"{dark_mode['dim']}  Type 'quit' to exit | 'clear' to clear history{dark_mode['reset']}"

@@ -55,29 +55,30 @@ def _clear_src_modules():
         sys.modules.pop(key, None)
 
 
-def test_compiled_graph_declares_visible_jasper_coding_handoff_routes():
+def test_compiled_graph_uses_jasper_as_the_only_coding_boundary():
     _clear_src_modules()
     from src.chat_ui import create_chat_ui
 
     graph = _compile(create_chat_ui()).get_graph()
     edges = {(edge.source, edge.target) for edge in graph.edges}
 
-    assert ("jasper", "coding") in edges
-    assert ("coding", "jasper") in edges
-    assert ("jasper", "record_session") in edges
+    assert "coding" not in graph.nodes
+    assert ("prepare_jasper", "jasper") in edges
+    assert ("jasper", "route_jasper_result") in edges
+    assert ("route_jasper_result", "record_session") in edges
     assert ("record_session", "__end__") in edges
 
 
-def test_compiled_graph_declares_visible_jasper_librarian_handoff_routes():
+def test_compiled_graph_routes_local_jasper_librarian_exit():
     _clear_src_modules()
     from src.chat_ui import create_chat_ui
 
     graph = _compile(create_chat_ui()).get_graph()
     edges = {(edge.source, edge.target) for edge in graph.edges}
 
-    assert ("jasper", "librarian") in edges
-    assert ("librarian", "jasper") in edges
-    assert ("jasper", "record_session") in edges
+    assert ("route_jasper_result", "librarian") in edges
+    assert ("librarian", "prepare_jasper") in edges
+    assert ("jasper", "librarian") not in edges
     assert ("jasper", "research") not in edges
     assert ("supervisor", "research") not in edges
     assert "research" not in graph.nodes
@@ -330,7 +331,7 @@ def test_supervisor_done_falls_back_to_jasper():
     assert result.get("pending_approval", False) is True
 
 
-def test_jasper_visual_response_survives_outer_graph_state():
+def test_jasper_visual_response_survives_outer_graph_state(tmp_path):
     """Structured artifacts use persisted LangGraph state, not a side channel."""
 
     async def fake_call_jasper(state):
@@ -395,7 +396,7 @@ def test_jasper_visual_response_survives_outer_graph_state():
         }
 
     _clear_src_modules()
-    with patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper):
+    with patch("src.jasper_agent.call_jasper", side_effect=fake_call_jasper):
         from src.chat_ui import create_chat_ui
 
         app = _compile(create_chat_ui())
@@ -404,7 +405,7 @@ def test_jasper_visual_response_survives_outer_graph_state():
             app.ainvoke(
                 {
                     "messages": [{"role": "user", "content": "Draw the flow"}],
-                    "workspace": "/tmp",
+                    "workspace": str(tmp_path),
                     "target_agent": "jasper",
                     "mode": "live",
                     "model": "ollama/test-model",
@@ -425,16 +426,16 @@ def test_jasper_visual_response_survives_outer_graph_state():
     )
 
 
-def test_explicit_jasper_selection_stays_sticky_across_turns():
+def test_explicit_jasper_selection_stays_sticky_across_turns(tmp_path):
     async def fake_call_jasper(state):
-        user_text = state["messages"][-1]["content"]
+        user_text = state["messages"][-1].content
         return {
             "messages": [AIMessage(content=f"Jasper handled: {user_text}")],
             "visual_artifacts": [],
         }
 
     _clear_src_modules()
-    with patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper):
+    with patch("src.jasper_agent.call_jasper", side_effect=fake_call_jasper):
         from src.chat_ui import create_chat_ui
 
         app = _compile(create_chat_ui())
@@ -443,7 +444,7 @@ def test_explicit_jasper_selection_stays_sticky_across_turns():
             app.ainvoke(
                 {
                     "messages": [{"role": "user", "content": "First request"}],
-                    "workspace": "/tmp",
+                    "workspace": str(tmp_path),
                     "target_agent": "jasper",
                     "mode": "live",
                     "model": "ollama/test-model",
@@ -477,7 +478,7 @@ def test_jasper_passes_selected_workspace_and_langgraph_thread_to_coding(tmp_pat
         }
 
     _clear_src_modules()
-    with patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper):
+    with patch("src.jasper_agent.call_jasper", side_effect=fake_call_jasper):
         from src.chat_ui import create_chat_ui
 
         app = _compile(create_chat_ui())
@@ -501,167 +502,40 @@ def test_jasper_passes_selected_workspace_and_langgraph_thread_to_coding(tmp_pat
     assert captured[0]["thread_identity"] == "jasper-coding-thread"
 
 
-def test_coding_receives_explicit_task_and_returns_named_result_directly(tmp_path):
-    coding_inputs = []
+def test_legacy_coding_selection_enters_the_jasper_boundary(tmp_path):
     jasper_inputs = []
-
-    class FakeCodingApp:
-        async def ainvoke(self, state, config=None):
-            coding_inputs.append((state, config))
-            return {
-                "messages": [
-                    *state["messages"],
-                    AIMessage(content="Coder completed and verified the task."),
-                ],
-                "coding_session_id": "coding-session-1",
-                "coding_status": "completed",
-                            }
 
     async def fake_call_jasper(state):
         jasper_inputs.append(state)
         return {
-            "messages": [AIMessage(content="Coder completed and verified the task.")],
+            "messages": [AIMessage(content="Jasper accepted the coding request.")],
             "visual_artifacts": [],
         }
 
     _clear_src_modules()
-    with (
-        patch("src.chat_ui.create_coding_agent_graph", return_value=FakeCodingApp()),
-        patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper),
-    ):
+    with patch("src.jasper_agent.call_jasper", side_effect=fake_call_jasper):
         from src.chat_ui import create_chat_ui
 
-        app = _compile(create_chat_ui())
+        builder = create_chat_ui()
         result = asyncio.run(
-            app.ainvoke(
+            _compile(builder).ainvoke(
                 {
                     "messages": [{"role": "user", "content": "Use Coder"}],
-                    "coding_task": "Install OpenSpec in the selected workspace",
-                    "workspace": str(tmp_path),
-                    "target_agent": "coding",
-                    "execution_mode": "approval",
-                    "model": "ollama/test-model",
-                    "user_identity": "test-user",
-                },
-                config={"configurable": {"thread_id": "coding-return-thread"}},
-            )
-        )
-
-    coding_state, coding_config = coding_inputs[0]
-    assert len(coding_state["messages"]) == 1
-    assert coding_state["messages"][0].type == "human"
-    assert coding_state["messages"][0].content == (
-        "Install OpenSpec in the selected workspace"
-    )
-    assert coding_state["workspace"] == str(tmp_path)
-    assert coding_state["execution_mode"] == "approval"
-    assert coding_state["model"] == "ollama/test-model"
-    assert coding_state["thread_identity"] == "coding-return-thread"
-    assert coding_state["user_identity"] == "test-user"
-    assert coding_config["configurable"]["thread_id"] == "coding-return-thread"
-    assert jasper_inputs == []
-    assert result["messages"][-1]["name"] == "coding"
-    assert result["messages"][-1]["content"] == (
-        "Coder completed and verified the task."
-    )
-    assert result["coding_task"] == ""
-    assert result["coding_status"] == "completed"
-
-
-def test_direct_coding_uses_latest_user_task_and_fails_closed_without_result(
-    tmp_path,
-):
-    coding_inputs = []
-    jasper_inputs = []
-
-    class FakeCodingApp:
-        async def ainvoke(self, state, config=None):
-            coding_inputs.append(state)
-            return {
-                "messages": list(state["messages"]),
-                "coding_status": "completed",
-                            }
-
-    async def fake_call_jasper(state):
-        jasper_inputs.append(state)
-        return {
-            "messages": [AIMessage(content=state["messages"][-1]["content"])],
-            "visual_artifacts": [],
-        }
-
-    _clear_src_modules()
-    with (
-        patch("src.chat_ui.create_coding_agent_graph", return_value=FakeCodingApp()),
-        patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper),
-    ):
-        from src.chat_ui import create_chat_ui
-
-        result = asyncio.run(
-            _compile(create_chat_ui()).ainvoke(
-                {
-                    "messages": [
-                        {"role": "user", "content": "Inspect the selected workspace"}
-                    ],
                     "workspace": str(tmp_path),
                     "target_agent": "coding",
                     "execution_mode": "read_only",
+                    "model": "ollama/test-model",
+                    "user_identity": "test-user",
                 },
-                config={"configurable": {"thread_id": "direct-coding-thread"}},
+                config={"configurable": {"thread_id": "coding-alias-thread"}},
             )
         )
 
-    assert coding_inputs[0]["messages"][0].content == "Inspect the selected workspace"
-    assert coding_inputs[0]["execution_mode"] == "read_only"
-    assert jasper_inputs == []
-    assert result["messages"][-1]["name"] == "coding"
-    assert "missing_final_result" in result["messages"][-1]["content"]
-    assert result["coding_status"] == "error"
-
-
-def test_direct_coding_defaults_to_approval_when_mode_is_omitted(tmp_path):
-    coding_inputs = []
-
-    class FakeCodingApp:
-        async def ainvoke(self, state, config=None):
-            coding_inputs.append(state)
-            return {
-                "messages": [
-                    *state["messages"],
-                    AIMessage(content="OpenSpec is ready for approval-mode work."),
-                ],
-                "coding_status": "completed",
-                            }
-
-    async def fake_call_jasper(state):
-        return {
-            "messages": [AIMessage(content=state["messages"][-1]["content"])],
-            "visual_artifacts": [],
-        }
-
-    _clear_src_modules()
-    with (
-        patch("src.chat_ui.create_coding_agent_graph", return_value=FakeCodingApp()),
-        patch("src.chat_ui.call_jasper", side_effect=fake_call_jasper),
-    ):
-        from src.chat_ui import create_chat_ui
-
-        asyncio.run(
-            _compile(create_chat_ui()).ainvoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "Create the OpenSpec change",
-                        }
-                    ],
-                    "workspace": str(tmp_path),
-                    "target_agent": "coding",
-                },
-                config={"configurable": {"thread_id": "coding-default-approval"}},
-            )
-        )
-
-    assert coding_inputs[0]["execution_mode"] == "approval"
+    assert "coding" not in builder.nodes
+    assert jasper_inputs[0]["execution_mode"] == "read_only"
+    assert jasper_inputs[0]["thread_identity"] == "coding-alias-thread"
+    assert jasper_inputs[0]["user_identity"] == "test-user"
+    assert result["messages"][-1]["content"] == "Jasper accepted the coding request."
 
 
 def test_auto_concept_map_routing_is_owned_by_jasper_without_model_guessing():

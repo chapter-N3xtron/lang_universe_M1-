@@ -6,7 +6,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from deepagents import CompiledSubAgent, DeepAgentState, create_deep_agent
@@ -18,15 +18,23 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.structured_output import ProviderStrategy, ToolStrategy
 from langchain.tools import ToolRuntime, tool
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langgraph.errors import GraphBubbleUp
-from langgraph.graph import START, StateGraph
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.ui import AnyUIMessage, push_ui_message, ui_message_reducer
 from langgraph.types import Command
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 from src.agent_utils import get_user_query
+from src.coding_agent import create_coding_agent_graph
 from src.custodian_backend import CustodianBackend, CustodianClient, CustodianError
 from src.jasper_tools import (
     agent_evidence,
@@ -94,8 +102,100 @@ class State(TypedDict, total=False):
     thread_identity: str
     user_identity: str
     coding_session_id: str
+    coding_status: str
     execution_manifest: ExecutionManifest
     session_evidence: list[dict]
+
+
+class JasperToCoderRequest(TypedDict):
+    messages: list[Any]
+    workspace: str
+    model: str | None
+    execution_mode: str
+    thread_identity: str
+    user_identity: str
+    coding_session_id: str
+
+
+class CoderToJasperResult(TypedDict, total=False):
+    messages: list[Any]
+    workspace: str
+    execution_manifest: ExecutionManifest
+    coding_session_id: str
+    coding_status: str
+
+
+class CoderBridgeInputState(TypedDict):
+    coding_request: JasperToCoderRequest
+
+
+class CoderBridgeOutputState(TypedDict):
+    coding_result: CoderToJasperResult
+
+
+class CoderBridgeState(TypedDict, total=False):
+    coding_request: JasperToCoderRequest
+    messages: list[Any]
+    workspace: str
+    model: str | None
+    execution_mode: str
+    thread_identity: str
+    user_identity: str
+    coding_session_id: str
+    coding_status: str
+    execution_manifest: ExecutionManifest
+    coding_result: CoderToJasperResult
+
+
+class JasperGraphRequest(TypedDict, total=False):
+    messages: list[Any]
+    todos: list[dict]
+    model: str | None
+    workspace: str
+    execution_manifest: ExecutionManifest
+    execution_mode: str
+    thread_identity: str
+    user_identity: str
+    coding_session_id: str
+    session_evidence: list[dict]
+
+
+class JasperGraphResult(TypedDict, total=False):
+    route: Literal["record_session", "librarian", "ocr"]
+    messages: list[dict]
+    jasper_response: str
+    jasper_structured_response: dict
+    visual_artifacts: list[dict]
+    layout_suggestion: dict | None
+    jasper_strategy: ResponseStrategy
+    jasper_diagnostic: dict | None
+    workspace: str
+    execution_manifest: ExecutionManifest
+    coding_session_id: str
+    coding_status: str
+    librarian_task: str
+    ocr_task: str
+    ocr_document_ref: str
+    ocr_output_format: str
+
+
+class JasperGraphInputState(TypedDict):
+    jasper_request: JasperGraphRequest
+
+
+class JasperGraphOutputState(TypedDict):
+    jasper_result: JasperGraphResult
+
+
+class JasperGraphState(State, total=False):
+    jasper_request: JasperGraphRequest
+    jasper_result: JasperGraphResult
+    coding_request: JasperToCoderRequest
+    coding_result: CoderToJasperResult
+    librarian_task: str
+    ocr_task: str
+    ocr_document_ref: str
+    ocr_output_format: str
 
 
 class JasperDeepAgentState(DeepAgentState, total=False):
@@ -142,15 +242,15 @@ def transfer_to_ocr(
     output_format: OCR_OUTPUT_FORMATS = "markdown",
     *,
     runtime: ToolRuntime,
-) -> Command[Literal["ocr"]]:
-    """Hand an approved document to the top-level OCR specialist."""
+) -> Command[Literal["ocr_exit"]]:
+    """Hand an approved document to Jasper's local OCR exit."""
     if output_format not in {"markdown", "json", "structured"}:
         raise ValueError("output_format must be markdown, json, or structured")
     if not task.strip() or not document_ref.strip():
         raise ValueError("task and document_ref are required")
     state = runtime.state
     return Command(
-        goto="ocr",
+        goto="ocr_exit",
         update={
             "ocr_task": task,
             "ocr_document_ref": document_ref,
@@ -176,9 +276,13 @@ def _specialists(_model) -> list[CompiledSubAgent]:
 
 
 @tool
-def transfer_to_coding(task: str, runtime: ToolRuntime) -> Command[Literal["coding"]]:
-    """Hand a repository task to the top-level Coding specialist."""
+def transfer_to_coding(
+    task: str, runtime: ToolRuntime
+) -> Command[Literal["coder_bridge"]]:
+    """Hand a repository task to Jasper's local Coding subgraph."""
 
+    if not task.strip():
+        raise ValueError("task is required")
     state = runtime.state
     execution_mode = state.get("execution_mode")
     if execution_mode not in {"read_only", "approval", "autonomous"}:
@@ -197,16 +301,19 @@ def transfer_to_coding(task: str, runtime: ToolRuntime) -> Command[Literal["codi
         tool_call_id=runtime.tool_call_id,
     )
     return Command(
-        goto="coding",
+        goto="coder_bridge",
         update={
-            "coding_task": task,
+            "coding_request": {
+                "messages": [HumanMessage(content=task)],
+                "workspace": str(workspace),
+                "model": state.get("model"),
+                "execution_mode": execution_mode,
+                "thread_identity": state.get("thread_identity", ""),
+                "user_identity": state.get("user_identity", "anonymous"),
+                "coding_session_id": state.get("coding_session_id", ""),
+            },
             "workspace": str(workspace),
             "execution_manifest": manifest,
-            "model": state.get("model"),
-            "execution_mode": execution_mode,
-            "thread_identity": state.get("thread_identity", ""),
-            "pending_agent": "",
-            "pending_approval": False,
             "messages": [last_ai_message, transfer_message],
         },
         graph=Command.PARENT,
@@ -216,8 +323,8 @@ def transfer_to_coding(task: str, runtime: ToolRuntime) -> Command[Literal["codi
 @tool
 def transfer_to_librarian(
     task: str, runtime: ToolRuntime
-) -> Command[Literal["librarian"]]:
-    """Hand an evidence-gathering task to the top-level Librarian specialist."""
+) -> Command[Literal["librarian_exit"]]:
+    """Hand an evidence-gathering task to Jasper's local Librarian exit."""
 
     state = runtime.state
     last_ai_message = next(
@@ -226,7 +333,7 @@ def transfer_to_librarian(
         if isinstance(message, AIMessage)
     )
     return Command(
-        goto="librarian",
+        goto="librarian_exit",
         update={
             "librarian_task": task,
             "workspace": state.get("workspace", ""),
@@ -431,7 +538,7 @@ They are unavailable in read-only and autonomous modes. Call transfer_to_coding,
 transfer_to_librarian, or transfer_to_ocr by itself, never in parallel with another tool
 call.
 
-When an assistant message named coding returns from the top-level Coding node,
+When an assistant message named coding returns from the nested Coding subgraph,
 relay its result to the human. Treat a question, blocker, cancellation, or error as
 such. Do not claim the requested work completed unless Coding's returned message
 explicitly reports completion and verification. Do not expose Coding's internal
@@ -989,10 +1096,241 @@ async def call_jasper(state: State):
     return result
 
 
-def create_jasper_graph():
-    """Compile the Jasper wrapper node around LangChain's production agent loop."""
+def _messages_to_dicts(messages: list[Any]) -> list[dict]:
+    role_map = {"human": "user", "ai": "assistant", "tool": "tool", "system": "system"}
+    converted = []
+    for message in messages:
+        if isinstance(message, dict):
+            converted.append(dict(message))
+            continue
+        role = role_map.get(getattr(message, "type", ""), getattr(message, "type", ""))
+        entry = {"role": role, "content": getattr(message, "content", "")}
+        if getattr(message, "name", None):
+            entry["name"] = message.name
+        if role == "assistant" and getattr(message, "tool_calls", None):
+            entry["tool_calls"] = message.tool_calls
+        if role == "assistant" and getattr(message, "additional_kwargs", None):
+            entry["additional_kwargs"] = message.additional_kwargs
+        if role == "tool":
+            entry["tool_call_id"] = getattr(message, "tool_call_id", "")
+        converted.append(entry)
+    return converted
 
-    graph = StateGraph(State)
-    graph.add_node("call_jasper", call_jasper)
-    graph.add_edge(START, "call_jasper")
+
+def _prepare_coder_input(state: CoderBridgeState) -> dict[str, Any]:
+    request = state.get("coding_request")
+    if not isinstance(request, dict):
+        raise ValueError("coding_request is required")
+    messages = request.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("coding_request messages are required")
+    if any(not isinstance(message, (BaseMessage, dict)) for message in messages):
+        raise ValueError("coding_request messages are invalid")
+    if not any(
+        (message.get("role") if isinstance(message, dict) else message.type)
+        in {"user", "human"}
+        and bool(_message_text(message))
+        for message in messages
+    ):
+        raise ValueError("coding_request delegated task is required")
+    execution_mode = request.get("execution_mode")
+    if execution_mode not in {"read_only", "approval", "autonomous"}:
+        raise ValueError("coding_request execution_mode is invalid")
+    for field in ("workspace", "thread_identity", "user_identity"):
+        value = request.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"coding_request {field} is required")
+    model = request.get("model")
+    if "model" not in request or (model is not None and not isinstance(model, str)):
+        raise ValueError("coding_request model is invalid")
+    coding_session_id = request.get("coding_session_id")
+    if not isinstance(coding_session_id, str):
+        raise ValueError("coding_request coding_session_id is invalid")
+    return {
+        "messages": list(messages),
+        "workspace": request["workspace"],
+        "model": model,
+        "execution_mode": execution_mode,
+        "thread_identity": request["thread_identity"],
+        "user_identity": request["user_identity"],
+        "coding_session_id": coding_session_id,
+    }
+
+
+def _final_coder_messages(messages: list[Any]) -> list[Any]:
+    final_messages = [
+        message
+        for message in messages
+        if (
+            (message.get("role") if isinstance(message, dict) else message.type)
+            in {"assistant", "ai"}
+            and not (
+                message.get("tool_calls", [])
+                if isinstance(message, dict)
+                else getattr(message, "tool_calls", [])
+            )
+        )
+    ][-1:]
+    if not final_messages:
+        final_messages = [
+            AIMessage(
+                content="The coding agent did not return a final result (missing_final_result)."
+            )
+        ]
+    attributed = []
+    for message in final_messages:
+        if isinstance(message, dict):
+            replacement = dict(message)
+            replacement["name"] = "coding"
+        else:
+            replacement = message.model_copy(update={"name": "coding"})
+        attributed.append(replacement)
+    return attributed
+
+
+def _project_coder_output(state: CoderBridgeState) -> CoderBridgeOutputState:
+    final_messages = _final_coder_messages(list(state.get("messages", [])))
+    status = state.get("coding_status", "error")
+    if "missing_final_result" in str(getattr(final_messages[0], "content", "")):
+        status = "error"
+    result: CoderToJasperResult = {
+        "messages": final_messages,
+        "coding_session_id": state.get("coding_session_id", ""),
+        "coding_status": status,
+    }
+    if state.get("workspace") is not None:
+        result["workspace"] = state["workspace"]
+    if state.get("execution_manifest") is not None:
+        result["execution_manifest"] = state["execution_manifest"]
+    return {"coding_result": result}
+
+
+def create_jasper_coder_bridge():
+    graph = StateGraph(
+        CoderBridgeState,
+        input_schema=CoderBridgeInputState,
+        output_schema=CoderBridgeOutputState,
+    )
+    graph.add_node("prepare_coder_input", _prepare_coder_input)
+    graph.add_node("coder", create_coding_agent_graph())
+    graph.add_node("project_coder_output", _project_coder_output)
+    graph.add_edge(START, "prepare_coder_input")
+    graph.add_edge("prepare_coder_input", "coder")
+    graph.add_edge("coder", "project_coder_output")
+    graph.add_edge("project_coder_output", END)
+    return graph.compile()
+
+
+def _prepare_jasper_input(state: JasperGraphState) -> dict[str, Any]:
+    request = state.get("jasper_request")
+    if not isinstance(request, dict):
+        raise ValueError("jasper_request is required")
+    return {
+        key: request[key]
+        for key in (
+            "messages",
+            "todos",
+            "model",
+            "workspace",
+            "execution_manifest",
+            "execution_mode",
+            "thread_identity",
+            "user_identity",
+            "coding_session_id",
+            "session_evidence",
+        )
+        if key in request
+    }
+
+
+async def _run_jasper(state: JasperGraphState) -> Command[Literal["jasper_output"]]:
+    result = await call_jasper(state)
+    return Command(goto="jasper_output", update=result)
+
+
+def _normal_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
+    result: JasperGraphResult = {
+        "route": "record_session",
+        "messages": _messages_to_dicts(list(state.get("messages", []))[-1:]),
+    }
+    for key in (
+        "jasper_response",
+        "jasper_structured_response",
+        "visual_artifacts",
+        "layout_suggestion",
+        "jasper_strategy",
+        "jasper_diagnostic",
+        "workspace",
+        "execution_manifest",
+    ):
+        if key in state:
+            result[key] = state[key]
+    return {"jasper_result": result}
+
+
+def _coder_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
+    coding_result = dict(state.get("coding_result") or {})
+    result: JasperGraphResult = {
+        "route": "record_session",
+        "messages": _messages_to_dicts(list(coding_result.get("messages", []))),
+        "coding_session_id": coding_result.get("coding_session_id", ""),
+        "coding_status": coding_result.get("coding_status", "error"),
+    }
+    if coding_result.get("workspace") is not None:
+        result["workspace"] = coding_result["workspace"]
+    if coding_result.get("execution_manifest") is not None:
+        result["execution_manifest"] = coding_result["execution_manifest"]
+    return {"jasper_result": result}
+
+
+def _handoff_messages(state: JasperGraphState) -> list[dict]:
+    messages = list(state.get("messages", []))
+    if messages and isinstance(messages[-1], ToolMessage):
+        return _messages_to_dicts(messages[-2:])
+    return []
+
+
+def _librarian_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
+    return {
+        "jasper_result": {
+            "route": "librarian",
+            "messages": _handoff_messages(state),
+            "librarian_task": state.get("librarian_task", ""),
+        }
+    }
+
+
+def _ocr_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
+    return {
+        "jasper_result": {
+            "route": "ocr",
+            "messages": _handoff_messages(state),
+            "ocr_task": state.get("ocr_task", ""),
+            "ocr_document_ref": state.get("ocr_document_ref", ""),
+            "ocr_output_format": state.get("ocr_output_format", "markdown"),
+        }
+    }
+
+
+def create_jasper_graph():
+    coder_bridge = create_jasper_coder_bridge()
+    graph = StateGraph(
+        JasperGraphState,
+        input_schema=JasperGraphInputState,
+        output_schema=JasperGraphOutputState,
+    )
+    graph.add_node("prepare_jasper_input", _prepare_jasper_input)
+    graph.add_node("call_jasper", _run_jasper)
+    graph.add_node("coder_bridge", coder_bridge)
+    graph.add_node("coder_output", _coder_jasper_output)
+    graph.add_node("jasper_output", _normal_jasper_output)
+    graph.add_node("librarian_exit", _librarian_jasper_output)
+    graph.add_node("ocr_exit", _ocr_jasper_output)
+    graph.add_edge(START, "prepare_jasper_input")
+    graph.add_edge("prepare_jasper_input", "call_jasper")
+    graph.add_edge("coder_bridge", "coder_output")
+    graph.add_edge("coder_output", END)
+    graph.add_edge("jasper_output", END)
+    graph.add_edge("librarian_exit", END)
+    graph.add_edge("ocr_exit", END)
     return graph.compile()

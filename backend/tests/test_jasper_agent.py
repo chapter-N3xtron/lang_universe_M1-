@@ -1,5 +1,6 @@
 """Tests for Jasper's LangChain agent wrapper and deterministic fallbacks."""
 
+import asyncio
 import importlib
 import json
 import sys
@@ -10,7 +11,6 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langgraph.graph import START, StateGraph
 from pydantic import PrivateAttr
 
 from src.visual_models import (
@@ -51,8 +51,13 @@ def _grounded_edge(source: str, target: str) -> ConceptMapEdge:
 
 
 def _clear_src_modules():
+    src_package = sys.modules.get("src")
     for key in ("src.jasper_agent", "src.llm"):
         sys.modules.pop(key, None)
+        if src_package is not None:
+            module_name = key.rsplit(".", 1)[-1]
+            if hasattr(src_package, module_name):
+                delattr(src_package, module_name)
 
 
 class _TestChatModel(BaseChatModel):
@@ -113,11 +118,11 @@ async def test_jasper_text_strategy_produces_canonical_assistant_message():
         patch("src.llm.ChatOllama", return_value=model),
     ):
         module = importlib.import_module("src.jasper_agent")
-        result = await module.create_jasper_graph().ainvoke(
+        result = await module.call_jasper(
             {"messages": [{"role": "user", "content": "What can you do?"}]}
         )
 
-    assert len(result["messages"]) == 2
+    assert len(result["messages"]) == 1
     assert result["messages"][-1].content.startswith("Hello")
     assert result["jasper_response"] == result["messages"][-1].content
     assert result["visual_artifacts"] == []
@@ -139,7 +144,7 @@ async def test_jasper_provider_error_is_sanitized():
         patch("src.llm.ChatOllama", return_value=model),
     ):
         module = importlib.import_module("src.jasper_agent")
-        result = await module.create_jasper_graph().ainvoke(
+        result = await module.call_jasper(
             {"messages": [{"role": "user", "content": "Test error handling"}]}
         )
 
@@ -160,7 +165,7 @@ async def test_jasper_internal_error_is_not_misreported_as_provider_failure():
         patch("src.llm.ChatOllama", return_value=model),
     ):
         module = importlib.import_module("src.jasper_agent")
-        result = await module.create_jasper_graph().ainvoke(
+        result = await module.call_jasper(
             {"messages": [{"role": "user", "content": "Test agent handling"}]}
         )
 
@@ -198,7 +203,7 @@ async def test_jasper_recovers_when_tool_loop_returns_empty_final_content():
         patch("src.llm.ChatOllama", return_value=model),
     ):
         module = importlib.import_module("src.jasper_agent")
-        result = await module.create_jasper_graph().ainvoke(
+        result = await module.call_jasper(
             {"messages": [{"role": "user", "content": "Explain this"}]}
         )
 
@@ -240,11 +245,11 @@ async def test_jasper_plain_agent_executes_tools_but_exposes_only_canonical_answ
         patch("src.llm.ChatOllama", return_value=model),
     ):
         module = importlib.import_module("src.jasper_agent")
-        result = await module.create_jasper_graph().ainvoke(
+        result = await module.call_jasper(
             {"messages": [{"role": "user", "content": "What are my todos?"}]}
         )
 
-    assert len(result["messages"]) == 2
+    assert len(result["messages"]) == 1
     assert result["jasper_response"] == "Here is your todo list summary."
 
 
@@ -340,7 +345,7 @@ async def test_two_pass_format_failure_preserves_the_plain_answer():
             ),
         ),
     ):
-        result = await module.create_jasper_graph().ainvoke(
+        result = await module.call_jasper(
             {
                 "messages": [{"role": "user", "content": "Explain this"}],
                 "model": "ollama/unknown-model",
@@ -492,7 +497,7 @@ async def test_combined_strategy_associates_artifact_with_canonical_message():
             module, "_invoke_combined", new=AsyncMock(return_value=structured)
         ),
     ):
-        result = await module.create_jasper_graph().ainvoke(
+        result = await module.call_jasper(
             {"messages": [{"role": "user", "content": "Draw the flow"}]}
         )
 
@@ -696,7 +701,7 @@ def test_jasper_approval_mode_uses_human_review_interrupts(tmp_path):
     assert create_agent.call_args.kwargs["backend"].read_only is True
 
 
-def test_jasper_handoff_targets_top_level_coding_with_required_context(tmp_path):
+def test_jasper_handoff_targets_local_coder_bridge_with_required_context(tmp_path):
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
     runtime = MagicMock(
@@ -727,15 +732,74 @@ def test_jasper_handoff_targets_top_level_coding_with_required_context(tmp_path)
     )
 
     assert command.graph == command.PARENT
-    assert command.goto == "coding"
-    assert command.update["workspace"] == str(tmp_path)
-    assert command.update["execution_mode"] == "approval"
-    assert command.update["thread_identity"] == "top-level-coding-test"
+    assert command.goto == "coder_bridge"
+    request = command.update["coding_request"]
+    assert request["workspace"] == str(tmp_path)
+    assert request["execution_mode"] == "approval"
+    assert request["thread_identity"] == "top-level-coding-test"
+    assert request["user_identity"] == "test-user"
+    assert request["messages"][0].content == "Inspect the repository"
     assert len(command.update["messages"]) == 2
     assert command.update["messages"][1].tool_call_id == "coding-handoff-1"
 
 
-def test_jasper_autonomous_handoff_targets_top_level_coding(tmp_path):
+def test_real_jasper_tool_handoff_enters_local_coder_subgraph(tmp_path):
+    _clear_src_modules()
+    module = importlib.import_module("src.jasper_agent")
+    coding_module = importlib.import_module("src.coding_agent")
+    model = _plain_model(
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "transfer_to_coding",
+                    "args": {"task": "Inspect the repository"},
+                    "id": "real-coding-handoff",
+                    "type": "tool_call",
+                }
+            ],
+        )
+    )
+    captured = []
+
+    async def fake_coder(state, config=None):
+        captured.append((state, config))
+        return {
+            "messages": [AIMessage(content="Coder completed the inspection.")],
+            "workspace": state["workspace"],
+            "coding_session_id": "coding-session-real-handoff",
+            "coding_status": "completed",
+        }
+
+    with (
+        patch.object(module, "get_agent_llm", return_value=model),
+        patch.object(module, "select_response_strategy", return_value="text"),
+        patch.object(coding_module, "deep_agents_coding_node", fake_coder),
+    ):
+        graph = module.create_jasper_graph()
+        result = asyncio.run(
+            graph.ainvoke(
+                {
+                    "jasper_request": {
+                        "messages": [
+                            {"role": "user", "content": "Use Coding to inspect this"}
+                        ],
+                        "workspace": str(tmp_path),
+                        "model": "ollama/test-model",
+                        "execution_mode": "read_only",
+                        "thread_identity": "real-handoff-thread",
+                        "user_identity": "test-user",
+                    }
+                }
+            )
+        )
+
+    assert captured[0][0]["messages"][0].content == "Inspect the repository"
+    assert result["jasper_result"]["coding_status"] == "completed"
+    assert result["jasper_result"]["messages"][-1]["name"] == "coding"
+
+
+def test_jasper_autonomous_handoff_targets_local_coder_bridge(tmp_path):
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
     runtime = MagicMock(
@@ -754,11 +818,10 @@ def test_jasper_autonomous_handoff_targets_top_level_coding(tmp_path):
     )
 
     assert command.graph == command.PARENT
-    assert command.goto == "coding"
-    assert command.update["coding_task"] == "Implement OpenSpec change example"
-    assert command.update["pending_agent"] == ""
-    assert command.update["pending_approval"] is False
-    assert command.update["execution_mode"] == "autonomous"
+    assert command.goto == "coder_bridge"
+    request = command.update["coding_request"]
+    assert request["messages"][0].content == "Implement OpenSpec change example"
+    assert request["execution_mode"] == "autonomous"
 
 
 def test_jasper_handoff_requires_explicit_execution_mode(tmp_path):
@@ -776,7 +839,7 @@ def test_jasper_handoff_requires_explicit_execution_mode(tmp_path):
         module.transfer_to_coding.func(task="Inspect", runtime=runtime)
 
 
-def test_jasper_handoff_targets_top_level_librarian_with_bounded_context(tmp_path):
+def test_jasper_handoff_targets_local_librarian_exit_with_bounded_context(tmp_path):
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
     runtime = MagicMock(
@@ -794,20 +857,20 @@ def test_jasper_handoff_targets_top_level_librarian_with_bounded_context(tmp_pat
     command = module.transfer_to_librarian.func(task="Research SIFT", runtime=runtime)
 
     assert command.graph == command.PARENT
-    assert command.goto == "librarian"
+    assert command.goto == "librarian_exit"
     assert command.update["librarian_task"] == "Research SIFT"
     assert command.update["session_evidence"] == [{"id": "source-one"}]
     assert len(command.update["messages"]) == 2
 
 
 @pytest.mark.asyncio
-async def test_jasper_allows_parent_handoff_command_to_reach_outer_graph():
+async def test_jasper_allows_local_handoff_command_to_reach_wrapper_graph():
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
     from langgraph.errors import ParentCommand
     from langgraph.types import Command
 
-    parent_command = ParentCommand(Command(goto="coding", graph=Command.PARENT))
+    parent_command = ParentCommand(Command(goto="coder_bridge", graph=Command.PARENT))
     with (
         patch.object(module, "get_agent_llm", return_value=MagicMock(profile={})),
         patch.object(module, "select_response_strategy", return_value="text"),
@@ -822,53 +885,16 @@ async def test_jasper_allows_parent_handoff_command_to_reach_outer_graph():
         )
 
 
-@pytest.mark.asyncio
-async def test_documented_handoff_tool_runs_top_level_coding_node(tmp_path):
+def test_jasper_graph_declares_local_coder_bridge():
     _clear_src_modules()
     module = importlib.import_module("src.jasper_agent")
-    model = _plain_model(
-        AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "name": "transfer_to_coding",
-                    "args": {"task": "Read the selected workspace"},
-                    "id": "top-level-handoff-1",
-                    "type": "tool_call",
-                }
-            ],
-        ),
-        AIMessage(content="Jasper relayed the Coding result."),
-    )
-    jasper = module._build_agent(model, workspace=str(tmp_path))
-    coding_inputs = []
 
-    async def run_jasper(state, config):
-        return await jasper.ainvoke(state, config=config)
+    graph = module.create_jasper_graph()
 
-    async def run_coding(state):
-        coding_inputs.append(state)
-        return {"messages": [AIMessage(content="TOP_LEVEL_CODING_OK")]}
-
-    graph = StateGraph(module.JasperDeepAgentState)
-    graph.add_node("jasper", run_jasper)
-    graph.add_node("coding", run_coding)
-    graph.add_edge(START, "jasper")
-    graph.add_edge("coding", "jasper")
-    result = await graph.compile().ainvoke(
-        {
-            "messages": [{"role": "user", "content": "Use Coding"}],
-            "workspace": str(tmp_path),
-            "execution_mode": "read_only",
-            "thread_identity": "documented-handoff-test",
-        }
-    )
-
-    assert coding_inputs
-    assert coding_inputs[0]["coding_task"] == "Read the selected workspace"
-    assert coding_inputs[0]["workspace"] == str(tmp_path)
-    assert coding_inputs[0]["execution_mode"] == "read_only"
-    assert result["messages"][-1].content == "Jasper relayed the Coding result."
+    assert "coder_bridge" in graph.get_graph().nodes
+    assert "coding" not in graph.get_graph().nodes
+    assert graph.checkpointer is None
+    assert graph.store is None
 
 
 def test_jasper_deep_agent_executes_builtin_repository_discovery(monkeypatch, tmp_path):

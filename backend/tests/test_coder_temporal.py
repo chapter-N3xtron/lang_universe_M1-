@@ -34,7 +34,7 @@ def _request(operation_id: str = "coder-operation-1") -> CoderTemporalRequest:
     )
 
 
-def test_authoritative_builder_serves_supervisor_and_temporal_plugin():
+def test_authoritative_builder_contract_and_temporal_plugin():
     builder = coding_agent.create_coding_agent_graph_builder()
     compiled = coding_agent.create_coding_agent_graph()
 
@@ -145,7 +145,7 @@ async def test_closed_duplicate_attaches_without_starting_unrelated_work():
     assert client.attachment[1] == request.operation_id
 
 
-def test_temporal_path_does_not_change_product_registration_or_add_bridge():
+def test_temporal_path_keeps_single_product_registration():
     backend = Path(coding_agent.__file__).parent.parent
     langgraph = json.loads((backend / "langgraph.json").read_text())
     chat_ui = (backend / "src" / "chat_ui.py").read_text()
@@ -154,7 +154,8 @@ def test_temporal_path_does_not_change_product_registration_or_add_bridge():
     )
 
     assert langgraph["graphs"] == {"chat_ui": "./src/chat_ui.py:create_chat_ui"}
-    assert "create_coding_agent_graph()" in chat_ui
+    assert "create_jasper_graph()" in chat_ui
+    assert "create_coding_agent_graph" not in chat_ui
     assert "langgraph_sdk" not in temporal_sources
     assert "Agent Server" not in temporal_sources
     assert not (

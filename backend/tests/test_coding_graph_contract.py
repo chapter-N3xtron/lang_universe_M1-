@@ -255,4 +255,5 @@ def test_production_has_one_complete_coder_builder_and_no_direct_node_consumer()
                 builder_definitions.append(path.name)
 
     assert builder_definitions == ["coding_agent.py"]
-    assert "create_coding_agent_graph()" in (src_dir / "chat_ui.py").read_text()
+    assert "create_coding_agent_graph()" in (src_dir / "jasper_agent.py").read_text()
+    assert "create_coding_agent_graph" not in (src_dir / "chat_ui.py").read_text()

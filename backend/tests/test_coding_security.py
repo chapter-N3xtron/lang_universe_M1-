@@ -461,26 +461,40 @@ def test_production_wrapper_surfaces_and_resumes_approval(monkeypatch, tmp_path)
     assert (tmp_path / "approved.txt").read_text() == "approved"
 
 
-def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_directly(
+def test_outer_legacy_coding_alias_enters_jasper_and_surfaces_openspec_approval(
     monkeypatch, tmp_path
 ):
-    from src import chat_ui, coding_agent
+    import importlib
 
+    from src import coding_agent
+
+    jasper_agent = importlib.import_module("src.jasper_agent")
+    chat_ui = importlib.reload(importlib.import_module("src.chat_ui"))
     nested = _approval_app(monkeypatch, tmp_path, _openspec_install_model())
-    jasper_inputs = []
+    jasper_model = ToolCallingModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "transfer_to_coding",
+                        "args": {"task": "Install OpenSpec in the selected workspace"},
+                        "id": "openspec-coding-handoff",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ]
+    )
 
     async def session_agent(*_args):
         return nested
 
-    async def fake_call_jasper(state):
-        jasper_inputs.append(state)
-        return {
-            "messages": [AIMessage(content=state["messages"][-1]["content"])],
-            "visual_artifacts": [],
-        }
-
     monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
-    monkeypatch.setattr(chat_ui, "call_jasper", fake_call_jasper)
+    monkeypatch.setattr(jasper_agent, "get_agent_llm", lambda _name: jasper_model)
+    monkeypatch.setattr(
+        jasper_agent, "select_response_strategy", lambda _model, _selected=None: "text"
+    )
     app = chat_ui.create_chat_ui().compile(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "outer-openspec-approval"}}
     initial = {
@@ -512,7 +526,6 @@ def test_outer_coding_handoff_surfaces_openspec_approval_and_returns_directly(
         )
     )
 
-    assert jasper_inputs == []
     assert result["messages"][-1]["name"] == "coding"
     content = result["messages"][-1]["content"]
     assert content.startswith("Completion report")

@@ -11,7 +11,14 @@ The LangGraph Agent Server checkpoint for each Jasper thread is the source of tr
 for that thread's transcript, graph position, tool results, and resumable execution.
 Coder runs as a native nested LangGraph subgraph and inherits that checkpoint context,
 so pending file and command approvals propagate directly to Agent Chat UI and resume
-on the same thread.
+on the same thread. Agent Server also registers `coder` as a standalone graph. Both
+`chat_ui` and `coder` compile without an application-owned checkpointer or Store; Agent
+Server injects PostgreSQL checkpoint persistence at runtime.
+
+Agent Server `thread_id` is the only durable Jasper and Coder conversation identity. It
+is propagated unchanged into nested Coder. A missing identity or disagreement with a
+declared identity fails closed with bounded diagnostics. Run, attempt, operation,
+Temporal, correlation, and Redis identifiers remain non-authoritative metadata.
 
 Coder does not maintain a second live checkpoint history. LangGraph checkpoints retain
 failed-run execution evidence, while the selected Git repository remains authoritative
@@ -31,18 +38,24 @@ unfinished specialist execution. Completed transcript values, artifact and evide
 references, and repository-binding links are inherited through existing Agent Server
 and Store APIs. Artifact ownership remains with the producing thread/session.
 
-The former nested Coder checkpoint database is legacy read-only data. Its opaque
-SHA-256 session ID remains available only for scoped export compatibility through:
-
-- `GET /api/coding-sessions/export`
-
-`POST /api/coding-sessions/reset` returns `410 Gone`; starting a linked thread or fork
-is the supported clean-context path. Legacy data is not replayed into native thread
-checkpoints.
+The former nested Coder checkpoint database is inert legacy data retained for Phase 9
+cleanup. Production paths do not read, write, recover, compare, or export it.
+`GET /api/coding-sessions/export` and `POST /api/coding-sessions/reset` return
+`410 Gone`; starting a linked thread or fork is the supported clean-context path.
+Legacy data is never replayed into native thread checkpoints.
 
 Repository `AGENTS.md` is loaded as read-only Deep Agents memory on each agent
 construction. Workspace-local `.agents/skills/` is loaded when present. Credential
 values remain only in the runtime environment or secret manager.
+
+## Temporal boundary
+
+Temporal owns only outer Coder scheduling, retry policy, timeout policy, cancellation,
+and correlation. Its activity invokes the Agent Server `coder` graph with the unchanged
+Agent Server thread ID and synchronous checkpoint durability. An activity retry uses its
+operation correlation key to join an existing Agent Server run when present; otherwise,
+it submits work under Agent Server concurrency controls. Temporal never compiles the
+Coder graph, owns a checkpoint saver, or stores or selects an inner graph cursor.
 
 ## Custodian host-operation lifecycle
 

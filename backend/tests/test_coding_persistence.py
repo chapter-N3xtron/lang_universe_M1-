@@ -210,23 +210,8 @@ def test_export_and_reset_affect_only_selected_session(monkeypatch, tmp_path):
     asyncio.run(scenario())
 
 
-def test_scoped_export_reads_legacy_agent_state(monkeypatch, tmp_path):
+def test_scoped_legacy_export_is_not_a_production_path():
     from src import coding_agent
 
-    async def export_legacy(session_id):
-        return {
-            "session_id": session_id,
-            "exists": True,
-            "messages": [{"type": "ai", "content": "legacy coding conversation"}],
-        }
-
-    monkeypatch.setattr(coding_agent, "export_coding_session", export_legacy)
-    result = asyncio.run(
-        coding_agent.export_coding_session_state(
-            thread_identity="export-thread",
-            workspace=tmp_path,
-            user_identity="export-user",
-        )
-    )
-    assert result["exists"] is True
-    assert result["messages"][0]["content"] == "legacy coding conversation"
+    assert not hasattr(coding_agent, "export_coding_session")
+    assert not hasattr(coding_agent, "export_coding_session_state")

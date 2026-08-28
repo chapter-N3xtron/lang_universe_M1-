@@ -17,6 +17,7 @@ from src.librarian_agent import librarian_agent
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
 from src.ocr_agent import run_ocr, specialist_message
+from src.runtime_authority import authoritative_thread_id
 from src.session_catalog import record_session_projection
 from src.workspace_policy import (
     ExecutionManifest,
@@ -369,6 +370,11 @@ def create_chat_ui():
         state, config: RunnableConfig
     ) -> Command[Literal["jasper", "record_session"]]:
         configurable = config.get("configurable", {})
+        thread_id = authoritative_thread_id(
+            state.get("thread_identity"),
+            config,
+            operation="prepare_jasper",
+        )
         try:
             workspace = (
                 canonical_workspace(state.get("workspace"))
@@ -398,13 +404,12 @@ def create_chat_ui():
             "model": state.get("model"),
             "workspace": str(workspace) if workspace is not None else "",
             "execution_mode": state.get("execution_mode") or state.get("mode"),
-            "thread_identity": state.get("thread_identity")
-            or configurable.get("thread_id", ""),
+            "thread_identity": thread_id,
             "user_identity": state.get("user_identity")
             or configurable.get("user_id")
             or configurable.get("owner_id")
             or "anonymous",
-            "coding_session_id": state.get("coding_session_id", ""),
+            "coding_session_id": thread_id,
             "session_evidence": state.get("session_evidence", []),
         }
         if manifest is not None:

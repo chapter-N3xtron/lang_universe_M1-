@@ -12,6 +12,8 @@ services:
       LANGGRAPH_API_URL: http://localhost:8000
       POSTGRES_URI: postgresql://postgres:postgres@postgres:5432/postgres
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      DATABASE_URI: postgresql://postgres:postgres@postgres:5432/postgres
+      POSTGRES_URI_CUSTOM: postgresql://postgres:postgres@postgres:5432/postgres
       REDIS_URI: redis://redis:6379
       REDIS_URL: redis://redis:6379
       AGENT_WORKSPACE: /app-data

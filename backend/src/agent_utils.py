@@ -1,8 +1,8 @@
 """Shared utilities for agent nodes in the LangGraph chat UI.
 
 Every agent node receives the full accumulated State (including all prior
-messages) from the outer graph's SQLite checkpointer.  Use these helpers
-so every agent — current and future — benefits from persistent memory
+messages) from the Agent Server-managed PostgreSQL checkpointer. Use these helpers
+so every agent — current and future — benefits from persistent thread state
 without reimplementing history extraction.
 
 Messages arrive as dicts with either LangGraph SDK format

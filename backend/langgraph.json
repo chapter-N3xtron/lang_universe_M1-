@@ -12,7 +12,8 @@
     "."
   ],
   "graphs": {
-    "chat_ui": "./src/chat_ui.py:create_chat_ui"
+    "chat_ui": "./src/chat_ui.py:create_chat_ui",
+    "coder": "./src/coding_agent.py:create_coding_agent_graph"
   },
   "http": {
     "app": "./src/runtime_identity.py:app"

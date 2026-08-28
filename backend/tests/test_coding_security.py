@@ -448,7 +448,7 @@ def test_production_wrapper_surfaces_and_resumes_approval(monkeypatch, tmp_path)
         "messages": [{"role": "user", "content": "write the file"}],
         "workspace": str(tmp_path),
         "execution_mode": "approval",
-        "thread_identity": "nested-approval",
+        "thread_identity": "outer-approval",
     }
 
     first = asyncio.run(app.ainvoke(initial, config=config))
@@ -554,7 +554,7 @@ def test_native_wrapper_resumes_ordered_chained_approval_batches(monkeypatch, tm
         "messages": [{"role": "user", "content": "complete the chained work"}],
         "workspace": str(tmp_path),
         "execution_mode": "approval",
-        "thread_identity": "nested-chained-approvals",
+        "thread_identity": "outer-chained-approvals",
     }
 
     first = asyncio.run(app.ainvoke(initial, config=config))

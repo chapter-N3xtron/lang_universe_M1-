@@ -1,4 +1,4 @@
-"""Automatic heartbeats for the Temporal-managed Coder Activity."""
+"""Automatic heartbeats for the outer Agent Server invocation activity."""
 
 from __future__ import annotations
 
@@ -11,7 +11,9 @@ from temporalio.worker import (
     Interceptor,
 )
 
-CODER_TEMPORAL_ACTIVITY_TYPE = "coder.coding_agent"
+from src.coder_temporal_contract import CODER_AGENT_SERVER_ACTIVITY_NAME
+
+CODER_TEMPORAL_ACTIVITY_TYPE = CODER_AGENT_SERVER_ACTIVITY_NAME
 
 
 class _CoderActivityHeartbeatInboundInterceptor(ActivityInboundInterceptor):

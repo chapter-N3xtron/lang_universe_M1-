@@ -317,7 +317,11 @@ async def test_embedded_sanitized_error_matches_authoritative_coder():
     projected = embedded["coding_result"]
 
     assert projected["coding_status"] == authoritative["coding_status"] == "error"
-    assert projected["coding_session_id"] == authoritative["coding_session_id"] == ""
+    assert (
+        projected["coding_session_id"]
+        == authoritative["coding_session_id"]
+        == "invalid-workspace"
+    )
     assert projected["messages"][0].content == authoritative["messages"][-1].content
     assert "secret-path" not in projected["messages"][0].content
     assert "invalid_workspace" in projected["messages"][0].content
@@ -427,7 +431,7 @@ async def test_parent_only_checkpointer_restores_nested_interrupt(
     monkeypatch.setattr("src.workspace_policy.host_worker_available", lambda: False)
     monkeypatch.setattr(jasper_agent, "call_jasper", _handoff(request))
     saver = InMemorySaver()
-    config = {"configurable": {"thread_id": "nested-coder-interrupt"}}
+    config = {"configurable": {"thread_id": "jasper-coder-thread"}}
 
     first = _parent_graph().compile(checkpointer=saver)
     initial = await first.ainvoke(
@@ -465,7 +469,7 @@ async def test_parent_only_checkpointer_restores_nested_interrupt(
     )
 
     assert result["jasper_result"]["coding_status"] == "completed"
-    assert result["jasper_result"]["coding_session_id"].startswith("coding-v1-")
+    assert result["jasper_result"]["coding_session_id"] == "jasper-coder-thread"
     assert (
         "Coder completed the approved write."
         in result["jasper_result"]["messages"][0]["content"]

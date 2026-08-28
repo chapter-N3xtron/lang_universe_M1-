@@ -1,31 +1,33 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 
 import pytest
-from langchain_core.messages import AIMessage
+from temporalio import activity
 from temporalio.client import WorkflowFailureError
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import CancelledError
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Replayer, Worker
+from temporalio.worker import Replayer, UnsandboxedWorkflowRunner, Worker
 
-from src import coding_agent
 from src.coder_temporal_client import start_or_attach_coder_workflow
+from src.coder_temporal_contract import CODER_AGENT_SERVER_ACTIVITY_NAME
 from src.coder_temporal_worker import (
     CODER_ACTIVITY_HEARTBEAT_TIMEOUT,
+    CODER_ACTIVITY_RETRY_POLICY,
     CODER_ACTIVITY_START_TO_CLOSE_TIMEOUT,
     create_coder_temporal_interceptors,
-    create_coder_temporal_plugin,
 )
-from src.coder_temporal_workflow import CoderTemporalRequest, CoderTemporalWorkflow
-from src.coding_persistence import coding_session_id
+from src.coder_temporal_workflow import (
+    CoderTemporalRequest,
+    CoderTemporalResult,
+    CoderTemporalWorkflow,
+)
 
 
 def _request(operation_id: str, workspace: str, content: str = "Do the work"):
     return CoderTemporalRequest(
         operation_id=operation_id,
+        thread_id="agent-server-thread-stable",
         messages=[{"role": "user", "content": content}],
         workspace=workspace,
         model=None,
@@ -34,42 +36,40 @@ def _request(operation_id: str, workspace: str, content: str = "Do the work"):
     )
 
 
+def _result(request: CoderTemporalRequest) -> CoderTemporalResult:
+    return CoderTemporalResult(
+        operation_id=request.operation_id,
+        thread_id=request.thread_id,
+        messages=[{"type": "ai", "content": "Coder result"}],
+        workspace=request.workspace,
+        execution_manifest={"selected_repository": request.workspace},
+        coding_status="completed",
+        ui=[],
+    )
+
+
 @pytest.mark.asyncio
-async def test_temporal_execution_replay_restart_and_stable_identity(
-    monkeypatch, tmp_path
-):
-    runs = []
+async def test_temporal_replay_restart_and_retry_preserve_agent_server_thread(tmp_path):
+    attempts: list[tuple[str, str]] = []
 
-    class App:
-        async def ainvoke(self, payload, config=None):
-            del config
-            content = payload["messages"][-1]["content"]
-            runs.append(content)
-            if content == "Fail safely":
-                raise RuntimeError("provider-secret-detail")
-            return {
-                "messages": [*payload["messages"], AIMessage(content="Coder result")],
-                "todos": [],
-            }
+    @activity.defn(name=CODER_AGENT_SERVER_ACTIVITY_NAME)
+    async def invoke(request: CoderTemporalRequest) -> CoderTemporalResult:
+        attempts.append((request.operation_id, request.thread_id))
+        if len(attempts) == 1:
+            raise RuntimeError("transient outer invocation failure")
+        return _result(request)
 
-    async def session_agent(*_args):
-        return App()
-
-    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
-    monkeypatch.setattr("src.workspace_policy.host_worker_available", lambda: False)
     request = _request("coder-operation-1", str(tmp_path))
-    second_request = _request("coder-operation-2", str(tmp_path), "Second operation")
-    failure_request = _request("coder-operation-3", str(tmp_path), "Fail safely")
     task_queue = "coder-temporal-integration"
 
     async with await WorkflowEnvironment.start_time_skipping() as environment:
-        first_plugin = create_coder_temporal_plugin()
         async with Worker(
             environment.client,
             task_queue=task_queue,
             workflows=[CoderTemporalWorkflow],
-            plugins=[first_plugin],
+            activities=[invoke],
             interceptors=create_coder_temporal_interceptors(),
+            workflow_runner=UnsandboxedWorkflowRunner(),
         ):
             handle = await start_or_attach_coder_workflow(
                 environment.client,
@@ -79,13 +79,13 @@ async def test_temporal_execution_replay_restart_and_stable_identity(
             result = await handle.result()
             history = await handle.fetch_history()
 
-        second_plugin = create_coder_temporal_plugin()
         async with Worker(
             environment.client,
             task_queue=task_queue,
             workflows=[CoderTemporalWorkflow],
-            plugins=[second_plugin],
+            activities=[invoke],
             interceptors=create_coder_temporal_interceptors(),
+            workflow_runner=UnsandboxedWorkflowRunner(),
         ):
             attached = await start_or_attach_coder_workflow(
                 environment.client,
@@ -93,40 +93,17 @@ async def test_temporal_execution_replay_restart_and_stable_identity(
                 task_queue=task_queue,
             )
             attached_result = await attached.result()
-            second = await start_or_attach_coder_workflow(
-                environment.client,
-                second_request,
-                task_queue=task_queue,
-            )
-            second_result = await second.result()
-            failure = await start_or_attach_coder_workflow(
-                environment.client,
-                failure_request,
-                task_queue=task_queue,
-            )
-            failure_result = await failure.result()
 
         await Replayer(
             workflows=[CoderTemporalWorkflow],
-            plugins=[create_coder_temporal_plugin()],
+            workflow_runner=UnsandboxedWorkflowRunner(),
         ).replay_workflow(history)
 
-    assert result.operation_id == request.operation_id
-    assert result.coding_status == "completed"
-    assert result.messages[-1]["content"].startswith("Completion report")
-    assert result.coding_session_id == coding_session_id(
-        thread_identity=request.operation_id,
-        workspace=tmp_path,
-        user_identity=request.user_identity,
-    )
-    assert attached_result == result
-    assert second_result.operation_id == second_request.operation_id
-    assert second_result.coding_session_id != result.coding_session_id
-    assert failure_result.coding_status == "error"
-    assert "agent_failure" in failure_result.messages[-1]["content"]
-    assert "provider-secret-detail" not in failure_result.messages[-1]["content"]
-    assert runs == ["Do the work", "Second operation", "Fail safely"]
-
+    assert result == attached_result == _result(request)
+    assert attempts == [
+        (request.operation_id, request.thread_id),
+        (request.operation_id, request.thread_id),
+    ]
     scheduled = [
         event.activity_task_scheduled_event_attributes
         for event in history.events
@@ -139,31 +116,27 @@ async def test_temporal_execution_replay_restart_and_stable_identity(
     assert scheduled[0].heartbeat_timeout.ToTimedelta() == (
         CODER_ACTIVITY_HEARTBEAT_TIMEOUT
     )
-    assert scheduled[0].retry_policy.maximum_attempts == 1
+    assert (
+        scheduled[0].retry_policy.maximum_attempts
+        == CODER_ACTIVITY_RETRY_POLICY.maximum_attempts
+    )
 
 
 @pytest.mark.asyncio
-async def test_temporal_cancellation_reaches_running_coder_activity(
-    monkeypatch, tmp_path
-):
+async def test_temporal_cancellation_reaches_outer_agent_server_activity(tmp_path):
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
-    class App:
-        async def ainvoke(self, payload, config=None):
-            del payload, config
-            started.set()
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                cancelled.set()
-                raise
+    @activity.defn(name=CODER_AGENT_SERVER_ACTIVITY_NAME)
+    async def invoke(request: CoderTemporalRequest) -> CoderTemporalResult:
+        del request
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
 
-    async def session_agent(*_args):
-        return App()
-
-    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
-    monkeypatch.setattr("src.workspace_policy.host_worker_available", lambda: False)
     request = _request("coder-cancel-operation", str(tmp_path))
     task_queue = "coder-temporal-cancellation"
 
@@ -173,12 +146,9 @@ async def test_temporal_cancellation_reaches_running_coder_activity(
             environment.client,
             task_queue=task_queue,
             workflows=[CoderTemporalWorkflow],
-            plugins=[
-                create_coder_temporal_plugin(
-                    heartbeat_timeout=timedelta(milliseconds=200)
-                )
-            ],
+            activities=[invoke],
             interceptors=create_coder_temporal_interceptors(),
+            workflow_runner=UnsandboxedWorkflowRunner(),
         ),
     ):
         handle = await start_or_attach_coder_workflow(
@@ -193,52 +163,3 @@ async def test_temporal_cancellation_reaches_running_coder_activity(
         await asyncio.wait_for(cancelled.wait(), timeout=10)
 
     assert isinstance(failure.value.__cause__, CancelledError)
-
-
-@pytest.mark.asyncio
-async def test_temporal_timeout_does_not_retry_side_effecting_coder(
-    monkeypatch, tmp_path
-):
-    runs = 0
-    release = asyncio.Event()
-
-    class App:
-        async def ainvoke(self, payload, config=None):
-            nonlocal runs
-            del payload, config
-            runs += 1
-            await release.wait()
-
-    async def session_agent(*_args):
-        return App()
-
-    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
-    monkeypatch.setattr("src.workspace_policy.host_worker_available", lambda: False)
-    request = _request("coder-timeout-operation", str(tmp_path))
-    task_queue = "coder-temporal-timeout"
-    plugin = create_coder_temporal_plugin(
-        start_to_close_timeout=timedelta(milliseconds=100),
-        heartbeat_timeout=timedelta(milliseconds=50),
-        retry_policy=RetryPolicy(maximum_attempts=1),
-    )
-
-    async with (
-        await WorkflowEnvironment.start_time_skipping() as environment,
-        Worker(
-            environment.client,
-            task_queue=task_queue,
-            workflows=[CoderTemporalWorkflow],
-            plugins=[plugin],
-            interceptors=create_coder_temporal_interceptors(),
-        ),
-    ):
-        handle = await start_or_attach_coder_workflow(
-            environment.client,
-            request,
-            task_queue=task_queue,
-        )
-        with pytest.raises(WorkflowFailureError):
-            await handle.result()
-        release.set()
-
-    assert runs == 1

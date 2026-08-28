@@ -151,9 +151,7 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
         tmp_path.resolve()
     )
     assert result["workspace"] == str(tmp_path.resolve())
-    assert result["coding_session_id"] == coding_agent.coding_session_id(
-        thread_identity="thread-7", workspace=tmp_path
-    )
+    assert result["coding_session_id"] == "thread-7"
     assert result["coding_status"] == "completed"
 
 

@@ -24,9 +24,9 @@ from langgraph.graph.ui import (
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
 
-from src.coding_persistence import coding_session_id, export_coding_session
 from src.custodian_backend import CustodianBackend, CustodianClient, CustodianError
 from src.llm import get_coding_llm
+from src.runtime_authority import RuntimeIdentityError, authoritative_thread_id
 from src.workspace_policy import (
     ExecutionManifest,
     WorkspacePolicyError,
@@ -473,23 +473,6 @@ async def _session_agent(
     return app
 
 
-async def export_coding_session_state(
-    *,
-    thread_identity: str,
-    workspace: Path,
-    user_identity: str = "anonymous",
-    model_name: str | None = None,
-) -> dict[str, Any]:
-    del model_name
-    workspace = _validated_workspace(str(workspace))
-    session_id = coding_session_id(
-        thread_identity=thread_identity,
-        workspace=workspace,
-        user_identity=user_identity,
-    )
-    return await export_coding_session(session_id)
-
-
 def _current_turn_output(messages: list[Any]) -> list[Any]:
     for index in range(len(messages) - 1, -1, -1):
         if _message_type(messages[index]) in {"human", "user"}:
@@ -739,18 +722,16 @@ async def deep_agents_coding_node(
     manifest: ExecutionManifest | None = None
     workspace: Path | None = None
     try:
+        thread_identity = authoritative_thread_id(
+            state.get("thread_identity"),
+            config,
+            operation="coder_graph_run",
+        )
+        session_id = thread_identity
         workspace = _validated_workspace(state.get("workspace"))
         manifest = execution_manifest(workspace)
         execution_mode = _execution_mode(state.get("execution_mode"))
         input_messages = list(state.get("messages", []))
-        thread_identity = str(state.get("thread_identity") or "")
-        if not thread_identity:
-            raise InvalidWorkspaceError("thread identity is required")
-        session_id = coding_session_id(
-            thread_identity=thread_identity,
-            workspace=workspace,
-            user_identity=str(state.get("user_identity") or "anonymous"),
-        )
         app = await _session_agent(
             workspace,
             state.get("model"),
@@ -781,27 +762,25 @@ async def deep_agents_coding_node(
                 "blocked" if _has_incomplete_tasks(raw_todos) else "completed"
             ),
         }
-    except asyncio.CancelledError:
-        raise
-    except GraphBubbleUp:
+    except (asyncio.CancelledError, GraphBubbleUp, RuntimeIdentityError):
         raise
     except InvalidWorkspaceError:
         error_code = "invalid_workspace"
         logger.exception(
             "Coding agent failed",
-            extra={"coding_error_code": error_code, "coding_session_id": session_id},
+            extra={"coding_error_code": error_code, "thread_id": session_id},
         )
     except ImportError:
         error_code = "dependency_unavailable"
         logger.exception(
             "Coding agent failed",
-            extra={"coding_error_code": error_code, "coding_session_id": session_id},
+            extra={"coding_error_code": error_code, "thread_id": session_id},
         )
     except Exception:
         error_code = "agent_failure"
         logger.exception(
             "Coding agent failed",
-            extra={"coding_error_code": error_code, "coding_session_id": session_id},
+            extra={"coding_error_code": error_code, "thread_id": session_id},
         )
 
     error_messages = [AIMessage(content=_failure_report(error_code))]
@@ -828,11 +807,7 @@ def create_coding_agent_graph_builder():
         input_schema=CoderInputState,
         output_schema=CoderOutputState,
     )
-    graph.add_node(
-        "coding_agent",
-        deep_agents_coding_node,
-        metadata={"execute_in": "activity"},
-    )
+    graph.add_node("coding_agent", deep_agents_coding_node)
     graph.add_edge(START, "coding_agent")
     graph.add_edge("coding_agent", END)
     return graph

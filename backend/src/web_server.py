@@ -17,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from src.coding_agent import export_coding_session_state
 from src.document_attachments import (
     MAX_ATTACHMENT_BYTES,
     DocumentAttachmentError,
@@ -33,7 +32,6 @@ from src.epub_attachments import (
 from src.ollama_client import list_ollama_cloud_models, list_ollama_models
 from src.openai_client import list_openai_gpt_models
 from src.stt import transcribe
-from src.workspace_policy import WorkspacePolicyError, canonical_workspace
 
 load_dotenv()
 
@@ -100,13 +98,6 @@ class CodingSessionScope(BaseModel):
     user_id: str = "anonymous"
 
 
-def _session_workspace(raw_workspace: str) -> Path:
-    try:
-        return canonical_workspace(raw_workspace)
-    except WorkspacePolicyError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @app.post("/api/coding-sessions/reset")
 async def reset_coding_session_api(_scope: CodingSessionScope) -> dict:
     raise HTTPException(
@@ -119,10 +110,10 @@ async def reset_coding_session_api(_scope: CodingSessionScope) -> dict:
 async def export_coding_session_api(
     thread_id: str, workspace: str, user_id: str = "anonymous"
 ) -> dict:
-    return await export_coding_session_state(
-        thread_identity=thread_id,
-        workspace=_session_workspace(workspace),
-        user_identity=user_id,
+    del thread_id, workspace, user_id
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy Coder checkpoint export is retired.",
     )
 
 

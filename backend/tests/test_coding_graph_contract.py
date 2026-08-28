@@ -127,7 +127,7 @@ def test_complete_graph_returns_only_shared_output_for_normal_results(
     assert result["messages"][-1].content.startswith("Completion report")
     assert result["workspace"] == str(tmp_path)
     assert result["execution_manifest"]["selected_repository"] == str(tmp_path)
-    assert result["coding_session_id"].startswith("coding-v1-")
+    assert result["coding_session_id"] == "contract-thread"
     assert result["coding_status"] == expected_status
     assert result["ui"] == []
 
@@ -147,7 +147,7 @@ def test_complete_graph_invalid_workspace_uses_shared_sanitized_error_output():
 
     assert set(result) <= _OUTPUT_FIELDS
     assert result["coding_status"] == "error"
-    assert result["coding_session_id"] == ""
+    assert result["coding_session_id"] == "invalid-workspace"
     assert "secret-path" not in result["messages"][-1].content
     assert "invalid_workspace" in result["messages"][-1].content
 

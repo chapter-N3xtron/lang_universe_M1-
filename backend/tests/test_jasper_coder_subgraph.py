@@ -282,7 +282,12 @@ async def test_embedded_mode_build_matches_authoritative_tool_policy(
     assert embedded_policy["checkpointer"] is None
     assert embedded_policy["permissions"] is None
     if mode == "read_only":
-        assert embedded_policy["tools"] == []
+        assert embedded_policy["tools"] == [
+            "coder_memory_write",
+            "coder_memory_read",
+            "coder_memory_delete",
+            "coder_documentation_read",
+        ]
         assert embedded_policy["interrupts"] == set()
         assert embedded_policy["read_only"] is True
     elif mode == "approval":

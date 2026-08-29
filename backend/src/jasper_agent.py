@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
@@ -44,6 +46,8 @@ from src.jasper_tools import (
     read_file,
 )
 from src.llm import get_agent_llm
+from src.phase5_ingestion import DocumentationIngestionRequest
+from src.phase5_tools import JASPER_PHASE5_TOOLS
 from src.secure_coding_tools import APPROVAL_INTERRUPT_ON, create_approval_tools
 from src.visual_models import (
     ConceptMapArtifact,
@@ -214,6 +218,7 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     ocr_task: str
     ocr_document_ref: str
     ocr_output_format: str
+    documentation_ingestion_request: dict
     session_evidence: list[dict]
     ui: Annotated[list[AnyUIMessage], ui_message_reducer]
 
@@ -261,6 +266,98 @@ def transfer_to_ocr(
                 _last_ai_message(runtime),
                 ToolMessage(
                     content=f"OCR task: {task}\nDocument: {document_ref}",
+                    tool_call_id=runtime.tool_call_id,
+                ),
+            ],
+        },
+        graph=Command.PARENT,
+    )
+
+
+class SubmitDocumentationInput(BaseModel):
+    requester: Literal["librarian", "coder"]
+    document_id: str
+    fragment_id: str
+    document_ref: str
+    operation_id: str
+    source_type: Literal[
+        "public-https",
+        "public-pdf",
+        "owner-upload",
+        "approved-private-workspace",
+        "coder-report",
+    ]
+    title: str
+    locator: str
+    source_revision: str
+    source_uri: str = "unknown"
+    source_time: str = "unknown"
+    explicitly_selected: bool = False
+
+
+@tool(args_schema=SubmitDocumentationInput)
+def submit_documentation_for_ingestion(
+    requester: Literal["librarian", "coder"],
+    document_id: str,
+    fragment_id: str,
+    document_ref: str,
+    operation_id: str,
+    source_type: str,
+    title: str,
+    locator: str,
+    source_revision: str,
+    source_uri: str = "unknown",
+    source_time: str = "unknown",
+    explicitly_selected: bool = False,
+    *,
+    runtime: ToolRuntime,
+) -> Command[Literal["ocr_exit"]]:
+    """Submit a Librarian source or explicitly selected Coder artifact to trusted OCR.
+
+    This creates only an untrusted candidate. The outer supervisor validates and grants
+    any eventual Store write after Docling OCR succeeds.
+    """
+    state = runtime.state
+    workspace = str(state.get("workspace") or "")
+    marker = ""
+    if workspace:
+        root = Path(workspace).expanduser().resolve()
+        candidate = Path(document_ref).expanduser()
+        resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError:
+            relative = "outside-workspace"
+        marker = hashlib.sha256(f"{root}\n{relative}".encode()).hexdigest()
+    request = DocumentationIngestionRequest(
+        requester=requester,
+        corpus="installation-docs",
+        document_id=document_id,
+        document_ref=document_ref,
+        fragment_id=fragment_id,
+        operation_id=operation_id,
+        source_type=source_type,
+        title=title,
+        locator=locator,
+        source_revision=source_revision,
+        source_uri=source_uri,
+        source_time=source_time,
+        explicitly_selected=explicitly_selected,
+        selection_marker=marker,
+        workspace_root=workspace,
+    )
+    return Command(
+        goto="ocr_exit",
+        update={
+            "ocr_task": "Ingest approved documentation candidate",
+            "ocr_document_ref": document_ref,
+            "ocr_output_format": "structured",
+            "documentation_ingestion_request": asdict(request),
+            "workspace": workspace,
+            "messages": [
+                _last_ai_message(runtime),
+                ToolMessage(
+                    content="Documentation candidate routed to trusted OCR supervisor.",
                     tool_call_id=runtime.tool_call_id,
                 ),
             ],
@@ -425,6 +522,8 @@ ACTIVE_TOOLS = [
     transfer_to_coding,
     transfer_to_librarian,
     transfer_to_ocr,
+    submit_documentation_for_ingestion,
+    *JASPER_PHASE5_TOOLS,
 ]
 
 
@@ -1308,6 +1407,9 @@ def _ocr_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
             "ocr_task": state.get("ocr_task", ""),
             "ocr_document_ref": state.get("ocr_document_ref", ""),
             "ocr_output_format": state.get("ocr_output_format", "markdown"),
+            "documentation_ingestion_request": state.get(
+                "documentation_ingestion_request", {}
+            ),
         }
     }
 

@@ -1,6 +1,6 @@
 ## Purpose
 
-Define permissioned, durable memory that can be recalled across sessions without confusing checkpoint state with memory or crossing personal and work security boundaries.
+Define permissioned private durable memory for one person per installation without confusing checkpoint state with memory. Multiple installations are supported through separate installation databases; shared/work memory is not part of this phase.
 
 ## ADDED Requirements
 
@@ -30,27 +30,19 @@ The system SHALL authenticate the requesting principal and derive tenant, trust-
 - **WHEN** a caller supplies an owner or namespace that conflicts with verified server-side scope
 - **THEN** the system denies the operation and does not access the supplied scope
 
-### Requirement: Personal and work memory are separate security tenants
-The system SHALL place personal and work contexts in different tenant scopes and MUST NOT search, read, write, copy, merge, summarize, or delete memory across those tenant boundaries in one operation. A work-context operation additionally SHALL require current work-tenant membership and an operation-specific grant for the target owner scope.
+### Requirement: Memory is private to one person per installation
+The system SHALL use a separate installation/database for each person. It SHALL derive a server-generated opaque tenant ID, trust domain `local-installation-v1`, owner type `person`, and owner ID exclusively from trusted server configuration. Browser, prompt, agent, and tool input MUST NOT select these values. Shared and work memory operations are unsupported in this phase.
 
-#### Scenario: Personal session recalls memory
-- **WHEN** an authorized request originates in a personal context
-- **THEN** the system searches only the verified principal's personal tenant and owner scope
+#### Scenario: Installation owner recalls memory
+- **WHEN** the installation owner makes an authorized request
+- **THEN** the system searches only that installation's server-derived tenant and owner scope
 
-#### Scenario: Work session recalls memory
-- **WHEN** a verified work member has `read` permission for the target work owner scope
-- **THEN** the system searches only that work tenant, trust domain, and permitted owner scope
-
-#### Scenario: Cross-context recall is requested
-- **WHEN** a personal request targets work memory or a work request targets personal memory
-- **THEN** the system denies the request rather than combining results
-
-#### Scenario: Work membership is revoked
-- **WHEN** a principal no longer has current membership or the required grant in a work tenant
-- **THEN** subsequent memory operations in that tenant are denied
+#### Scenario: Another scope is requested
+- **WHEN** a caller requests another tenant, owner, trust domain, shared scope, or work scope
+- **THEN** the system denies the request without accessing that scope
 
 ### Requirement: Memory access follows least-privilege operation rules
-The system SHALL enforce separate `read`, `write`, and `delete` permissions. A personal owner can operate only on that owner's personal records; a work principal can operate only on owner scopes and operations granted by work policy; a delegated agent can act only within the verified user's current context and granted operation; infrastructure operators have no default content access. No principal or agent SHALL enumerate tenants, trust domains, or owners outside its authorized scope.
+The system SHALL enforce separate `read`, `write`, `delete`, `restore`, and `permanent-delete` permissions. The installation owner can operate only on that owner's private records; a delegated agent can act only within the verified owner's installation scope and granted operation; infrastructure operators have no default content access. No principal or agent SHALL enumerate tenants, trust domains, or owners outside its authorized scope.
 
 #### Scenario: Read permission does not imply write
 - **WHEN** a principal with only `cross-session-memory:read` requests a write or delete
@@ -65,7 +57,7 @@ The system SHALL enforce separate `read`, `write`, and `delete` permissions. A p
 - **THEN** the system denies content access
 
 ### Requirement: Memory records are bounded and provenance-bearing
-Each memory record SHALL have an immutable record identifier, schema version, tenant, trust domain, owner, memory kind, bounded content, bounded metadata, provenance, creation time, update time, retention class or expiry, and lifecycle state. Provenance SHALL identify the source session or approved external source, creating principal or service, creation method, and source time when known. Configured hard limits SHALL bound record bytes, metadata fields and bytes, batch size, query length, and returned result count; over-limit writes SHALL fail rather than truncate silently.
+Each memory record SHALL have an immutable record identifier, schema version, tenant, trust domain, owner, memory kind, bounded content, bounded metadata, provenance, creation time, update time, and lifecycle state. Kinds SHALL be exactly `user preferences`, `user-provided facts`, `project decisions`, `task outcomes`, and `reusable instructions`. Each kind SHALL have a 15 MB total limit. Content SHALL be at most 32 KB; metadata at most 8 KB and 32 fields; a query at most 4 KB; an already-authorized candidate scan at most 1000; results at most 20; a response at most 256 KB; and a write batch at most 10. Over-limit writes SHALL fail without truncation or partial writes. Reaching a kind limit SHALL require an explicit owner decision and MUST NOT cause automatic eviction. Provenance SHALL identify the source session or approved external source, creating principal or service, creation method, and source time when known.
 
 #### Scenario: Valid record is accepted
 - **WHEN** an authorized write supplies all required fields within configured limits
@@ -102,7 +94,7 @@ The initial system SHALL support only exact-key lookup, authorized metadata filt
 - **THEN** the system returns an unsupported-capability response rather than presenting lexical results as semantic
 
 ### Requirement: Retention and deletion are enforceable
-The system SHALL associate every memory record with an approved retention policy or explicit expiry. Expired or deleted records SHALL be excluded from normal reads immediately. An authorized delete SHALL be scoped to an exact verified tenant, trust domain, owner, and record identifier; it SHALL be idempotent, produce a non-content audit event, and progress to physical purge according to the approved deletion policy. Restore SHALL be denied unless a separately approved policy explicitly permits it.
+The system SHALL retain memory until owner deletion; a category limit requires an explicit owner decision and never automatic eviction. Deleted records SHALL be excluded from normal reads immediately. An authorized delete SHALL be scoped to an exact verified tenant, trust domain, owner, and record identifier, be idempotent, and produce a non-content audit event. Only the exact owner SHALL be able to restore the exact item for exactly seven days; after seven days content SHALL be permanently purged with no restore. Owner-authorized Permanently Delete SHALL purge the exact deleted record immediately.
 
 #### Scenario: Record expires
 - **WHEN** a record passes its approved expiry
@@ -128,7 +120,7 @@ The system SHALL keep database, Agent Server Store, and other persistence creden
 - **THEN** the returned error and audit telemetry contain sanitized identifiers and failure classes but no credential or connection-secret values
 
 ### Requirement: Access decisions are auditable without duplicating content
-The system SHALL emit bounded audit events for allowed and denied memory operations containing time, verified principal or service identifier, tenant, trust domain, owner scope, operation, policy decision, reason class, correlation identifier, and affected record count. Audit events MUST NOT duplicate memory content, credentials, or internal reasoning and SHALL follow an approved audit-retention and access policy.
+The system SHALL emit bounded audit events for allowed and denied memory operations containing time, verified principal or service identifier, tenant, trust domain, owner scope, operation, policy decision, reason class, correlation identifier, and affected record count. Audit events MUST NOT duplicate memory content, queries, credentials, or internal reasoning. They SHALL be retained for 90 days and SHALL be accessible only to the installation owner.
 
 #### Scenario: Access is denied
 - **WHEN** a memory request fails authorization
@@ -137,3 +129,4 @@ The system SHALL emit bounded audit events for allowed and denied memory operati
 #### Scenario: Authorized query completes
 - **WHEN** a memory query succeeds
 - **THEN** the system records its scope, match mode, and bounded result count without copying result bodies into the audit event
+count without copying result bodies into the audit event

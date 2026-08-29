@@ -15,8 +15,8 @@ The system SHALL store and retrieve documentation records in application-owned d
 - **WHEN** no documentation result matches a query
 - **THEN** the system returns no documentation matches and does not search cross-session memory as a fallback
 
-### Requirement: Documentation retrieval requires verified scope and explicit corpus access
-Before retrieval, the system SHALL derive principal, context tenant, trust domain, and permitted corpus scopes from verified server-side identity. It SHALL require `documentation-retrieval:read` plus an explicit grant for every target corpus and deny by default. Personal and work contexts SHALL remain separate security tenants, and one request MUST NOT query both contexts.
+### Requirement: Documentation retrieval and ingestion require verified scope and explicit corpus access
+Before retrieval or corpus ingestion, the system SHALL derive the principal, private-installation tenant, `local-installation-v1` trust domain, `person` owner, and permitted corpus scopes from verified server-side configuration and identity. Retrieval SHALL require `documentation-retrieval:read` plus an explicit grant for every target corpus. Corpus writes SHALL require a supervisor-created `documentation-retrieval:write` delegation following approved source validation and successful OCR. The system SHALL deny by default. Shared, work-member, and caller-selected tenant contexts are unsupported.
 
 #### Scenario: Authorized corpus query
 - **WHEN** a verified principal has `read` permission for a corpus in the current tenant and trust domain
@@ -26,13 +26,13 @@ Before retrieval, the system SHALL derive principal, context tenant, trust domai
 - **WHEN** a request includes any corpus outside the verified principal's grants
 - **THEN** the system denies that corpus access without revealing document existence or corpus statistics
 
-#### Scenario: Personal request targets work corpus
-- **WHEN** a request in a personal context targets a work-tenant corpus
-- **THEN** the system denies the request rather than widening or switching tenant context
+#### Scenario: Write lacks supervisor delegation
+- **WHEN** a corpus-write request does not have a current supervisor-created ingestion delegation for the verified scope and corpus
+- **THEN** the system denies the write without revealing corpus state or changing content
 
-#### Scenario: Work membership changes
-- **WHEN** a principal's work membership or corpus grant is revoked
-- **THEN** subsequent queries and result-page retrievals for that work corpus are denied
+#### Scenario: Request targets another installation
+- **WHEN** a caller requests a tenant, owner, or trust domain other than the server-derived installation scope
+- **THEN** the system denies the request without accessing or revealing that scope
 
 ### Requirement: Initial retrieval is exact, metadata, or lexical only
 The initial system SHALL provide bounded exact-identifier lookup, allowlisted metadata filtering, and lexical text matching. Every response SHALL state the match mode and corpus scope used. The system MUST NOT claim that initial retrieval is semantic, vector, embedding-based, conceptual, or ontology-driven.
@@ -83,7 +83,7 @@ The system SHALL treat retrieved documentation as untrusted source content. Inst
 - **THEN** the system treats that text only as document content and does not widen access or expose a credential
 
 ### Requirement: Deleted, expired, or unavailable documents are not returned
-Retrieval SHALL exclude corpus records whose approved lifecycle state is deleted, expired, quarantined, superseded-withdrawn, or otherwise unavailable. Retrieval SHALL honor the corpus revision selected at authorization time and SHALL fail safely if lifecycle status cannot be verified. This change does not implement document ingestion, chunking, reindexing, or corpus-deletion workflows.
+Retrieval SHALL exclude corpus records whose approved lifecycle state is deleted, expired, quarantined, superseded-withdrawn, or otherwise unavailable. Retrieval SHALL honor the corpus revision selected at authorization time and SHALL fail safely if lifecycle status cannot be verified. This change does not implement corpus deletion or reindexing workflows.
 
 #### Scenario: Document is unavailable
 - **WHEN** a matching document is marked deleted, expired, quarantined, or withdrawn
@@ -94,7 +94,7 @@ Retrieval SHALL exclude corpus records whose approved lifecycle state is deleted
 - **THEN** it excludes the candidate and reports a sanitized retrieval failure or partial-result status
 
 ### Requirement: Agents never receive corpus credentials
-The system SHALL keep Store, database, source-system, future index, and embedding-provider credentials in trusted server infrastructure. Agents SHALL receive only an authorized retrieval operation and bounded provenance-bearing results; errors and telemetry MUST NOT reveal credential or secret connection material.
+The system SHALL keep Store, database, source-system, future index, and embedding-provider credentials in trusted server infrastructure. Agents SHALL receive only authorized retrieval or supervisor-mediated ingestion operations and bounded provenance-bearing results; errors and telemetry MUST NOT reveal credential or secret connection material.
 
 #### Scenario: Agent retrieves documentation
 - **WHEN** an agent has a valid server-created delegation for an authorized corpus
@@ -105,7 +105,7 @@ The system SHALL keep Store, database, source-system, future index, and embeddin
 - **THEN** the system exposes only a sanitized failure class and correlation identifier to the agent
 
 ### Requirement: Retrieval access is auditable
-The system SHALL record bounded audit events for allowed and denied documentation queries containing time, verified principal or service identifier, tenant, trust domain, owner and corpus scopes, operation, match mode, policy decision, reason class, correlation identifier, and result count. Audit events MUST NOT copy query results, document bodies, credentials, or internal reasoning and SHALL follow an approved retention and access policy.
+The system SHALL record bounded audit events for allowed and denied documentation reads and supervisor-mediated ingestion requests containing time, verified principal or service identifier, tenant, trust domain, owner and corpus scopes, operation, match mode when applicable, policy decision, reason class, correlation identifier, and result count. Audit events MUST NOT copy query results, document bodies, credentials, or internal reasoning and SHALL follow an approved retention and access policy.
 
 #### Scenario: Corpus query succeeds
 - **WHEN** an authorized documentation query returns results
@@ -115,13 +115,25 @@ The system SHALL record bounded audit events for allowed and denied documentatio
 - **WHEN** authorization denies a documentation query
 - **THEN** the system records a sanitized denial without revealing document existence
 
-### Requirement: Librarian ingestion and semantic indexing remain deferred
-The system SHALL NOT represent Librarian as wired to populate the documentation corpus under this capability. Source acquisition, ingestion, parsing, chunking, corpus population, reindexing, document or corpus deletion implementation, vector generation, and semantic-index lifecycle SHALL require separate changes before they are available.
+### Requirement: Supervisor-mediated OCR ingestion is the only corpus write path
+The existing Agent Server supervisor graph SHALL be the sole authority that routes documentation corpus writes. Librarian MAY request download of approved research sources, and Coder MAY submit qualifying work artifacts. The supervisor SHALL validate scope and source, route the selected document through the existing OCR capability, and create a bounded documentation record only after successful OCR and authorized trusted-adapter write. Librarian, Coder, and OCR SHALL NOT communicate directly with each other or receive Store/database credentials. Reindexing and document/corpus deletion remain unsupported.
 
-#### Scenario: Librarian is asked to populate the corpus
-- **WHEN** an agent attempts to use Librarian to ingest or populate documentation under this capability
-- **THEN** the system reports ingestion as unavailable and does not claim that corpus content changed
+#### Scenario: Librarian source is ingested
+- **WHEN** Librarian requests ingestion of an approved downloaded research source
+- **THEN** the supervisor routes it to OCR and, after successful bounded OCR output and authorization, writes provenance-bearing content to the authorized corpus
+
+#### Scenario: Coder artifact is ingested
+- **WHEN** Coder requests ingestion of a qualifying work artifact
+- **THEN** the supervisor routes it to OCR and, after successful bounded OCR output and authorization, writes provenance-bearing content to the authorized corpus
+
+#### Scenario: A direct specialist write is attempted
+- **WHEN** Librarian, Coder, or OCR attempts to write the corpus without a supervisor-created delegation
+- **THEN** the system denies the operation without changing corpus content
+
+#### Scenario: OCR or source validation fails
+- **WHEN** download approval, source validation, OCR, or a bounded corpus write fails
+- **THEN** the system reports a sanitized failure and does not claim that corpus content changed
 
 #### Scenario: Reindex or corpus deletion is requested
 - **WHEN** a caller requests reindexing or implementation of document or corpus deletion under this capability
-- **THEN** the system reports the operation as deferred rather than simulating success
+- **THEN** the system reports the operation as unsupported rather than simulating success

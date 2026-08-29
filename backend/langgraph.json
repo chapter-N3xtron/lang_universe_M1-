@@ -11,12 +11,17 @@
   "dependencies": [
     "."
   ],
+  "auth": {
+    "path": "./src/installation_auth.py:auth"
+  },
   "graphs": {
     "chat_ui": "./src/chat_ui.py:create_chat_ui",
     "coder": "./src/coding_agent.py:create_coding_agent_graph"
   },
   "http": {
-    "app": "./src/runtime_identity.py:app"
+    "app": "./src/runtime_identity.py:app",
+    "enable_custom_route_auth": true,
+    "middleware_order": "auth_first"
   },
   "env": "./.env"
 }

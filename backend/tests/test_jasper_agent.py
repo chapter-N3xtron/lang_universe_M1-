@@ -622,6 +622,11 @@ def test_jasper_delegates_web_access_to_librarian_without_direct_web_tools():
         "transfer_to_coding",
         "transfer_to_librarian",
         "transfer_to_ocr",
+        "submit_documentation_for_ingestion",
+        "jasper_memory_write",
+        "jasper_memory_read",
+        "jasper_memory_delete",
+        "jasper_documentation_read",
     ]
 
 
@@ -646,6 +651,11 @@ def test_jasper_deep_agent_exposes_documented_tools_and_task(tmp_path):
         "transfer_to_coding",
         "transfer_to_librarian",
         "transfer_to_ocr",
+        "submit_documentation_for_ingestion",
+        "jasper_memory_write",
+        "jasper_memory_read",
+        "jasper_memory_delete",
+        "jasper_documentation_read",
     }
     assert tool_names.isdisjoint({"web_search", "read_url", "ingest_uploaded_sources"})
 

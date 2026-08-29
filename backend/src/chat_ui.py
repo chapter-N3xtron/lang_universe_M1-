@@ -12,11 +12,17 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
 from src.agent_utils import get_conversation_history, get_user_query
+from src.installation_auth import installation_identity
 from src.jasper_agent import STANDARD_SESSION_GREETING, create_jasper_graph
 from src.librarian_agent import librarian_agent
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
 from src.ocr_agent import run_ocr, specialist_message
+from src.phase5_capabilities import Authority
+from src.phase5_ingestion import (
+    DocumentationIngestionRequest,
+    supervisor_ingest_document,
+)
 from src.runtime_authority import authoritative_thread_id
 from src.session_catalog import record_session_projection
 from src.workspace_policy import (
@@ -61,6 +67,7 @@ class State(TypedDict):
     ocr_task: str
     ocr_document_ref: str
     ocr_output_format: str
+    documentation_ingestion_request: dict
     session_evidence: Annotated[list[dict], operator.add]
     ui: Annotated[list[AnyUIMessage], ui_message_reducer]
 
@@ -450,27 +457,56 @@ def create_chat_ui():
         )
 
     async def run_ocr_node(
-        state,
+        state, runtime: Runtime
     ) -> Command[Literal["record_session"]]:
         output_format = state.get("ocr_output_format", "markdown")
         try:
-            result = await asyncio.to_thread(
-                run_ocr,
-                state.get("ocr_task", ""),
-                state.get("ocr_document_ref", ""),
-                state.get("workspace"),
-                output_format,
-            )
+
+            async def execute_ocr(document_ref: str) -> dict:
+                return await asyncio.to_thread(
+                    run_ocr,
+                    state.get("ocr_task", ""),
+                    document_ref,
+                    state.get("workspace"),
+                    output_format,
+                )
+
+            ingestion = state.get("documentation_ingestion_request")
+            if ingestion:
+                identity = installation_identity()
+                result = await supervisor_ingest_document(
+                    DocumentationIngestionRequest(**ingestion),
+                    store=runtime.store,
+                    installation_authority=Authority(
+                        str(identity["tenant_id"]),
+                        str(identity["owner_id"]),
+                        principal_id="owner",
+                        corpus_read_grants=frozenset({"installation-docs"}),
+                    ),
+                    ocr=execute_ocr,
+                    selected_workspace=state.get("workspace"),
+                    current_evidence=tuple(
+                        str(item.get("locator"))
+                        for item in state.get("session_evidence", [])
+                        if isinstance(item, dict) and item.get("locator")
+                    ),
+                )
+            else:
+                result = await execute_ocr(state.get("ocr_document_ref", ""))
             message = {
                 "role": "assistant",
                 "name": "ocr",
-                "content": specialist_message(result, output_format),
+                "content": (
+                    f"Documentation ingestion completed: {result['id']}"
+                    if ingestion
+                    else specialist_message(result, output_format)
+                ),
             }
-        except Exception as exc:
+        except Exception:
             message = {
                 "role": "assistant",
                 "name": "ocr",
-                "content": f"OCR failed: {exc}",
+                "content": "Documentation/OCR operation failed; correlation_id=ocr-operation",
             }
         return Command(
             goto="record_session",
@@ -478,6 +514,7 @@ def create_chat_ui():
                 "messages": [message],
                 "ocr_task": "",
                 "ocr_document_ref": "",
+                "documentation_ingestion_request": {},
             },
         )
 

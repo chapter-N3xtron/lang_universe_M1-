@@ -1,158 +1,96 @@
 ## Context
 
-See `proposal.md` and the two capability specs. Agent Server checkpoints already provide durable execution state, but durability does not make them cross-session memory. The memory layer must use public Agent Server Store operations, while documentation retrieval needs an independently authorized corpus boundary. Both may reside in one PostgreSQL deployment only if application ownership and Agent Server internal-table boundaries remain explicit.
-
-The design must work without assuming Store compare-and-swap, checkpoint/Store atomicity, semantic search, a configured vector index, or Librarian ingestion. Exact deployed Store behavior, existing identity middleware, and safe lexical-query support must be inventoried before implementation.
+Agent Server checkpoints are durable execution state, not cross-session memory. Private memory must use public Agent Server Store operations in application-owned namespaces. Documentation requires an independently authorized corpus boundary. Phase 5 supports one person per private installation and one separate database per installation; it defines no work members or shared/work memory.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Put one trusted server-side policy enforcement point in front of both capabilities.
-- Encode capability, tenant, trust domain, owner, and (for documents) corpus into every authorized storage/retrieval scope.
-- Keep personal and work scopes non-overlapping and re-check work membership on every operation and pagination request.
-- Make memory writes, reads, retention, deletion, provenance, and audit behavior bounded and testable.
-- Return grounded documentation results with inspectable lexical match information and source provenance.
-- Permit physical co-location in PostgreSQL without logical co-mingling or direct application writes to Agent Server internal tables.
+- Centralize server-side authorization for memory and documentation.
+- Derive the opaque tenant, `local-installation-v1` trust domain, and `person` owner from trusted server configuration.
+- Preserve bounded memory, immutable provenance, explicit creation, deterministic non-semantic retrieval, and enforceable deletion.
+- Preserve a separate, grounded documentation corpus and the approved supervisor-mediated OCR ingestion path.
+- Keep application code away from Agent Server internal PostgreSQL tables and all persistence credentials away from agents.
 
 **Non-Goals:**
 
-- No checkpoint migration, checkpoint-derived automatic memory, or duplicate checkpoint/message ledger.
-- No Coder graph topology, Coder report handoff, MCP surface, or UI work.
-- No Librarian wiring, source acquisition, parsing, ingestion, chunking, corpus population, reindexing, or documentation-deletion implementation.
-- No vector/embedding index, semantic-search claim, ontology, knowledge graph, or custom inference logic.
-- No agent-held database, Store, source-system, index, or embedding-provider credentials.
+- Shared/work memory, work-member policy, checkpoint migration, checkpoint-derived memory, direct specialist communication, MCP, general UI work, vector/semantic retrieval, ontology, reindexing, and document/corpus deletion.
 
 ## Decisions
 
-### 1. Use two storage authorities behind one policy-enforcement pattern
+### 1. Separate memory and documentation authorities
 
-Cross-session memory is stored only through supported Agent Server Store APIs in application-owned namespaces. Documentation uses a separate application-owned corpus repository; an implementation may back it with supported Store APIs or dedicated application-owned PostgreSQL schema/tables, but never Agent Server internal tables. The selection is pinned after a read-only capability inventory and must preserve the same corpus contract.
+Memory and documentation both use supported Agent Server public Store APIs, in separate server-derived application namespace families. This is an approved architecture decision: there are no direct PostgreSQL corpus tables and neither capability may select or write Agent Server internal tables or query the other. Production documentation starts empty.
 
-Physical co-location is deployment convenience only. Neither repository can query or mutate the other, and each has a separate least-privilege service role or equivalent Store authorization path. If PostgreSQL roles cannot prevent direct access to Agent Server internal tables, rollout stops.
+### 2. Use service-level PostgreSQL least privilege, not model identities
 
-**Alternative rejected:** writing memory or documents into Agent Server persistence tables, because those tables are not an application API and upgrades, authorization, and ownership would be unsafe.
+The trusted standalone Agent Server service is the PostgreSQL principal for its migrations and runtime operations. Browser, owner, Jasper, Coder, Librarian, and OCR identities are HTTP/auth-capability principals, not SQL roles, and receive no database URI. Because PostgreSQL reserves object-definition changes to owners, the smallest role that supports the observed startup migrations is a non-superuser login that owns only the Agent Server `public` schema and its observed relations, with database `CONNECT`, `CREATE`, and `TEMPORARY`; it does not own the database, extensions, roles, or the application projection schema.
 
-**Alternative rejected:** one mixed memory/document namespace, because personal recollections and governed source documents have different ownership, provenance, lifecycle, and access rules.
+The existing application-owned `session_catalog` code opens a separate connection through `POSTGRES_URI` and runs idempotent DDL. A second non-superuser service login therefore owns only that schema. The later rollout must map documented standalone `DATABASE_URI` to the Agent Server role and repository `POSTGRES_URI` to the projection role, resolve the currently duplicated URI aliases, and retain the same database and volume. This service-role split does not make untrusted graph code a database principal or a secure process sandbox; credentials must remain outside model-visible requests, state, results, errors, and telemetry.
 
-### 2. Resolve scope from verified identity, never from agent text
+Both memory and documentation use the same supported Agent Server `BaseStore` and the same physical `store` relation. The public Store integration supplies namespaces, not a per-namespace SQL principal or connection selector. PostgreSQL grants therefore cannot enforce memory-versus-document row privileges behind this boundary. Phase 5 relies on default-deny capabilities and server-derived namespace isolation and does not add RLS, direct SQL, a custom Store/checkpointer, or graph/database infrastructure.
 
-A trusted gateway receives authenticated identity and current context, resolves memberships and grants, and creates an internal authorization context:
+### 3. Resolve one private installation scope server-side
 
-- `principal_id` and principal type;
-- `context_kind` (`personal` or `work`);
-- `tenant_id`;
-- `trust_domain_id`;
-- permitted owner scopes;
-- permitted capability operations;
-- permitted corpus IDs for documentation;
-- correlation ID and delegation expiry.
+Trusted configuration generates or loads one opaque tenant ID and owner ID, fixes owner type `person` and trust domain `local-installation-v1`, and supplies the only valid scope. Prompts, browser values, tools, and agent output cannot select scope. Missing, conflicting, shared, or work scope fails closed.
 
-The gateway rejects missing, stale, contradictory, or caller-overridden scope. It mints an in-process or short-lived opaque delegation containing no persistence credential. Repository adapters accept only this authorization context, not arbitrary tenant/owner strings from model output. Pagination tokens are scope-bound, revision-bound, integrity-protected, short-lived, and reauthorized when used.
+### 4. Enforce independent least-privilege operations
 
-**Alternative rejected:** allowing prompts, graph state, or tool arguments to select raw namespaces, because unverified values would permit confused-deputy and cross-tenant access.
+The owner may receive memory read, explicit write, exact delete, exact restore, permanent delete, and owner-only audit access. Jasper, Coder, and Librarian may receive bounded delegated memory operations; OCR cannot. Jasper, Coder, Librarian, and OCR may receive explicit documentation-read delegation. Corpus writes require a current supervisor-created ingestion delegation. Infrastructure operators have no default content access.
 
-### 3. Apply a deny-by-default operation matrix
+### 5. Use explicit namespace families
 
-| Principal/context | Memory read | Memory write | Memory delete | Documentation read |
-|---|---:|---:|---:|---:|
-| Verified personal owner in personal tenant | Own scope with grant | Own scope with grant | Exact own record with grant | Explicitly granted personal corpora only |
-| Verified work member | Granted work owner scopes only | Granted work owner scopes only | Exact granted work records only | Explicitly granted work corpora only |
-| Delegated agent invocation | Current verified scope and delegated operation only | Current verified scope and delegated operation only | Only if separately delegated for exact record | Current verified scope and delegated corpora only |
-| Infrastructure operator | Denied by default | Denied by default | Denied by default | Denied by default |
-| Unverified or stale principal | Denied | Denied | Denied | Denied |
+- Memory: `app / v1 / cross-session-memory / tenant:{id} / trust:{id} / owner:person:{id} / kind:{kind}`
+- Documentation: `app / v1 / documentation-retrieval / tenant:{id} / trust:{id} / owner:person:{id} / corpus:{id} / record:{type}`
+- Sanitized audit: separately permissioned and never a content namespace.
 
-`read`, `write`, and `delete` are independent grants. A request cannot span personal and work tenants, multiple trust domains, or ungranted owners/corpora. A multi-corpus documentation request is allowed only when every corpus is explicitly granted in the same tenant and trust domain; otherwise the request fails closed rather than returning a partial authorization view.
+Identifiers are normalized, opaque, bounded, and server-derived. Prefix enumeration is not agent-visible.
 
-**Alternative rejected:** filter-after-fetch authorization, because unauthorized records would already have crossed the storage boundary and existence could leak.
+### 6. Store bounded memory envelopes with explicit creation
 
-### 4. Use explicit logical namespace families
+An envelope includes schema version, immutable ID, kind, bounded content/metadata, server scope, provenance, timestamps, lifecycle state, revision, and deterministic operation ID. Kinds are exactly `user preferences`, `user-provided facts`, `project decisions`, `task outcomes`, and `reusable instructions`. Per-kind and request limits are those in the capability spec. Limits never trigger automatic eviction.
 
-The authorization layer constructs namespace components after validation. The adapter encodes them into the deployed backend's supported tuple/key form:
+No checkpoint, thread, message, tool result, report, or artifact becomes memory merely by existing. Store behavior must be contract-tested; the design assumes neither compare-and-swap nor atomic checkpoint/Store writes.
 
-- Memory: `app / v1 / cross-session-memory / tenant:{id} / trust:{id} / owner:{type}:{id} / kind:{kind}`
-- Documentation: `app / v1 / documentation-retrieval / tenant:{id} / trust:{id} / owner:{type}:{id} / corpus:{id} / record:{type}`
-- Sanitized audit: a separately permissioned audit sink keyed by capability and tenant, never a content namespace.
+### 7. Make retrieval inspectable and non-semantic
 
-Identifiers are opaque, normalized, length-bounded, and server-derived. Prefix listing is never exposed to agents. Personal and work tenant IDs are different identifiers, not labels on a shared owner namespace. A namespace conformance test must prove that changing any capability, tenant, trust-domain, owner, or corpus component cannot return records from the original scope.
+Memory and documentation support exact lookup, allowlisted metadata filters, and bounded same-word lexical matching over no more than 1000 already-authorized candidates. Normalize case/tokens; rank by descending count of query words present, then stable record ID. Return match mode and provenance. Do not claim vector, semantic, conceptual, ontology, or inference behavior.
 
-**Alternative rejected:** owner-only namespaces, because the same principal may have personal and multiple work identities with different trust and retention rules.
+Documentation results include corpus, document, fragment/locator, title, approved URI or opaque locator, source revision, digest, source-time status, retrieval time, and match mode. Unknown provenance stays `unknown`. Retrieved text is untrusted data and cannot affect authorization.
 
-### 5. Store bounded memory envelopes and immutable provenance
+### 8. Enforce the approved memory lifecycle
 
-A memory envelope contains schema version, immutable record ID, logical memory kind, bounded content and metadata, server-derived scope, provenance, server timestamps, retention policy/expiry, lifecycle state, revision, and deterministic operation ID. Provenance records the source session or approved external source, creator principal/service, creation method, and source time status; it does not copy checkpoint state or internal reasoning.
+Memory remains until owner deletion. Exact deletion immediately excludes content from every normal read. The exact owner can restore it for exactly seven days. Once that window ends, content is permanently purged and cannot be restored. Owner-authorized permanent delete purges the exact deleted item immediately. Content-free memory audit events are owner-only and retained 90 days. They contain identifiers, operation, decision/reason class, correlation, time, and counts, never memory bodies, credentials, or internal reasoning.
 
-Writes validate the complete envelope before persistence. Retries reuse the operation ID. Implementations must not claim atomicity with checkpoints. Where the Store lacks conditional updates, immutable revision records plus deterministic read resolution and reconciliation prevent an older retry from silently replacing a newer revision; exact behavior must be contract-tested against the deployed Store adapter before enablement.
+### 9. Preserve approved documentation ingestion
 
-Secrets, credentials, auth headers, private keys, and internal reasoning are rejected content classes. Configured limits cover content, metadata, fields, batch size, candidate scan, query, result count, and response bytes. Limits are deployment configuration with reviewed safe maxima, not agent-controlled values.
-
-**Alternative rejected:** mutable transcript or checkpoint blobs, because they are unbounded, mix execution with memory, obscure provenance, and make deletion unsafe.
-
-### 6. Make memory creation an explicit authorized action
-
-No checkpoint, thread, message, tool result, report, or artifact becomes memory merely by existing. A separate `cross-session-memory:write` operation validates scope, content class, provenance, bounds, and retention before writing. A session reference may be stored as provenance, but canonical execution state remains checkpoint-owned.
-
-This phase defines no autonomous memory-extraction ontology. Memory kinds are a small allowlist used for validation and filtering, not an ontology or inference system.
-
-**Alternative rejected:** automatically summarizing every session into memory, because consent, accuracy, tenant context, retention, and provenance would be ambiguous.
-
-### 7. Implement inspectable non-semantic retrieval
-
-Exact lookup resolves a scoped identifier. Metadata filtering accepts only allowlisted fields and values. Lexical retrieval uses a documented tokenizer, case/normalization rules, scoring formula, and stable record-ID tie-breaker over a hard-bounded authorized candidate set or a native lexical index whose behavior is pinned by tests. Responses label `exact`, `metadata-filtered`, and/or `lexical` modes.
-
-The documentation response includes corpus, document, fragment/locator, title, approved URI/opaque locator, source revision, digest, source-time status, retrieval time, and match mode. Memory results include their record provenance. Unknown provenance remains `unknown`. Documents are treated as untrusted data; their text cannot modify authorization or invoke capabilities.
-
-A future vector index can be additive only through a separate OpenSpec defining embedding model/version, index ownership, tenant isolation, reindex/deletion behavior, evaluation, and truthful semantic-search labeling. Ontology remains future custom logic.
-
-**Alternative rejected:** using an embedding-capable API without a configured and evaluated index, because lexical results must not be mislabeled as semantic retrieval.
-
-### 8. Enforce lifecycle before returning content
-
-Memory records require an approved retention class or expiry. Normal reads first enforce lifecycle state and expiry. Exact, owner-authorized deletion writes an idempotent unavailable state, emits a sanitized audit event, and invokes the approved purge mechanism; restore is unavailable unless separately approved. Retention and audit-retention durations, purge service level, backup interaction, and legal-hold handling are release-gated configuration owned by human policy authorities.
-
-Documentation retrieval consumes lifecycle metadata from an already approved corpus snapshot and excludes deleted, expired, quarantined, withdrawn, or unverifiable candidates. Creating that metadata and implementing document/corpus deletion are deferred; this phase only enforces available status during read.
-
-**Alternative rejected:** delete-by-query or tenant-wide agent deletion, because broad mutable operations violate least privilege and make accidental cross-scope loss more likely.
-
-### 9. Keep credentials and audits outside agent context
-
-Only trusted services receive backend credentials. Agent-visible tools expose typed capability operations, bounded request fields, bounded results, and sanitized errors. Audit events contain verified identity, scope identifiers, operation, decision/reason class, match mode, correlation ID, time, and counts—never memory/document bodies, raw queries when policy forbids them, credentials, connection strings, or internal reasoning.
-
-Audit storage has a separately approved access and retention policy. Error messages avoid record-existence and corpus-statistics leaks across denied scopes.
-
-**Alternative rejected:** giving agents read-only database credentials, because read-only still permits uncontrolled enumeration and bypasses per-operation policy, bounds, and audit handling.
-
-### 10. Librarian and corpus mutation remain disconnected
-
-No Librarian path receives a corpus write operation in this phase. Documentation retrieval can be tested against synthetic fixtures and can read an externally approved, pre-existing corpus snapshot after authorization, but it cannot acquire, parse, chunk, populate, reindex, or delete corpus content. Capability responses report these mutations as unsupported rather than pretending they succeeded.
-
-**Alternative rejected:** a placeholder ingestion path, because even dormant wiring would obscure source approval, chunk provenance, retention, reindex consistency, and deletion obligations that need their own design.
+Librarian may request public HTTPS pages, public PDFs, owner-uploaded documents, or explicitly source-approved private-workspace documents. Coder may submit explicitly selected Markdown, plain text, PDF, or DOCX reports that pass sensitive-data checks. The existing supervisor validates each request, routes accepted content through existing OCR, and requests a bounded trusted corpus write only after OCR succeeds. Specialists neither communicate directly nor receive persistence credentials. Production starts empty; synthetic fixtures validate the path.
 
 ## Risks / Trade-offs
 
-- [Shared PostgreSQL increases blast radius] → use application-owned schemas or supported Store namespaces, separate least-privilege roles, explicit grants, backup review, and tests proving no access to Agent Server internal tables.
-- [Namespace mistakes cause cross-tenant disclosure] → derive scope server-side, centralize encoding, deny raw namespace input, test every namespace dimension, and fail closed.
-- [Revoked work access persists in pagination or caches] → reauthorize every request/token use, bind tokens to scope and corpus revision, and keep result caches scope-bound and short-lived.
-- [Store update races lose memory revisions] → use deterministic operation IDs, immutable revision strategy, stale-write tests, and reconciliation without assuming CAS or checkpoint/Store atomicity.
-- [Application lexical scanning becomes expensive] → enforce candidate and response bounds; require a separately owned lexical index or stop rollout when measured limits cannot be met.
-- [Lexical retrieval misses conceptual matches] → describe match mode truthfully; defer vector search rather than implying semantic quality.
-- [Provenance exposes sensitive locators] → use approved opaque locators, field-level response policy, and no raw protected paths.
-- [Deletion conflicts with backups or policy] → gate enablement on approved retention, purge, backup, legal-hold, and restore decisions; test immediate read exclusion separately from physical purge.
-- [Documentation becomes prompt-injection material] → mark it as untrusted data, preserve citations, and keep authorization/capability decisions outside retrieved content.
-- [No ingestion means an empty production corpus] → do not claim corpus population; validate retrieval with synthetic fixtures and enable production reads only for an independently approved existing snapshot.
+- Namespace mistakes could disclose content; derive all scope server-side and test each namespace dimension.
+- Store races could lose revisions; use deterministic operations and tested revision resolution without assumed atomicity.
+- Lexical matching may miss concepts; label it truthfully and keep hard candidate/response bounds.
+- Deletion timing can regress; test immediate exclusion, both sides of the exact seven-day boundary, restore ownership, and permanent purge.
+- Documents can contain prompt injection; treat text as data and keep policy outside retrieval content.
+- Failed ingestion can pollute a corpus; require source approval, OCR success, complete provenance, and bounded all-or-nothing writes.
 
 ## Migration Plan
 
-1. Inventory the deployed Store API/version, namespace behavior, identity source, membership/grant checks, PostgreSQL ownership, internal Agent Server tables, and available lexical-query mechanisms using read-only inspection.
-2. Obtain human approval for tenant/trust-domain definitions, owner types, operation grants, record limits, memory kinds, retention/expiry classes, purge and backup behavior, audit access/retention, and any pre-existing documentation snapshot. Stop if any required policy owner or isolation control is absent.
-3. Implement the central authorization context and namespace encoder behind disabled capability entry points; provision only application-owned permissions and prove direct Agent Server internal-table access is impossible.
-4. Implement and test the memory Store adapter, immutable provenance/revision behavior, bounded exact/metadata/lexical reads, lifecycle enforcement, exact deletion, and sanitized audits with synthetic isolated namespaces.
-5. Implement documentation read-only retrieval against synthetic fixtures, then optionally an approved pre-existing corpus snapshot. Do not add Librarian or corpus mutation paths.
-6. Run cross-tenant, revoked-membership, spoofed-scope, operation-separation, pagination, bounds, race/retry, expiry/deletion, prompt-injection, provenance, credential-leak, and internal-table isolation tests.
-7. Enable capability grants for a limited tenant only after strict OpenSpec and focused acceptance validation. Monitor denial classes, bounded latency, candidate limits, and lifecycle failures without logging content.
-8. Roll back by revoking capability grants and disabling the adapters. Preserve memory records for approved retention/deletion processing; do not delete documentation or modify Agent Server internal persistence as part of rollback.
+1. Inventory deployed public Store behavior, identity/configuration, PostgreSQL ownership, and lexical support read-only.
+2. Prepare but do not apply exact-owner service-role SQL; validate it statically and rehearse it against a restored clone of the existing database with the pinned image.
+3. Prove browser/agent identities receive no SQL credential and that the two service URIs select only their intended schemas; accept that one BaseStore cannot enforce per-namespace SQL grants.
+4. Implement disabled authorization and namespace boundaries, then memory and synthetic documentation adapters.
+5. Add lifecycle, audit, ingestion, isolation, race, bounds, injection, credential-leak, and deployed role-denial tests.
+6. Enable only after backup/restore proof, migration/startup rehearsal, focused acceptance testing, and human release approval. Preserve the database, named volume, and sessions; rollback requires a reviewed inverse ownership/configuration plan and must not recreate or merge persistence.
 
-## Open Questions
+## Verified implementation inventory and rollout facts
 
-- Which approved pre-existing documentation snapshot, if any, will be available for production read-only retrieval? An empty corpus is valid and must be reported honestly until a separate ingestion change is approved.
-- Which supported lexical mechanism meets the measured candidate and latency bounds in the deployed environment? The answer may select Store-backed bounded matching or an application-owned lexical index but cannot introduce semantic behavior or internal-table writes.
+- Source environment inventory recorded `langgraph==1.2.11` and `langgraph-api==0.11.2`; the read-only deployed-container audit on 2026-08-29 found `langgraph==1.2.11` and `langgraph-api==0.13.0`. The installed SDK documents `Auth.authenticate`, global default-deny `Auth.on`, thread `create_run`, assistant handlers, and Store `get`/`put`/`delete`/`search`/`list_namespaces` handlers. Raw namespace listing is denied.
+- The public Store surface used here is synchronous and asynchronous `get_item`, `put_item`, `delete_item`, `search_items`, and namespace listing. Phase 5 uses only get/put/delete/bounded search in application Store namespaces. Checkpoints are a separate execution-persistence surface and are never promoted.
+- Store has no assumed compare-and-swap primitive. Memory uses immutable revision keys, deterministic highest-revision reconciliation, explicit stale-revision rejection, and physical removal of content-bearing revisions on purge. Operation records are excluded from the 15 MiB live-envelope accounting.
+- Read-only catalog queries found PostgreSQL 16.15, one login role (`postgres`) with superuser/role/database-creation powers, database owner `postgres`, Agent Server relations in `public`, application projection relations in `session_catalog`, and all observed relations owned by `postgres`. Existing extensions are `btree_gin`, `ltree`, and `plpgsql`, also operator-owned. The current Compose configuration supplies the same superuser URI under `DATABASE_URI`, `POSTGRES_URI`, `DATABASE_URL`, and `POSTGRES_URI_CUSTOM`; IAM is not enabled.
+- The observed Agent Server tables are `assistant`, `assistant_versions`, `checkpoint_blobs`, `checkpoint_delete_queue`, `checkpoint_writes`, `checkpoints`, `cron`, `run`, `schema_migrations`, `store`, `thread`, and `thread_ttl`, plus the checkpoint-delete sequence and their indexes. Current migrations and runtime can be served by a non-superuser owner of only these objects and `public`, with database connect/create/temporary privileges; database and extension ownership are unnecessary for the audited version. The application projection requires its own schema owner because `ensure_catalog_schema()` executes DDL.
+- `backend/deploy/postgres/phase5_least_privilege.sql` and its static tests are unapplied preparation only. Actual role creation, ownership transfer, credential provisioning, URI cutover, restored-clone migration rehearsal, deployed internal-table denial, production enablement, and release approval remain unchecked rollout work. A future Agent Server version can add migrations or extension requirements, so each upgrade must be rehearsed and the allowlist re-audited.
+- The single physical `public.store` relation holds every Store namespace. The documented public integration has no per-namespace SQL identity boundary; memory/document separation is capability/namespace isolation only, not a PostgreSQL grant claim.
+- Source-level synthetic verification uses an injected Store double and an empty documentation corpus. Lexical matching is NFKC/casefolded same-word ranking over at most 1000 already-authorized candidates, with stable record-ID ties; it is not semantic retrieval.

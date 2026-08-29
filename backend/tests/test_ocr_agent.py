@@ -11,7 +11,7 @@ from langgraph.types import Command
 
 from src import ocr_agent
 from src.chat_ui import create_chat_ui
-from src.jasper_agent import transfer_to_ocr
+from src.jasper_agent import submit_documentation_for_ingestion, transfer_to_ocr
 
 
 def test_ocr_path_is_confined_to_workspace(tmp_path):
@@ -159,8 +159,45 @@ def test_transfer_schema_and_command_route():
         "read tables", "upload:x.pdf", "json", runtime=runtime
     )
     assert isinstance(command, Command)
-    assert command.goto == "ocr"
+    assert command.goto == "ocr_exit"
     assert command.update["ocr_output_format"] == "json"
+
+
+def test_ingestion_transfer_is_untrusted_parent_command_and_schema_hides_authority(tmp_path):
+    schema = submit_documentation_for_ingestion.args_schema.model_json_schema()
+    properties = schema["properties"]
+    assert "runtime" not in properties
+    assert "supervisor_approved" not in properties
+    assert "authority" not in properties
+    runtime = type(
+        "Runtime",
+        (),
+        {
+            "state": {
+                "workspace": str(tmp_path),
+                "messages": [AIMessage(content="handoff")],
+            },
+            "tool_call_id": "call-ingest",
+        },
+    )()
+    command = submit_documentation_for_ingestion.func(
+        "coder",
+        "doc-1",
+        "fragment-1",
+        "report.md",
+        "operation-1",
+        "coder-report",
+        "Report",
+        "section-1",
+        "git-1",
+        explicitly_selected=True,
+        runtime=runtime,
+    )
+    assert isinstance(command, Command)
+    assert command.goto == "ocr_exit"
+    candidate = command.update["documentation_ingestion_request"]
+    assert "supervisor_approved" not in candidate
+    assert candidate["document_id"] != candidate["fragment_id"]
 
 
 def test_ollama_ocr_requests_model_unload(monkeypatch, tmp_path):

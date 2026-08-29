@@ -26,6 +26,7 @@ from typing_extensions import TypedDict
 
 from src.custodian_backend import CustodianBackend, CustodianClient, CustodianError
 from src.llm import get_coding_llm
+from src.phase5_tools import CODER_PHASE5_TOOLS
 from src.runtime_authority import RuntimeIdentityError, authoritative_thread_id
 from src.workspace_policy import (
     ExecutionManifest,
@@ -359,7 +360,9 @@ def _build_deep_agent(
     autonomous_mode = mode == "autonomous"
     mutable_mode = approval_mode or autonomous_mode
     backend = CustodianBackend(str(workspace), read_only=not mutable_mode)
-    tools = create_custodian_boundary_tools(workspace) if mutable_mode else []
+    # Keep every existing Custodian boundary tool and add only delegated Store tools.
+    tools = list(create_custodian_boundary_tools(workspace) if mutable_mode else [])
+    tools.extend(CODER_PHASE5_TOOLS)
     interrupt_on = (
         _LOCAL_APPROVAL_INTERRUPT_ON
         if approval_mode

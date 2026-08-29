@@ -6,10 +6,11 @@ import os
 from typing import Any
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from langgraph_sdk import get_client
 from psycopg.rows import dict_row
 
+from src.installation_auth import installation_identity
 from src.session_catalog import SCHEMA, ensure_catalog_schema, query_sessions
 from src.session_catalog_models import (
     ModelPreferenceInput,
@@ -21,13 +22,31 @@ from src.session_catalog_models import (
     SessionQuery,
 )
 
-router = APIRouter(prefix="/session-catalog", tags=["session-catalog"])
+
+def _owner(claimed: str | None = None) -> str:
+    """Return authenticated installation owner and reject legacy impersonation."""
+    owner = str(installation_identity()["owner_id"])
+    if claimed is not None and claimed != owner:
+        raise HTTPException(403, "Owner scope does not match the authenticated installation.")
+    return owner
+
+
+def _reject_query_owner_override(owner_id: str | None = Query(default=None)) -> None:
+    if owner_id is not None:
+        _owner(owner_id)
+
+
+router = APIRouter(
+    prefix="/session-catalog",
+    tags=["session-catalog"],
+    dependencies=[Depends(_reject_query_owner_override)],
+)
 
 
 @router.get("/preferences/model")
 async def get_model_preference(owner_id: str = Query(min_length=1, max_length=128)):
     client = _agent_server_client()
-    item = await client.store.get_item((owner_id, "preferences"), "model-selection")
+    item = await client.store.get_item((_owner(owner_id), "preferences"), "model-selection")
     value = item.get("value", {}) if item else {}
     return {"model_id": value.get("model_id")}
 
@@ -36,7 +55,7 @@ async def get_model_preference(owner_id: str = Query(min_length=1, max_length=12
 async def put_model_preference(body: ModelPreferenceInput):
     client = _agent_server_client()
     await client.store.put_item(
-        (body.owner_id, "preferences"),
+        (_owner(body.owner_id), "preferences"),
         "model-selection",
         {"model_id": body.model_id},
         index=False,
@@ -51,7 +70,7 @@ async def open_session(body: SessionOpenInput) -> dict[str, Any]:
     client = _agent_server_client()
     thread = await client.threads.create(
         graph_id="chat_ui",
-        metadata={"graph_id": "chat_ui", "owner_id": body.owner_id},
+        metadata={"graph_id": "chat_ui", "owner_id": _owner(body.owner_id)},
     )
     thread_id = thread["thread_id"]
     await client.runs.wait(
@@ -60,7 +79,7 @@ async def open_session(body: SessionOpenInput) -> dict[str, Any]:
         input={
             "messages": [],
             "session_event": "open",
-            "user_identity": body.owner_id,
+            "user_identity": _owner(body.owner_id),
             "target_agent": "jasper",
         },
     )
@@ -76,13 +95,19 @@ def _database_uri() -> str:
 
 def _agent_server_client():
     port = os.getenv("PORT", "8000")
-    return get_client(url=f"http://127.0.0.1:{port}")
+    api_key = os.getenv("INSTALLATION_OWNER_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, "Installation authentication is unavailable.")
+    return get_client(
+        url=f"http://127.0.0.1:{port}", headers={"X-Api-Key": api_key}
+    )
 
 
 @router.post("/query")
 async def session_catalog_query(query: SessionQuery) -> dict[str, Any]:
     """Validate and compile a typed rule tree; browser SQL is never accepted."""
 
+    _owner(query.owner_id)
     try:
         result = await query_sessions(query)
     except ValueError as exc:
@@ -172,16 +197,16 @@ async def rename_session_artifact(
     if body.title.strip() != body.title or not body.title.strip():
         raise HTTPException(422, "Board title must not be empty.")
     client = _agent_server_client()
-    item = await client.store.get_item((body.owner_id, "session-artifacts", session_id), artifact_id)
+    item = await client.store.get_item((_owner(body.owner_id), "session-artifacts", session_id), artifact_id)
     if not item:
         raise HTTPException(404, "Visualization board not found.")
     value = dict(item.get("value", {}))
     value["title"] = body.title
     await client.store.put_item(
-        (body.owner_id, "session-artifacts", session_id), artifact_id, value, index=False
+        (_owner(body.owner_id), "session-artifacts", session_id), artifact_id, value, index=False
     )
     await ensure_catalog_schema()
-    async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:
+    async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:  # noqa: SIM117
         async with connection.cursor() as cursor:
             await cursor.execute(
                 f"""UPDATE {SCHEMA}.artifacts a SET title = %s,
@@ -189,7 +214,7 @@ async def rename_session_artifact(
                     FROM {SCHEMA}.session_artifact_links sal
                     WHERE sal.session_id = %s AND sal.artifact_id = a.artifact_id
                       AND sal.owner_id = %s AND a.owner_id = %s AND a.artifact_id = %s""",
-                (body.title, body.title, session_id, body.owner_id, body.owner_id, artifact_id),
+                (body.title, body.title, session_id, _owner(body.owner_id), _owner(body.owner_id), artifact_id),
             )
     return {"artifact_id": artifact_id, "title": body.title}
 
@@ -205,7 +230,7 @@ async def delete_session_artifact(
         raise HTTPException(404, "Visualization board not found.")
     await client.store.delete_item((owner_id, "session-artifacts", session_id), artifact_id)
     await ensure_catalog_schema()
-    async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:
+    async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:  # noqa: SIM117
         async with connection.cursor() as cursor:
             await cursor.execute(
                 f"DELETE FROM {SCHEMA}.session_artifact_links WHERE session_id = %s AND artifact_id = %s AND owner_id = %s",
@@ -224,7 +249,7 @@ async def delete_session_artifact(
 @router.post("/{session_id}/close")
 async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, Any]:
     client = _agent_server_client()
-    item = await client.store.get_item((body.owner_id, "sessions"), session_id)
+    item = await client.store.get_item((_owner(body.owner_id), "sessions"), session_id)
     if not item:
         raise HTTPException(404, "Session not found.")
     value = dict(item.get("value", {}))
@@ -239,7 +264,7 @@ async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, A
         }
     )
     await client.store.put_item(
-        (body.owner_id, "sessions"), session_id, value, index=False
+        (_owner(body.owner_id), "sessions"), session_id, value, index=False
     )
 
     await ensure_catalog_schema()
@@ -256,7 +281,7 @@ async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, A
                 WHERE session_id = %s AND owner_id = %s
                 RETURNING *
                 """,
-                (body.summary, body.summary, session_id, body.owner_id),
+                (body.summary, body.summary, session_id, _owner(body.owner_id)),
             )
             session = await cursor.fetchone()
             if not session:
@@ -265,7 +290,7 @@ async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, A
                 await cursor.execute(
                     f"DELETE FROM {SCHEMA}.tent_poles "
                     "WHERE session_id = %s AND owner_id = %s",
-                    (session_id, body.owner_id),
+                    (session_id, _owner(body.owner_id)),
                 )
                 await cursor.executemany(
                     f"""
@@ -274,7 +299,7 @@ async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, A
                     ) VALUES (%s, %s, %s, %s)
                     """,
                     [
-                        (body.owner_id, session_id, index, value)
+                        (_owner(body.owner_id), session_id, index, value)
                         for index, value in enumerate(body.tent_poles)
                     ],
                 )
@@ -291,7 +316,7 @@ async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, A
                         human_locked = true
                     """,
                     (
-                        body.owner_id,
+                        _owner(body.owner_id),
                         session_id,
                         session["summary_version"],
                         session["short_description"],
@@ -299,7 +324,7 @@ async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, A
                     ),
                 )
     client = _agent_server_client()
-    item = await client.store.get_item((body.owner_id, "sessions"), session_id)
+    item = await client.store.get_item((_owner(body.owner_id), "sessions"), session_id)
     value = dict(item.get("value", {})) if item else {}
     value.update(
         {
@@ -311,7 +336,7 @@ async def close_session(session_id: str, body: SessionCloseInput) -> dict[str, A
         }
     )
     await client.store.put_item(
-        (body.owner_id, "sessions"), session_id, value, index=False
+        (_owner(body.owner_id), "sessions"), session_id, value, index=False
     )
     return {"session_id": session_id, "status": "closed"}
 
@@ -321,7 +346,7 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
     """Fork a settled Agent Server thread; pending actions are never copied."""
 
     client = _agent_server_client()
-    parent_item = await client.store.get_item((body.owner_id, "sessions"), session_id)
+    parent_item = await client.store.get_item((_owner(body.owner_id), "sessions"), session_id)
     if not parent_item:
         raise HTTPException(404, "Session not found.")
     parent_value = dict(parent_item.get("value", {}))
@@ -336,7 +361,7 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
 
     metadata = {
         "graph_id": "chat_ui",
-        "owner_id": body.owner_id,
+        "owner_id": _owner(body.owner_id),
         "parent_thread_id": source_thread_id,
         "parent_session_id": session_id,
     }
@@ -371,7 +396,7 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
         "parent_thread_id": source_thread_id,
     }
     await client.store.put_item(
-        (body.owner_id, "sessions"), new_thread_id, fork_value, index=False
+        (_owner(body.owner_id), "sessions"), new_thread_id, fork_value, index=False
     )
 
     await ensure_catalog_schema()
@@ -388,7 +413,7 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
                 (
                     new_thread_id,
                     new_thread_id,
-                    body.owner_id,
+                    _owner(body.owner_id),
                     session_id,
                     source_thread_id,
                     str(parent_value.get("short_description", "Untitled session")),
@@ -405,7 +430,7 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
                 FROM {SCHEMA}.workspace_session_links
                 WHERE session_id = %s AND owner_id = %s
                 """,
-                (new_thread_id, session_id, body.owner_id),
+                (new_thread_id, session_id, _owner(body.owner_id)),
             )
             await cursor.execute(
                 f"""
@@ -418,7 +443,7 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
                 FROM {SCHEMA}.agent_participations
                 WHERE session_id = %s AND owner_id = %s
                 """,
-                (new_thread_id, session_id, body.owner_id),
+                (new_thread_id, session_id, _owner(body.owner_id)),
             )
             await cursor.execute(
                 f"""
@@ -429,7 +454,7 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
                 FROM {SCHEMA}.session_artifact_links
                 WHERE session_id = %s AND owner_id = %s
                 """,
-                (new_thread_id, session_id, body.owner_id),
+                (new_thread_id, session_id, _owner(body.owner_id)),
             )
 
     return {
@@ -452,11 +477,11 @@ async def list_saved_views(
 
 @router.put("/views/saved/{view_id}")
 async def save_view(view_id: str, body: SavedViewInput) -> dict[str, Any]:
-    if view_id != body.view_id or body.query.owner_id != body.owner_id:
+    if view_id != body.view_id or body.query.owner_id != _owner(body.owner_id):
         raise HTTPException(422, "Saved-view ownership or identity does not match.")
     value = body.model_dump(mode="json", by_alias=True)
     await _agent_server_client().store.put_item(
-        (body.owner_id, "session-library-views"), view_id, value, index=False
+        (_owner(body.owner_id), "session-library-views"), view_id, value, index=False
     )
     return value
 

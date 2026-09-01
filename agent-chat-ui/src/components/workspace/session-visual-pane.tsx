@@ -28,12 +28,15 @@ import {
 import { ConceptMapRenderer } from "./concept-map-renderer";
 import { SessionLibrary } from "./session-library";
 import { SessionSources } from "./session-sources";
+import { SessionDocuments } from "./session-documents";
 import { setWorkspaceModeForThread } from "./use-workspace-preferences";
 
 const viewParser = parseAsStringLiteral([
   "library",
   "session",
   "sources",
+  "installation-documents",
+  "session-documents",
 ] as const);
 const SESSION_REMINDER_MINUTES = Number(
   process.env.NEXT_PUBLIC_SESSION_REMINDER_MINUTES ?? 90,
@@ -178,6 +181,22 @@ export function SessionVisualPane({
             void setSelectedArtifactId(null);
             void setView("session");
           }}
+        />
+      </div>
+    );
+  }
+
+  if (
+    effectiveView === "installation-documents" ||
+    effectiveView === "session-documents"
+  ) {
+    return (
+      <div className="bg-background h-full min-w-0 overflow-hidden border-l">
+        <SessionDocuments
+          apiUrl={apiUrl}
+          authScheme={authScheme}
+          threadId={threadId}
+          view={effectiveView}
         />
       </div>
     );

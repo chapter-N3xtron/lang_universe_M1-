@@ -447,6 +447,7 @@ function ChatInputImpl({
                         <Select
                           value={effectiveSelectedModel}
                           onValueChange={(value) => {
+                            if (!value) return;
                             setSelectedModel(value);
                             void saveModelPreference(
                               apiUrl,

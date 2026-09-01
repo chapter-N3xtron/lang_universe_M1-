@@ -72,7 +72,7 @@ Each memory record SHALL have an immutable record identifier, schema version, te
 - **THEN** the system applies the hard maximum or rejects the request and never performs an unbounded return
 
 ### Requirement: Memory creation is explicit and checkpoints are not memory
-The system SHALL create or update cross-session memory only through an authorized memory write. It MUST NOT treat checkpoint state, thread history, messages, tool state, or session persistence as cross-session memory merely because those records are durable, and it MUST NOT automatically promote checkpoint contents into memory.
+The system SHALL create or update cross-session memory only through an authorized memory write. It MUST NOT treat checkpoint state, thread history, messages, tool state, session persistence, or a thread's bounded stable-document-ID links as cross-session memory merely because those records are durable, and it MUST NOT automatically promote checkpoint contents or session-document references into memory. The implementation uses ordinary documented Store operations and MUST NOT claim compare-and-swap, multi-key transaction, or conflicting-write safety that the Store does not provide.
 
 #### Scenario: Session checkpoint is saved
 - **WHEN** Agent Server persists a checkpoint or thread state
@@ -81,6 +81,10 @@ The system SHALL create or update cross-session memory only through an authorize
 #### Scenario: Memory references a session
 - **WHEN** an authorized memory record is derived from a session
 - **THEN** provenance may reference that session without copying checkpoint execution state into the memory layer
+
+#### Scenario: Thread restores linked document IDs
+- **WHEN** a checkpointed thread restores its bounded Session Documents references
+- **THEN** those thread-scoped IDs remain execution state and no cross-session memory record or document-content copy is created
 
 ### Requirement: Initial memory retrieval makes no semantic-search claim
 The initial system SHALL support only exact-key lookup, authorized metadata filtering, and bounded lexical matching for memory retrieval. Responses SHALL identify the match mode used and MUST NOT label lexical or metadata results as vector, embedding, conceptual, ontology-based, or semantic search.
@@ -94,15 +98,23 @@ The initial system SHALL support only exact-key lookup, authorized metadata filt
 - **THEN** the system returns an unsupported-capability response rather than presenting lexical results as semantic
 
 ### Requirement: Retention and deletion are enforceable
-The system SHALL retain memory until owner deletion; a category limit requires an explicit owner decision and never automatic eviction. Deleted records SHALL be excluded from normal reads immediately. An authorized delete SHALL be scoped to an exact verified tenant, trust domain, owner, and record identifier, be idempotent, and produce a non-content audit event. Only the exact owner SHALL be able to restore the exact item for exactly seven days; after seven days content SHALL be permanently purged with no restore. Owner-authorized Permanently Delete SHALL purge the exact deleted record immediately.
+The system SHALL retain active memory without a default TTL until owner deletion; a category limit requires an explicit owner decision and never automatic eviction. Each memory ID SHALL have exactly one current Store item in its server-derived kind namespace, with no revision items, materialized head copy, or memory operation manifest. Delete SHALL overwrite that item as deleted, apply a per-item native Store TTL, and exclude it from all normal reads immediately. Only the exact owner SHALL be able to restore the exact item through the inclusive logical cutoff at `deleted_at + 7 days`; restore SHALL rewrite active state and clear its TTL. After that instant restore SHALL be denied even if asynchronous native sweeping has not physically removed the item. Owner-authorized Permanently Delete SHALL physically delete the exact item immediately. Native sweeping is best-effort, so logical expiry and physical deletion time are distinct. Overlapping writes or lifecycle calls are last-write-wins Store operations without CAS, multi-key transaction, or conflicting-write guarantee; revision and stale-input checks are non-atomic validation only.
 
-#### Scenario: Record expires
-- **WHEN** a record passes its approved expiry
-- **THEN** the system no longer returns it and schedules or performs purge according to policy
+#### Scenario: Deleted record passes its logical restore cutoff
+- **WHEN** the current time is later than `deleted_at + 7 days`
+- **THEN** normal reads exclude the record and restore is denied regardless of whether the native TTL sweeper has physically removed it
+
+#### Scenario: Owner restores at the boundary
+- **WHEN** the exact owner restores at or before `deleted_at + 7 days`
+- **THEN** the system rewrites the one item as active and clears its TTL
 
 #### Scenario: Owner deletes a personal record
 - **WHEN** the verified personal owner with `delete` permission requests deletion by exact record identifier
-- **THEN** the system makes the record unavailable, records a sanitized deletion event, and applies the approved purge policy
+- **THEN** the system overwrites the one item as deleted, excludes it immediately, records a sanitized deletion event, and applies its per-item TTL
+
+#### Scenario: Owner permanently deletes a personal record
+- **WHEN** the verified owner requests permanent deletion of an exact deleted record
+- **THEN** the system physically deletes that exact Store item without retaining a memory tombstone
 
 #### Scenario: Delete targets another scope
 - **WHEN** a delete request targets a different tenant, trust domain, or owner than the verified authorized scope
@@ -120,7 +132,7 @@ The system SHALL keep database, Agent Server Store, and other persistence creden
 - **THEN** the returned error and audit telemetry contain sanitized identifiers and failure classes but no credential or connection-secret values
 
 ### Requirement: Access decisions are auditable without duplicating content
-The system SHALL emit bounded audit events for allowed and denied memory operations containing time, verified principal or service identifier, tenant, trust domain, owner scope, operation, policy decision, reason class, correlation identifier, and affected record count. Audit events MUST NOT duplicate memory content, queries, credentials, or internal reasoning. They SHALL be retained for 90 days and SHALL be accessible only to the installation owner.
+The system SHALL emit bounded audit events for allowed and denied memory operations containing time, verified principal or service identifier, tenant, trust domain, owner scope, operation, policy decision, reason class, correlation identifier, and affected record count. Audit events MUST NOT duplicate memory content, queries, credentials, or internal reasoning. They SHALL carry a per-item native Store TTL, remain logically readable through the exact 90-day boundary, be excluded immediately after that boundary while awaiting best-effort physical sweeping, and be accessible only to the installation owner. No application audit sweeper SHALL be added.
 
 #### Scenario: Access is denied
 - **WHEN** a memory request fails authorization

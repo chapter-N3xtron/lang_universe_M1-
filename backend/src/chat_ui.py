@@ -9,6 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.ui import AnyUIMessage, ui_message_reducer
 from langgraph.runtime import Runtime
+from langgraph.store.base import BaseStore
 from langgraph.types import Command, interrupt
 
 from src.agent_utils import get_conversation_history, get_user_query
@@ -18,10 +19,14 @@ from src.librarian_agent import librarian_agent
 from src.llm import get_llm
 from src.magic_coder_graph import create_magic_coder_graph
 from src.ocr_agent import run_ocr, specialist_message
-from src.phase5_capabilities import Authority
-from src.phase5_ingestion import (
-    DocumentationIngestionRequest,
-    supervisor_ingest_document,
+from src.phase5_capabilities import (
+    CANONICAL_DOCUMENTATION_CORPUS,
+    Authority,
+    StoreCapabilities,
+)
+from src.phase5_thread_state import (
+    normalize_session_document_ids,
+    replace_session_document_ids,
 )
 from src.runtime_authority import authoritative_thread_id
 from src.session_catalog import record_session_projection
@@ -67,7 +72,9 @@ class State(TypedDict):
     ocr_task: str
     ocr_document_ref: str
     ocr_output_format: str
-    documentation_ingestion_request: dict
+    session_document_link_action: dict
+    session_document_link_result: dict
+    session_document_ids: Annotated[list[str], replace_session_document_ids]
     session_evidence: Annotated[list[dict], operator.add]
     ui: Annotated[list[AnyUIMessage], ui_message_reducer]
 
@@ -155,6 +162,7 @@ def supervisor_node(
     Command[
         Literal[
             "session_opening",
+            "mutate_session_document_link",
             "approval",
             "prepare_jasper",
             "librarian",
@@ -164,6 +172,9 @@ def supervisor_node(
     ]
     | dict
 ):
+    if state.get("session_document_link_action", {}) != {}:
+        return Command(goto="mutate_session_document_link")
+
     todos_data = _load_todos()
     messages = state["messages"]
     history = get_conversation_history(messages)
@@ -418,6 +429,9 @@ def create_chat_ui():
             or "anonymous",
             "coding_session_id": thread_id,
             "session_evidence": state.get("session_evidence", []),
+            "session_document_ids": normalize_session_document_ids(
+                state.get("session_document_ids", [])
+            ),
         }
         if manifest is not None:
             request["execution_manifest"] = manifest
@@ -429,6 +443,10 @@ def create_chat_ui():
         result = dict(state.get("jasper_result") or {})
         route = result.pop("route", "record_session")
         messages = result.pop("messages", [])
+        if "session_document_ids" in result:
+            result["session_document_ids"] = normalize_session_document_ids(
+                result["session_document_ids"]
+            )
         update = {
             **result,
             "messages": messages,
@@ -471,36 +489,11 @@ def create_chat_ui():
                     output_format,
                 )
 
-            ingestion = state.get("documentation_ingestion_request")
-            if ingestion:
-                identity = installation_identity()
-                result = await supervisor_ingest_document(
-                    DocumentationIngestionRequest(**ingestion),
-                    store=runtime.store,
-                    installation_authority=Authority(
-                        str(identity["tenant_id"]),
-                        str(identity["owner_id"]),
-                        principal_id="owner",
-                        corpus_read_grants=frozenset({"installation-docs"}),
-                    ),
-                    ocr=execute_ocr,
-                    selected_workspace=state.get("workspace"),
-                    current_evidence=tuple(
-                        str(item.get("locator"))
-                        for item in state.get("session_evidence", [])
-                        if isinstance(item, dict) and item.get("locator")
-                    ),
-                )
-            else:
-                result = await execute_ocr(state.get("ocr_document_ref", ""))
+            result = await execute_ocr(state.get("ocr_document_ref", ""))
             message = {
                 "role": "assistant",
                 "name": "ocr",
-                "content": (
-                    f"Documentation ingestion completed: {result['id']}"
-                    if ingestion
-                    else specialist_message(result, output_format)
-                ),
+                "content": specialist_message(result, output_format),
             }
         except Exception:
             message = {
@@ -514,7 +507,6 @@ def create_chat_ui():
                 "messages": [message],
                 "ocr_task": "",
                 "ocr_document_ref": "",
-                "documentation_ingestion_request": {},
             },
         )
 
@@ -530,6 +522,90 @@ def create_chat_ui():
         )
         new_messages = result["messages"][input_count:]
         return {"messages": _base_messages_to_dicts(new_messages)}
+
+    async def mutate_session_document_link(
+        state: State, config: RunnableConfig, runtime: Runtime
+    ) -> dict:
+        """Apply one owner-requested link mutation to this checkpointed thread."""
+
+        failure = {
+            "ok": False,
+            "status": "denied",
+            "error": "link_mutation_failed",
+        }
+        update: dict = {
+            "session_document_link_action": {},
+            "session_document_link_result": failure,
+        }
+        try:
+            request = state.get("session_document_link_action")
+            if type(request) is not dict or set(request) != {
+                "action",
+                "document_id",
+            }:
+                return update
+            action = request["action"]
+            if type(action) is not str or action not in {"add", "remove"}:
+                return update
+            document_id = normalize_session_document_ids([request["document_id"]])[0]
+
+            runtime_thread_id = (
+                runtime.execution_info.thread_id if runtime.execution_info else None
+            )
+            authoritative_thread_id(
+                runtime_thread_id,
+                config,
+                operation="session_document_link_mutation",
+            )
+            identity = installation_identity()
+            user = runtime.server_info.user if runtime.server_info is not None else None
+            if (
+                user is None
+                or user.is_authenticated is not True
+                or type(user.identity) is not str
+                or user.identity != identity["identity"]
+            ):
+                return update
+            authority = Authority.from_verified_context(
+                tenant_id=str(identity["tenant_id"]),
+                owner_id=str(identity["owner_id"]),
+                principal_id="owner",
+                server_verified=True,
+            )
+
+            current = normalize_session_document_ids(
+                state.get("session_document_ids", [])
+            )
+            if action == "add":
+                if not isinstance(runtime.store, BaseStore):
+                    return update
+                records = await StoreCapabilities(
+                    runtime.store, authority
+                ).read_documents(
+                    corpus=CANONICAL_DOCUMENTATION_CORPUS,
+                    mode="exact",
+                    key=document_id,
+                    limit=1,
+                    record_type="document",
+                )
+                if not records:
+                    return update
+                replacement = normalize_session_document_ids([*current, document_id])
+            else:
+                replacement = normalize_session_document_ids(
+                    [item for item in current if item != document_id]
+                )
+
+            update["session_document_ids"] = replacement
+            update["session_document_link_result"] = {
+                "ok": True,
+                "status": "complete",
+                "action": action,
+                "changed": replacement != current,
+            }
+            return update
+        except Exception:
+            return update
 
     async def record_session(
         state: State, config: RunnableConfig, runtime: Runtime
@@ -571,6 +647,7 @@ def create_chat_ui():
     graph.add_node("librarian", run_librarian)
     graph.add_node("ocr", run_ocr_node)
     graph.add_node("magic-coder", run_magic_coder_node)
+    graph.add_node("mutate_session_document_link", mutate_session_document_link)
     graph.add_node("record_session", record_session)
 
     graph.add_edge(START, "supervisor")
@@ -578,6 +655,7 @@ def create_chat_ui():
     graph.add_edge("jasper", "route_jasper_result")
 
     graph.add_edge("magic-coder", "record_session")
+    graph.add_edge("mutate_session_document_link", END)
     graph.add_edge("record_session", END)
 
     return graph

@@ -1,6 +1,8 @@
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
+from src import session_catalog_routes
 from src.session_catalog import (
     DDL,
     _decode_cursor,
@@ -10,6 +12,32 @@ from src.session_catalog import (
     query_sessions,
 )
 from src.session_catalog_models import SessionQuery
+from src.session_catalog_routes import _owner
+
+
+def test_legacy_catalog_owner_remains_behind_authenticated_installation():
+    assert _owner() == "local-owner-v1"
+    assert _owner("local-owner-v1") == "local-owner-v1"
+    with pytest.raises(HTTPException) as raised:
+        _owner("other")
+    assert raised.value.status_code == 403
+
+
+def test_internal_client_preserves_installation_key_over_langsmith_key(monkeypatch):
+    captured = {}
+
+    def client(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setenv("INSTALLATION_OWNER_API_KEY", "installation-key")
+    monkeypatch.setattr(session_catalog_routes, "get_client", client)
+    session_catalog_routes._agent_server_client()
+    assert captured == {
+        "url": "http://127.0.0.1:8000",
+        "api_key": None,
+        "headers": {"X-Api-Key": "installation-key"},
+    }
 
 
 def test_nested_filter_tree_compiles_to_parameterized_sql():

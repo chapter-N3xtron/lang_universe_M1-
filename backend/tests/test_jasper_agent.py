@@ -627,6 +627,7 @@ def test_jasper_delegates_web_access_to_librarian_without_direct_web_tools():
         "jasper_memory_read",
         "jasper_memory_delete",
         "jasper_documentation_read",
+        "jasper_documentation_fragment_use",
     ]
 
 
@@ -656,6 +657,7 @@ def test_jasper_deep_agent_exposes_documented_tools_and_task(tmp_path):
         "jasper_memory_read",
         "jasper_memory_delete",
         "jasper_documentation_read",
+        "jasper_documentation_fragment_use",
     }
     assert tool_names.isdisjoint({"web_search", "read_url", "ingest_uploaded_sources"})
 

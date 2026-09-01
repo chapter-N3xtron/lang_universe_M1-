@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
 import {
   BookOpen,
+  FileText,
+  FolderOpen,
   GitFork,
   Library,
   List,
@@ -38,6 +40,8 @@ const viewParser = parseAsStringLiteral([
   "library",
   "session",
   "sources",
+  "installation-documents",
+  "session-documents",
 ] as const);
 
 type SessionWorkspaceTopBarProps = {
@@ -108,6 +112,14 @@ export function SessionWorkspaceTopBar({
     setCloseOpen(true);
   };
   const showingSources = view === "sources";
+  const showingInstallationDocuments = view === "installation-documents";
+  const showingSessionDocuments = view === "session-documents";
+  const showDocumentView = (
+    nextView: "installation-documents" | "session-documents",
+  ) => {
+    void setView(nextView);
+    setWorkspaceModeForThread(threadId ?? "", "visual");
+  };
 
   return (
     <header className="bg-background flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 lg:flex-nowrap">
@@ -126,6 +138,26 @@ export function SessionWorkspaceTopBar({
       >
         <BookOpen className="size-4" /> {showingSources ? "Visuals" : "Sources"}
       </Button>
+      <nav
+        className="flex shrink-0 items-center rounded-md border p-0.5"
+        aria-label="Document views"
+      >
+        <Button
+          size="sm"
+          variant={showingInstallationDocuments ? "secondary" : "ghost"}
+          onClick={() => showDocumentView("installation-documents")}
+        >
+          <FolderOpen className="size-4" /> Installation Library
+        </Button>
+        <Button
+          size="sm"
+          variant={showingSessionDocuments ? "secondary" : "ghost"}
+          disabled={!threadId}
+          onClick={() => showDocumentView("session-documents")}
+        >
+          <FileText className="size-4" /> Session Documents
+        </Button>
+      </nav>
       <Button
         size="sm"
         variant="outline"

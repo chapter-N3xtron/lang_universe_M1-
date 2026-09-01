@@ -1,16 +1,16 @@
-r"""Phase 5 trusted capabilities over the public Agent Server Store API.
+r"""Phase 5 trusted capabilities over the Agent Server-injected BaseStore.
 
-Lexical matching is deliberately non-semantic: Unicode text is NFKC/casefolded,
-words are ``\w+`` tokens, score is the number of distinct query tokens present,
-and ties are ordered by record id. Store values are immutable revisions; a head
-is resolved deterministically from revision records, so no Store CAS is assumed.
+Documentation content retrieval delegates semantic ranking to the configured Store
+index. Memory lexical matching remains deliberately non-semantic: Unicode text is
+NFKC/casefolded, words are ``\w+`` tokens, score is the number of distinct query
+tokens present, and ties are ordered by record id. Memory has one current item per
+ID. Ordinary Store writes are last-write-wins; no CAS or multi-key transaction is
+assumed.
 """
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import json
 import re
 import unicodedata
@@ -50,13 +50,14 @@ class AsyncStore(Protocol):
         offset: int = 0,
     ) -> list[Item]: ...
 
+
 MEMORY_KINDS = frozenset(
     {
-        "user-preferences",
-        "user-provided-facts",
-        "project-decisions",
-        "task-outcomes",
-        "reusable-instructions",
+        "user preferences",
+        "user-provided facts",
+        "project decisions",
+        "task outcomes",
+        "reusable instructions",
     }
 )
 MEMORY_OPERATIONS = frozenset(
@@ -70,9 +71,12 @@ MAX_QUERY_BYTES = 4 * 1024
 MAX_RESPONSE_BYTES = 256 * 1024
 MAX_BATCH = 10
 MAX_CANDIDATES = 1000
+_CAPACITY_PAGE_SIZE = 1000
 MAX_RESULTS = 20
-MAINTENANCE_HARD_CAP = 1000
 MAX_FILTERS = 8
+CANONICAL_DOCUMENTATION_CORPUS = "installation-docs"
+MAX_DOCUMENT_TAGS = 32
+MAX_DOCUMENT_TAG_BYTES = 128
 _PHASE5_AUDIT_OPERATIONS = frozenset(
     {
         "read",
@@ -91,6 +95,14 @@ _PHASE5_REASON_CLASSES = frozenset({"policy", "validation-or-backend", "tool-den
 MAX_FILTER_VALUE_BYTES = 1024
 RESTORE_WINDOW = timedelta(days=7)
 AUDIT_RETENTION = timedelta(days=90)
+# Native expiration is best-effort and sweeps asynchronously. One configured sweep
+# interval of padding preserves the inclusive logical boundary; reads enforce the
+# exact policy cutoff even while an expired item awaits physical deletion.
+TTL_SWEEP_INTERVAL_MINUTES = 60
+DELETED_MEMORY_TTL_MINUTES = (
+    RESTORE_WINDOW.total_seconds() / 60 + TTL_SWEEP_INTERVAL_MINUTES
+)
+AUDIT_TTL_MINUTES = AUDIT_RETENTION.total_seconds() / 60 + TTL_SWEEP_INTERVAL_MINUTES
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _WORD = re.compile(r"\w+", re.UNICODE)
 PROHIBITED_CONTENT_CLASSES = frozenset(
@@ -145,14 +157,9 @@ class CapabilityError(ValueError):
 @dataclass(frozen=True)
 class _MemoryWritePlan:
     kind: str
-    operation_id: str
-    operation_key: str
-    request_digest: str
     memory_id: str
     envelope: dict[str, Any]
-    write_revision: bool
-    write_head: bool
-    write_operation: bool
+    create: bool
 
 
 @dataclass(frozen=True)
@@ -203,7 +210,7 @@ class Authority:
         principal = principal_id.casefold()
         if principal in {"owner", owner_id.casefold()}:
             memory = MEMORY_OPERATIONS
-            corpora = delegated_corpora or frozenset({"installation-docs"})
+            corpora = delegated_corpora or frozenset({CANONICAL_DOCUMENTATION_CORPUS})
             principal_id = "owner"
         elif principal in {"jasper", "coder", "librarian"}:
             allowed = frozenset({"read", "write", "delete"})
@@ -213,7 +220,7 @@ class Authority:
         elif principal == "ocr":
             if delegated_memory:
                 raise CapabilityError("OCR cannot receive memory grants")
-            memory, corpora = frozenset(), frozenset()
+            memory, corpora = frozenset(), delegated_corpora
         else:
             raise CapabilityError("Unknown principal")
         return cls(
@@ -240,6 +247,12 @@ class Authority:
             raise CapabilityError("OCR cannot receive memory grants")
         for corpus in self.corpus_read_grants:
             _identifier(corpus, "corpus grant")
+        if not self.corpus_read_grants <= {CANONICAL_DOCUMENTATION_CORPUS}:
+            raise CapabilityError("Unsupported corpus grant")
+        if self.delegation and not self.delegation.corpora <= {
+            CANONICAL_DOCUMENTATION_CORPUS
+        }:
+            raise CapabilityError("Unsupported corpus delegation")
 
 
 def _identifier(value: Any, label: str = "identifier") -> str:
@@ -248,35 +261,27 @@ def _identifier(value: Any, label: str = "identifier") -> str:
     return value
 
 
-def memory_namespace(
-    auth: Authority, kind: str, record: str = "head", record_id: str | None = None
-) -> tuple[str, ...]:
+def memory_namespace(auth: Authority, kind: str) -> tuple[str, ...]:
+    """Return the sole server-derived namespace for current items of one kind."""
     if type(kind) is not str or kind not in MEMORY_KINDS:
         raise CapabilityError("Unsupported memory kind")
-    if record not in {"head", "revision", "operation"}:
-        raise CapabilityError("Invalid memory scope")
-    namespace = (
+    return (
         "app",
         "v1",
         "cross-session-memory",
         f"tenant:{auth.tenant_id}",
         f"trust:{auth.trust_domain}",
         f"owner:person:{auth.owner_id}",
-        f"kind:{kind}",
-        f"record:{record}",
+        f"kind:{kind.replace(' ', '-')}",
     )
-    if record == "revision":
-        return namespace + (f"id:{_identifier(record_id, 'memory id')}",)
-    if record_id is not None:
-        raise CapabilityError("Record id is only valid for revisions")
-    return namespace
 
 
 def documentation_namespace(
     auth: Authority, corpus: str, record: str = "fragment"
 ) -> tuple[str, ...]:
-    _identifier(corpus, "corpus")
-    if record not in {"fragment", "document", "operation"}:
+    if corpus != CANONICAL_DOCUMENTATION_CORPUS:
+        raise CapabilityError("Invalid documentation corpus")
+    if record not in {"fragment", "document"}:
         raise CapabilityError("Invalid documentation scope")
     return (
         "app",
@@ -305,56 +310,6 @@ def _canonical(value: Any) -> bytes:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
-
-
-def issue_token(
-    payload: dict[str, Any], secret: bytes, *, now: datetime, ttl_seconds: int = 300
-) -> str:
-    if (
-        type(payload) is not dict
-        or type(secret) is not bytes
-        or not secret
-        or type(ttl_seconds) is not int
-        or not 1 <= ttl_seconds <= 900
-    ):
-        raise CapabilityError("Invalid token policy")
-    body = {
-        **payload,
-        "iat": int(now.timestamp()),
-        "exp": int(now.timestamp()) + ttl_seconds,
-    }
-    encoded = base64.urlsafe_b64encode(_canonical(body)).rstrip(b"=")
-    return (
-        encoded
-        + b"."
-        + base64.urlsafe_b64encode(
-            hmac.new(secret, encoded, hashlib.sha256).digest()
-        ).rstrip(b"=")
-    ).decode("ascii")
-
-
-def verify_token(
-    token: str, secret: bytes, expected: dict[str, Any], *, now: datetime
-) -> dict[str, Any]:
-    try:
-        encoded, supplied = token.encode("ascii").split(b".", 1)
-        signature = base64.urlsafe_b64decode(supplied + b"=" * (-len(supplied) % 4))
-        body = json.loads(
-            base64.urlsafe_b64decode(encoded + b"=" * (-len(encoded) % 4))
-        )
-    except (ValueError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
-        raise CapabilityError("Invalid capability token") from exc
-    if type(body) is not dict or not hmac.compare_digest(
-        signature, hmac.new(secret, encoded, hashlib.sha256).digest()
-    ):
-        raise CapabilityError("Invalid capability token")
-    if (
-        type(body.get("exp")) is not int
-        or body["exp"] < int(now.timestamp())
-        or any(body.get(k) != v for k, v in expected.items())
-    ):
-        raise CapabilityError("Expired or out-of-scope capability token")
-    return body
 
 
 def _value(item: Any) -> dict[str, Any]:
@@ -405,8 +360,25 @@ def _validate_string_map(value: Any, *, metadata: bool = False) -> dict[str, str
         if key.casefold() in _OBVIOUS_SECRET_FIELDS:
             raise CapabilityError("Obvious credential fields are prohibited")
     if metadata and len(_canonical(value)) > MAX_METADATA_BYTES:
-        raise CapabilityError("Memory metadata exceeds bounds")
+        raise CapabilityError("Metadata exceeds bounds")
     return value
+
+
+def _document_tags(value: Any) -> list[str]:
+    if type(value) not in {list, tuple} or len(value) > MAX_DOCUMENT_TAGS:
+        raise CapabilityError("Invalid document tags")
+    normalized: set[str] = set()
+    for tag in value:
+        if type(tag) is not str:
+            raise CapabilityError("Invalid document tags")
+        clean = " ".join(unicodedata.normalize("NFKC", tag).casefold().split())
+        if not clean or len(clean.encode("utf-8")) > MAX_DOCUMENT_TAG_BYTES:
+            raise CapabilityError("Invalid document tags")
+        normalized.add(clean)
+    tags = sorted(normalized)
+    if len(_canonical(tags)) > MAX_METADATA_BYTES:
+        raise CapabilityError("Document tags exceed bounds")
+    return tags
 
 
 def _validate_content(content: Any, content_class: Any) -> str:
@@ -440,6 +412,8 @@ class StoreCapabilities:
 
     def _permit(self, operation: str, corpus: str | None = None) -> None:
         if operation.startswith("documentation-retrieval:"):
+            if type(corpus) is not str:
+                raise CapabilityError("Capability denied")
             if (
                 operation == "documentation-retrieval:read"
                 and corpus in self.authority.corpus_read_grants
@@ -453,15 +427,25 @@ class StoreCapabilities:
         raise CapabilityError("Capability denied")
 
     async def _search(
-        self, namespace: tuple[str, ...], *, limit: int = MAX_CANDIDATES
+        self,
+        namespace: tuple[str, ...],
+        *,
+        limit: int = MAX_CANDIDATES,
+        query: str | None = None,
     ) -> list[dict[str, Any]]:
         if type(limit) is not int or not 1 <= limit <= MAX_CANDIDATES:
             raise CapabilityError("Candidate bound exceeded")
-        result = await self.store.asearch(namespace, limit=limit, offset=0)
+        if query is None:
+            result = await self.store.asearch(namespace, limit=limit, offset=0)
+        else:
+            result = await self.store.asearch(
+                namespace, query=query, limit=limit, offset=0
+            )
         if len(result) > limit:
             raise CapabilityError("Store exceeded candidate bound")
-        return [
-            {
+        rows = []
+        for item in result:
+            row = {
                 "_key": str(
                     item.get("key", item.get("id", ""))
                     if isinstance(item, dict)
@@ -469,26 +453,27 @@ class StoreCapabilities:
                 ),
                 **_value(item),
             }
-            for item in result
-        ]
+            if query is not None:
+                row["score"] = (
+                    item.get("score") if isinstance(item, dict) else item.score
+                )
+            rows.append(row)
+        return rows
 
-    async def _head(
+    async def _memory(
         self, namespace: tuple[str, ...], memory_id: str
     ) -> dict[str, Any] | None:
-        """Resolve an exact head without ever scanning revision history."""
         item = await self.store.aget(namespace, memory_id)
         if item is None:
             return None
         return {"_key": memory_id, **_value(item)}
 
-    async def _heads(self, namespace: tuple[str, ...]) -> dict[str, dict[str, Any]]:
-        """Scan only the bounded materialized-head namespace."""
+    async def _memories(self, namespace: tuple[str, ...]) -> dict[str, dict[str, Any]]:
         rows = await self._search(namespace)
         return {
             str(row["id"]): row
             for row in rows
-            if row.get("record_type") in {"memory-revision", "memory"}
-            and row.get("id")
+            if row.get("record_type") == "memory" and row.get("id")
         }
 
     async def _validated_write_plan(
@@ -502,26 +487,20 @@ class StoreCapabilities:
         content_class: str,
         timestamp: str,
     ) -> _MemoryWritePlan:
-        """Validate and inspect one write without mutating the Store."""
+        """Validate fully, then inspect the one deterministic item for a retry."""
         self._permit("write")
         namespace = memory_namespace(self.authority, kind)
         _validate_content(content, content_class)
         _validate_string_map(metadata, metadata=True)
         _validate_string_map(provenance)
-        required = {"source_type", "source_id", "actor"}
-        if not required <= set(provenance):
+        if not {"source_type", "source_id", "actor"} <= set(provenance):
             raise CapabilityError("Incomplete memory provenance")
-        # Creation method is a server fact, not a caller-selectable authority. Source time
-        # remains explicitly unknown when the creating caller has no verified value.
         provenance = {
             "source_time": "unknown",
             **provenance,
             "creation_method": "explicit-authorized-write",
         }
         _validate_string_map(provenance)
-        # Preserve bounded, non-secret source attributes rather than silently dropping
-        # provenance that a future schema can understand. Required authority still comes
-        # exclusively from Authority, never from this untrusted map.
         _identifier(operation_id, "operation id")
         request = {
             "kind": kind,
@@ -534,98 +513,108 @@ class StoreCapabilities:
         memory_id = hashlib.sha256(
             f"{self.authority.owner_id}:{kind}:{operation_id}".encode()
         ).hexdigest()
-        operation_key = f"operation:{operation_id}"
-        operation_namespace = memory_namespace(self.authority, kind, "operation")
-        revision_namespace = memory_namespace(
-            self.authority, kind, "revision", memory_id
-        )
-        manifest = _value(await self.store.aget(operation_namespace, operation_key))
-        if manifest and (
-            manifest.get("request_digest") != request_digest
-            or manifest.get("memory_id") != memory_id
-        ):
-            raise CapabilityError("Idempotency key conflict")
-        head = await self._head(namespace, memory_id)
-        revision = _value(await self.store.aget(revision_namespace, "revision:00000001"))
-        stored = ({k: v for k, v in head.items() if k != "_key"} if head else revision)
-        if stored:
-            stored_request = {key: stored.get(key) for key in request}
-            if _digest(stored_request) != request_digest:
+        current = await self._memory(namespace, memory_id)
+        if current:
+            if current.get("request_digest") != request_digest:
                 raise CapabilityError("Idempotency key conflict")
-            envelope = stored
-        else:
-            envelope = {
-                "schema_version": 1,
-                "record_type": "memory-revision",
-                "id": memory_id,
-                **request,
-                "tenant_id": self.authority.tenant_id,
-                "trust_domain": self.authority.trust_domain,
-                "owner_type": "person",
-                "owner_id": self.authority.owner_id,
-                "created_at": timestamp,
-                "updated_at": timestamp,
-                "lifecycle_state": "active",
-                "revision": 1,
-                "operation_id": operation_id,
-                "deleted_at": None,
-                "purged_at": None,
-            }
-        return _MemoryWritePlan(
-            kind, operation_id, operation_key, request_digest, memory_id, envelope,
-            not bool(revision), not bool(head), not bool(manifest),
-        )
+            return _MemoryWritePlan(
+                kind,
+                memory_id,
+                {key: value for key, value in current.items() if key != "_key"},
+                False,
+            )
+        envelope = {
+            "schema_version": 1,
+            "record_type": "memory",
+            "id": memory_id,
+            **request,
+            "request_digest": request_digest,
+            "tenant_id": self.authority.tenant_id,
+            "trust_domain": self.authority.trust_domain,
+            "owner_type": "person",
+            "owner_id": self.authority.owner_id,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "lifecycle_state": "active",
+            "revision": 1,
+            "operation_id": operation_id,
+            "deleted_at": None,
+        }
+        return _MemoryWritePlan(kind, memory_id, envelope, True)
 
     async def _check_write_capacity(self, plans: list[_MemoryWritePlan]) -> None:
         additions: dict[str, int] = {}
         for plan in plans:
-            if plan.write_head:
+            if plan.create:
                 additions[plan.kind] = additions.get(plan.kind, 0) + len(
                     _canonical(plan.envelope)
                 )
         for kind, addition in additions.items():
-            heads = await self._heads(memory_namespace(self.authority, kind))
-            used = sum(
-                len(_canonical({k: v for k, v in row.items() if k != "_key"}))
-                for row in heads.values()
-                if not row.get("purged_at")
-            )
-            if used + addition > MAX_KIND_BYTES:
-                raise CapabilityError("Memory kind capacity exceeded; no eviction performed")
+            if addition > MAX_KIND_BYTES:
+                raise CapabilityError(
+                    "Memory kind capacity exceeded; no eviction performed"
+                )
+            namespace = memory_namespace(self.authority, kind)
+            seen: set[str] = set()
+            used = 0
+            offset = 0
+            while True:
+                page = await self.store.asearch(
+                    namespace, limit=_CAPACITY_PAGE_SIZE, offset=offset
+                )
+                if len(page) > _CAPACITY_PAGE_SIZE:
+                    raise CapabilityError("Store exceeded capacity page bound")
+                for item in page:
+                    key = str(
+                        item.get("key", item.get("id", ""))
+                        if isinstance(item, dict)
+                        else item.key
+                    )
+                    if not key:
+                        raise CapabilityError("Memory capacity accounting failed")
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    used += len(_canonical(_value(item)))
+                    if used + addition > MAX_KIND_BYTES:
+                        raise CapabilityError(
+                            "Memory kind capacity exceeded; no eviction performed"
+                        )
+                if len(page) < _CAPACITY_PAGE_SIZE:
+                    break
+                offset += len(page)
 
     async def _execute_write_plan(self, plan: _MemoryWritePlan) -> dict[str, Any]:
-        # These deterministic writes reconcile a prior backend partial failure. They do
-        # not claim transaction atomicity from the Store backend.
-        if plan.write_revision:
-            await self.store.aput(
-                memory_namespace(self.authority, plan.kind, "revision", plan.memory_id),
-                "revision:00000001", plan.envelope, index=False,
-            )
-        if plan.write_head:
+        if plan.create:
             await self.store.aput(
                 memory_namespace(self.authority, plan.kind),
-                plan.memory_id, plan.envelope, index=False,
-            )
-        if plan.write_operation:
-            await self.store.aput(
-                memory_namespace(self.authority, plan.kind, "operation"),
-                plan.operation_key,
-                {"record_type": "operation", "memory_id": plan.memory_id,
-                 "request_digest": plan.request_digest},
+                plan.memory_id,
+                plan.envelope,
                 index=False,
+                ttl=None,
             )
-        if plan.write_revision or plan.write_head or plan.write_operation:
-            await self._audit("write", plan.memory_id, plan.operation_id, "allowed", 1)
+            await self._audit(
+                "write", plan.memory_id, plan.envelope["operation_id"], "allowed", 1
+            )
         return plan.envelope
 
     async def write_memory(
-        self, *, kind: str, content: str, metadata: dict[str, str],
-        provenance: dict[str, str], operation_id: str,
+        self,
+        *,
+        kind: str,
+        content: str,
+        metadata: dict[str, str],
+        provenance: dict[str, str],
+        operation_id: str,
         content_class: str = "ordinary",
     ) -> dict[str, Any]:
         plan = await self._validated_write_plan(
-            kind=kind, content=content, metadata=metadata, provenance=provenance,
-            operation_id=operation_id, content_class=content_class,
+            kind=kind,
+            content=content,
+            metadata=metadata,
+            provenance=provenance,
+            operation_id=operation_id,
+            content_class=content_class,
             timestamp=self.now().isoformat(),
         )
         await self._check_write_capacity([plan])
@@ -637,23 +626,40 @@ class StoreCapabilities:
         if type(writes) is not list or not 1 <= len(writes) <= MAX_BATCH:
             raise CapabilityError("Invalid write batch")
         self._permit("write")
-        allowed = {"kind", "content", "metadata", "provenance", "operation_id", "content_class"}
+        allowed = {
+            "kind",
+            "content",
+            "metadata",
+            "provenance",
+            "operation_id",
+            "content_class",
+        }
         required = {"kind", "content", "metadata", "provenance", "operation_id"}
         seen: set[str] = set()
         timestamp = self.now().isoformat()
         plans: list[_MemoryWritePlan] = []
         for item in writes:
-            if type(item) is not dict or set(item) - allowed or not required <= set(item):
+            if (
+                type(item) is not dict
+                or set(item) - allowed
+                or not required <= set(item)
+            ):
                 raise CapabilityError("Invalid write batch item")
             operation = str(item["operation_id"])
             if operation in seen:
                 raise CapabilityError("Duplicate operation id")
             seen.add(operation)
-            plans.append(await self._validated_write_plan(
-                kind=item["kind"], content=item["content"], metadata=item["metadata"],
-                provenance=item["provenance"], operation_id=item["operation_id"],
-                content_class=item.get("content_class", "ordinary"), timestamp=timestamp,
-            ))
+            plans.append(
+                await self._validated_write_plan(
+                    kind=item["kind"],
+                    content=item["content"],
+                    metadata=item["metadata"],
+                    provenance=item["provenance"],
+                    operation_id=item["operation_id"],
+                    content_class=item.get("content_class", "ordinary"),
+                    timestamp=timestamp,
+                )
+            )
         await self._check_write_capacity(plans)
         return [await self._execute_write_plan(plan) for plan in plans]
 
@@ -677,14 +683,22 @@ class StoreCapabilities:
         if type(limit) is not int or not 1 <= limit <= MAX_RESULTS:
             raise CapabilityError("Invalid result bound")
         namespace = memory_namespace(self.authority, kind)
+        selected: dict[str, str] | None = None
+        normalized_query: str | None = None
         if mode == "exact":
             _identifier(key, "memory id")
-            head = await self._head(namespace, key)
-            rows = [head] if head is not None else []
-        elif mode in {"metadata", "lexical"}:
-            rows = list((await self._heads(namespace)).values())
+        elif mode == "metadata":
+            selected = self._filters(filters, {"source_type", "source_id"})
+        elif mode == "lexical":
+            normalized_query = _query(query)
         else:
             raise CapabilityError("Unsupported match mode")
+
+        if mode == "exact":
+            memory = await self._memory(namespace, key)
+            rows = [memory] if memory is not None else []
+        else:
+            rows = list((await self._memories(namespace)).values())
         rows = [
             r
             for r in rows
@@ -693,7 +707,7 @@ class StoreCapabilities:
             and r.get("lifecycle_state", "active") == "active"
         ]
         if mode == "metadata":
-            selected = self._filters(filters, {"source_type", "source_id"})
+            assert selected is not None
             rows = [
                 r
                 for r in rows
@@ -701,7 +715,8 @@ class StoreCapabilities:
             ]
             rows.sort(key=lambda row: str(row["id"]))
         elif mode == "lexical":
-            rows = lexical_rank(_query(query), rows)
+            assert normalized_query is not None
+            rows = lexical_rank(normalized_query, rows)
         result = [
             {k: v for k, v in row.items() if k != "_key"} | {"match_mode": mode}
             for row in rows[:limit]
@@ -754,7 +769,10 @@ class StoreCapabilities:
         expected_revision: int | None,
     ) -> dict[str, Any]:
         self._permit(action)
-        if action in {"restore", "permanent-delete"} and self.authority.principal_id not in {
+        if action in {
+            "restore",
+            "permanent-delete",
+        } and self.authority.principal_id not in {
             "owner",
             self.authority.owner_id,
         }:
@@ -762,17 +780,7 @@ class StoreCapabilities:
         _identifier(memory_id, "memory id")
         _identifier(operation_id, "operation id")
         namespace = memory_namespace(self.authority, kind)
-        operation_namespace = memory_namespace(self.authority, kind, "operation")
-        request_digest = _digest(
-            {"action": action, "id": memory_id, "expected_revision": expected_revision}
-        )
-        op_key = f"operation:{operation_id}"
-        previous = _value(await self.store.aget(operation_namespace, op_key))
-        row = await self._head(namespace, memory_id)
-        if previous:
-            if previous.get("request_digest") != request_digest:
-                raise CapabilityError("Idempotency key conflict")
-            return row or {"id": memory_id, "purged": True}
+        row = await self._memory(namespace, memory_id)
         if not row:
             raise CapabilityError("Memory not found")
         if expected_revision is not None and (
@@ -783,95 +791,82 @@ class StoreCapabilities:
         deleted = (
             datetime.fromisoformat(row["deleted_at"]) if row.get("deleted_at") else None
         )
-        if action == "delete":
-            changes = {
-                "deleted_at": row.get("deleted_at") or now.isoformat(),
-                "lifecycle_state": "deleted",
-            }
-        elif action == "restore":
-            if not deleted or now > deleted + RESTORE_WINDOW or row.get("purged_at"):
-                raise CapabilityError("Memory is not restorable")
-            changes = {"deleted_at": None, "lifecycle_state": "active"}
-        else:
-            if not deleted:
-                raise CapabilityError(
-                    "Permanent delete requires an exact deleted memory"
-                )
-            changes = {
-                "purged_at": now.isoformat(),
-                "content": "",
-                "metadata": {},
-                "lifecycle_state": "purged",
-            }
-        revision = int(row["revision"]) + 1
+        if action == "delete" and deleted:
+            return {key: value for key, value in row.items() if key != "_key"}
+        if action == "restore" and (not deleted or now > deleted + RESTORE_WINDOW):
+            raise CapabilityError("Memory is not restorable")
+        if action == "permanent-delete" and not deleted:
+            raise CapabilityError("Permanent delete requires an exact deleted memory")
+
+        if action == "permanent-delete":
+            await self.store.adelete(namespace, memory_id)
+            await self._audit(action, memory_id, operation_id, "allowed", 1)
+            return {"id": memory_id, "purged": True}
+
+        changes = (
+            {"deleted_at": now.isoformat(), "lifecycle_state": "deleted"}
+            if action == "delete"
+            else {"deleted_at": None, "lifecycle_state": "active"}
+        )
         updated = (
-            {k: v for k, v in row.items() if k != "_key"}
+            {key: value for key, value in row.items() if key != "_key"}
             | changes
             | {
-                "revision": revision,
+                "revision": int(row["revision"]) + 1,
                 "updated_at": now.isoformat(),
                 "operation_id": operation_id,
-                "record_type": "memory-revision",
             }
         )
-        if action == "permanent-delete":
-            # Immutable revisions are never overwritten, but purge must physically
-            # remove every content-bearing revision before writing its tombstone.
-            revision_namespace = memory_namespace(
-                self.authority, kind, "revision", memory_id
-            )
-            for stored in await self._search(revision_namespace):
-                await self.store.adelete(revision_namespace, stored["_key"])
-            await self.store.adelete(namespace, memory_id)
-        else:
-            await self.store.aput(
-                memory_namespace(self.authority, kind, "revision", memory_id),
-                f"revision:{revision:08d}",
-                updated,
-                index=False,
-            )
-            await self.store.aput(namespace, memory_id, updated, index=False)
         await self.store.aput(
-            operation_namespace,
-            op_key,
-            {
-                "record_type": "operation",
-                "memory_id": memory_id,
-                "request_digest": request_digest,
-            },
+            namespace,
+            memory_id,
+            updated,
             index=False,
+            ttl=DELETED_MEMORY_TTL_MINUTES if action == "delete" else None,
         )
         await self._audit(action, memory_id, operation_id, "allowed", 1)
-        return (
-            {"id": memory_id, "purged": True}
-            if action == "permanent-delete"
-            else updated
-        )
+        return updated
 
-    async def purge_eligible(self, kind: str, *, limit: int = MAX_RESULTS) -> int:
-        self._permit("permanent-delete")
-        if not 1 <= limit <= MAX_RESULTS:
-            raise CapabilityError("Invalid result bound")
-        heads = await self._heads(memory_namespace(self.authority, kind))
-        count = 0
-        for row in sorted(heads.values(), key=lambda r: str(r["id"])):
-            if count >= limit:
-                break
-            if (
-                row.get("deleted_at")
-                and self.now()
-                > datetime.fromisoformat(row["deleted_at"]) + RESTORE_WINDOW
-                and not row.get("purged_at")
-            ):
-                await self._lifecycle(
-                    kind,
-                    row["id"],
-                    f"scheduled-{row['id']}-{row['revision']}",
-                    "permanent-delete",
-                    row["revision"],
-                )
-                count += 1
-        return count
+    async def _document_record(
+        self, corpus: str, document_id: str
+    ) -> dict[str, Any] | None:
+        item = await self.store.aget(
+            documentation_namespace(self.authority, corpus, "document"), document_id
+        )
+        return {"_key": document_id, **_value(item)} if item is not None else None
+
+    async def _fragment_record(
+        self, corpus: str, fragment_id: str
+    ) -> dict[str, Any] | None:
+        item = await self.store.aget(
+            documentation_namespace(self.authority, corpus, "fragment"), fragment_id
+        )
+        return {"_key": fragment_id, **_value(item)} if item is not None else None
+
+    def _active_document(self, row: dict[str, Any]) -> bool:
+        status = row.get(
+            "source_status", row.get("provenance", {}).get("source_status")
+        )
+        if status not in DOC_ACTIVE | DOC_INACTIVE:
+            raise CapabilityError("Documentation lifecycle verification failed")
+        return status in DOC_ACTIVE
+
+    def _document_result(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in row.items() if key != "_key"}
+
+    def _fragment_result(
+        self, fragment: dict[str, Any], document: dict[str, Any]
+    ) -> dict[str, Any]:
+        # Document metadata is stored only in the canonical document item. It is joined
+        # into the bounded response after authorization; the fragment never owns it.
+        canonical = self._document_result(document)
+        canonical.pop("id", None)
+        canonical.pop("record_type", None)
+        canonical.pop("created_at", None)
+        canonical.pop("metadata_digest", None)
+        return {
+            key: value for key, value in fragment.items() if key != "_key"
+        } | canonical
 
     async def write_document(
         self,
@@ -885,15 +880,21 @@ class StoreCapabilities:
         ocr_succeeded: bool = False,
         content_class: str = "documentation",
         corpus_revision: str = "1",
+        tags: list[str] | tuple[str, ...] = (),
     ) -> dict[str, Any]:
         self._permit("documentation-retrieval:write", corpus)
         if not supervisor_approved or not ocr_succeeded:
             raise CapabilityError("Documentation write denied")
+        # The namespace constructor also fixes the sole installation-wide corpus before
+        # any Store access. All request validation below completes before mutation.
+        document_namespace = documentation_namespace(self.authority, corpus, "document")
+        fragment_namespace = documentation_namespace(self.authority, corpus, "fragment")
         _identifier(fragment_id, "fragment id")
         _identifier(operation_id, "operation id")
         _identifier(corpus_revision, "corpus revision")
         _validate_content(content, content_class)
-        _validate_string_map(provenance)
+        _validate_string_map(provenance, metadata=True)
+        canonical_tags = _document_tags(tags)
         required = {
             "document_id",
             "locator",
@@ -904,6 +905,11 @@ class StoreCapabilities:
             "source_type",
         }
         allowed = required | {
+            "document_digest",
+            "fragment_index",
+            "fragment_count",
+            "char_start",
+            "char_end",
             "source_uri",
             "source_time",
             "requester",
@@ -919,73 +925,112 @@ class StoreCapabilities:
             or provenance["source_status"] not in DOC_ACTIVE | DOC_INACTIVE
         ):
             raise CapabilityError("Unapproved or incomplete documentation source")
-        _identifier(provenance["document_id"], "document id")
-        namespace = documentation_namespace(self.authority, corpus)
+        document_id = _identifier(provenance["document_id"], "document id")
+        if document_id == fragment_id:
+            raise CapabilityError("Document and fragment identities must be distinct")
+
+        now = self.now().isoformat()
+        document_digest = provenance.get("document_digest", provenance["digest"])
+        canonical_provenance = {
+            key: value
+            for key, value in provenance.items()
+            if key
+            not in {
+                "locator",
+                "digest",
+                "document_digest",
+                "fragment_index",
+                "fragment_count",
+                "char_start",
+                "char_end",
+            }
+        }
+        document_metadata = {
+            "schema_version": 1,
+            "record_type": "document",
+            "id": document_id,
+            "corpus": corpus,
+            "corpus_revision": corpus_revision,
+            "title": provenance["title"],
+            "tags": canonical_tags,
+            "source_uri": provenance.get("source_uri", "unknown"),
+            "source_revision": provenance["source_revision"],
+            "digest": document_digest,
+            "source_time": provenance.get("source_time", "unknown"),
+            "source_status": provenance["source_status"],
+            "source_type": provenance["source_type"],
+            "provenance": canonical_provenance,
+            "created_at": now,
+            "untrusted_data": True,
+        }
+        metadata_digest = _digest(
+            {
+                key: value
+                for key, value in document_metadata.items()
+                if key != "created_at"
+            }
+        )
+        document_metadata["metadata_digest"] = metadata_digest
+        if len(_canonical(document_metadata)) > MAX_METADATA_BYTES:
+            raise CapabilityError("Document metadata exceeds bounds")
         request_digest = _digest(
             {
                 "corpus": corpus,
                 "fragment_id": fragment_id,
                 "content": content,
-                "provenance": provenance,
-                "corpus_revision": corpus_revision,
+                "document_metadata_digest": metadata_digest,
+                "locator": provenance["locator"],
             }
         )
-        op_ns = documentation_namespace(self.authority, corpus, "operation")
-        op_key = f"operation:{operation_id}"
-        prior = _value(await self.store.aget(op_ns, op_key))
-        if prior:
-            if prior.get("request_digest") != request_digest:
-                raise CapabilityError("Idempotency key conflict")
-            return _value(
-                await self.store.aget(namespace, str(prior["record_key"]))
-            )
-        key = f"fragment:{fragment_id}:corpus-revision:{corpus_revision}"
-        if await self.store.aget(namespace, key):
-            raise CapabilityError("Immutable documentation record already exists")
-        now = self.now().isoformat()
-        record = {
+        fragment = {
             "schema_version": 1,
             "record_type": "fragment",
             "id": fragment_id,
             "content": content,
             "corpus": corpus,
             "corpus_revision": corpus_revision,
-            "document_id": provenance["document_id"],
+            "document_id": document_id,
             "fragment_id": fragment_id,
             "locator": provenance["locator"],
-            "title": provenance["title"],
-            "source_uri": provenance.get("source_uri", "unknown"),
-            "source_revision": provenance["source_revision"],
+            "fragment_index": provenance.get("fragment_index", "0"),
+            "fragment_count": provenance.get("fragment_count", "1"),
+            "char_start": provenance.get("char_start", "0"),
+            "char_end": provenance.get("char_end", str(len(content))),
             "digest": provenance["digest"],
-            "source_time": provenance.get("source_time", "unknown"),
-            "source_status": provenance["source_status"],
-            "source_type": provenance["source_type"],
-            "provenance": provenance,
+            "request_digest": request_digest,
             "operation_id": operation_id,
             "created_at": now,
             "untrusted_data": True,
         }
-        try:
-            await self.store.aput(namespace, key, record, index=False)
+
+        existing_document = await self._document_record(corpus, document_id)
+        existing_fragment = await self._fragment_record(corpus, fragment_id)
+        if (
+            existing_document
+            and existing_document.get("metadata_digest") != metadata_digest
+        ):
+            raise CapabilityError("Immutable canonical document already exists")
+        if (
+            existing_fragment
+            and existing_fragment.get("request_digest") != request_digest
+        ):
+            raise CapabilityError("Immutable documentation fragment already exists")
+        if existing_fragment:
+            if not existing_document:
+                raise CapabilityError("Canonical document metadata is unavailable")
+            return self._fragment_result(existing_fragment, existing_document)
+
+        # BaseStore has no multi-key transaction. The validated canonical metadata is
+        # written first when absent, followed by the one fragment; no atomicity claim,
+        # lock, rollback protocol, operation record, or content copy is introduced.
+        if not existing_document:
             await self.store.aput(
-                op_ns,
-                op_key,
-                {
-                    "record_type": "operation",
-                    "record_key": key,
-                    "request_digest": request_digest,
-                },
-                index=False,
+                document_namespace, document_id, document_metadata, index=False
             )
-        except Exception:
-            # A fragment without its idempotency manifest is not a committed corpus
-            # write. Best-effort rollback keeps ordinary backend failures fail-closed.
-            try:
-                await self.store.adelete(namespace, key)
-                await self.store.adelete(op_ns, op_key)
-            except Exception:
-                pass
-            raise
+            existing_document = {"_key": document_id, **document_metadata}
+        await self.store.aput(
+            fragment_namespace, fragment_id, fragment, index=["content"]
+        )
         await self._audit(
             "documentation-write",
             fragment_id,
@@ -994,7 +1039,51 @@ class StoreCapabilities:
             1,
             corpus=corpus,
         )
-        return record
+        return self._fragment_result(fragment, existing_document)
+
+    async def update_document_tags(
+        self,
+        *,
+        corpus: str,
+        document_id: str,
+        tags: list[str] | tuple[str, ...],
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """Replace only canonical document tags through delegated write authority."""
+
+        self._permit("documentation-retrieval:write", corpus)
+        _identifier(document_id, "document id")
+        _identifier(operation_id, "operation id")
+        canonical_tags = _document_tags(tags)
+        row = await self._document_record(corpus, document_id)
+        if row is None or not self._active_document(row):
+            raise CapabilityError("Canonical document metadata is unavailable")
+        updated = {
+            key: value
+            for key, value in row.items()
+            if key not in {"_key", "metadata_digest"}
+        }
+        updated["tags"] = canonical_tags
+        updated["metadata_digest"] = _digest(
+            {key: value for key, value in updated.items() if key != "created_at"}
+        )
+        if len(_canonical(updated)) > MAX_METADATA_BYTES:
+            raise CapabilityError("Document metadata exceeds bounds")
+        await self.store.aput(
+            documentation_namespace(self.authority, corpus, "document"),
+            document_id,
+            updated,
+            index=False,
+        )
+        await self._audit(
+            "documentation-write",
+            document_id,
+            operation_id,
+            "allowed",
+            1,
+            corpus=corpus,
+        )
+        return updated
 
     async def read_documents(
         self,
@@ -1006,75 +1095,118 @@ class StoreCapabilities:
         filters: dict[str, str] | None = None,
         limit: int = MAX_RESULTS,
         corpus_revision: str | None = None,
+        record_type: str = "fragment",
     ) -> list[dict[str, Any]]:
         self._permit("documentation-retrieval:read", corpus)
         if type(limit) is not int or not 1 <= limit <= MAX_RESULTS:
             raise CapabilityError("Invalid result bound")
-        namespace = documentation_namespace(self.authority, corpus)
-        rows = await self._search(namespace)
-        unknown_lifecycle = any(
-            row.get("record_type") == "fragment"
-            and row.get(
-                "source_status", row.get("provenance", {}).get("source_status")
-            )
-            not in DOC_ACTIVE | DOC_INACTIVE
-            for row in rows
-        )
+        document_namespace = documentation_namespace(self.authority, corpus, "document")
+        fragment_namespace = documentation_namespace(self.authority, corpus, "fragment")
+        if corpus_revision is not None:
+            _identifier(corpus_revision, "corpus revision")
+        selected: dict[str, str] | None = None
+        semantic_query: str | None = None
         if mode == "exact":
             _identifier(key, "document or fragment id")
-            rows = [
-                r
-                for r in rows
-                if r.get("id") == key or r.get("document_id") == key
-            ]
-        elif mode in {"metadata", "metadata+lexical"}:
-            selected = self._filters(
-                filters,
-                {"document_id", "source_type", "source_revision", "source_status"},
-            )
-            rows = [
-                r
-                for r in rows
-                if all(
-                    r.get(k, r.get("provenance", {}).get(k)) == v
-                    for k, v in selected.items()
+            if record_type not in {"document", "fragment"}:
+                raise CapabilityError("Invalid exact record type")
+        elif mode == "metadata":
+            selected = (
+                {}
+                if filters is None or filters == {}
+                else self._filters(
+                    filters,
+                    {
+                        "document_id",
+                        "tag",
+                        "source_type",
+                        "source_revision",
+                        "source_status",
+                    },
                 )
-            ]
-            if mode == "metadata+lexical":
-                rows = lexical_rank(_query(query), rows)
-        elif mode == "lexical":
-            rows = lexical_rank(_query(query), rows)
+            )
+        elif mode == "semantic":
+            semantic_query = _query(query)
         else:
             raise CapabilityError("Unsupported match mode")
+
+        rows: list[dict[str, Any]] = []
+        if mode == "exact" and record_type == "document":
+            document = await self._document_record(corpus, key)
+            if document is not None and self._active_document(document):
+                rows = [self._document_result(document)]
+        elif mode == "exact":
+            fragment = await self._fragment_record(corpus, key)
+            if fragment is not None:
+                document = await self._document_record(
+                    corpus, str(fragment.get("document_id", ""))
+                )
+                if document is None:
+                    raise CapabilityError("Documentation lifecycle verification failed")
+                if self._active_document(document):
+                    rows = [self._fragment_result(fragment, document)]
+        elif mode == "metadata":
+            documents = await self._search(document_namespace)
+            for document in documents:
+                if document.get("record_type") != "document":
+                    continue
+                if not self._active_document(document):
+                    continue
+                rows.append(self._document_result(document))
+        else:
+            # The configured Store index embeds only fragment content. Supplying the
+            # query delegates semantic ranking to BaseStore while retaining the fully
+            # authorized namespace and hard candidate bound.
+            assert semantic_query is not None
+            fragments = await self._search(fragment_namespace, query=semantic_query)
+            for fragment in fragments:
+                if fragment.get("record_type") != "fragment":
+                    continue
+                document = await self._document_record(
+                    corpus, str(fragment.get("document_id", ""))
+                )
+                if document is None:
+                    raise CapabilityError("Documentation lifecycle verification failed")
+                if self._active_document(document):
+                    rows.append(self._fragment_result(fragment, document))
+
+        if selected is not None:
+
+            def matches(row: dict[str, Any]) -> bool:
+                for name, value in selected.items():
+                    if name == "document_id":
+                        if row.get("document_id", row.get("id")) != value:
+                            return False
+                    elif name == "tag":
+                        normalized = " ".join(
+                            unicodedata.normalize("NFKC", value).casefold().split()
+                        )
+                        if not normalized or normalized not in row.get("tags", []):
+                            return False
+                    elif row.get(name, row.get("provenance", {}).get(name)) != value:
+                        return False
+                return True
+
+            rows = [row for row in rows if matches(row)]
+        if mode != "semantic":
+            rows.sort(key=lambda row: str(row.get("id", "")))
         rows = [
-            r
-            for r in rows
-            if r.get("record_type") == "fragment"
-            and r.get("source_status", r.get("provenance", {}).get("source_status"))
-            in DOC_ACTIVE
-            and (corpus_revision is None or r.get("corpus_revision") == corpus_revision)
+            row
+            for row in rows
+            if corpus_revision is None or row.get("corpus_revision") == corpus_revision
         ]
-        if mode != "lexical":
-            rows.sort(
-                key=lambda r: (str(r.get("id", "")), str(r.get("corpus_revision", "")))
-            )
-        if unknown_lifecycle:
-            raise CapabilityError("Documentation lifecycle verification failed")
+
         retrieved = self.now().isoformat()
-        result = []
-        for row in rows[:limit]:
-            clean = {k: v for k, v in row.items() if k != "_key"}
-            result.append(
-                clean
-                | {
-                    # Combined filtering remains lexical matching, not a fourth
-                    # retrieval technology. Report filtering independently.
-                    "match_mode": "lexical" if mode == "metadata+lexical" else mode,
-                    "metadata_filtered": mode in {"metadata", "metadata+lexical"},
-                    "retrieved_at": retrieved,
-                    "result_status": "complete",
-                }
-            )
+        result = [
+            row
+            | {
+                "match_mode": mode,
+                "metadata_filtered": mode == "metadata",
+                "retrieved_at": retrieved,
+                "result_status": "complete",
+            }
+            for row in rows[:limit]
+        ]
         self._response(result)
         await self._audit(
             "documentation-read",
@@ -1087,48 +1219,8 @@ class StoreCapabilities:
         )
         return result
 
-    async def maintain(
-        self,
-        *,
-        per_kind_limit: int = MAX_RESULTS,
-        audit_hard_cap: int = MAINTENANCE_HARD_CAP,
-    ) -> dict[str, int]:
-        """Bounded lazy maintenance; deployment scheduling is configured separately."""
-        self._permit("permanent-delete")
-        if type(audit_hard_cap) is not int or not 1 <= audit_hard_cap <= MAINTENANCE_HARD_CAP:
-            raise CapabilityError("Invalid maintenance bound")
-        purged = 0
-        for kind in sorted(MEMORY_KINDS):
-            purged += await self.purge_eligible(kind, limit=per_kind_limit)
-        namespace = self._audit_namespace()
-        inspected = 0
-        expired_keys: list[str] = []
-        while inspected < audit_hard_cap:
-            page_limit = min(MAX_RESULTS, audit_hard_cap - inspected)
-            rows = await self.store.asearch(
-                namespace, limit=page_limit, offset=inspected
-            )
-            if not rows:
-                break
-            for item in rows:
-                value = _value(item)
-                if datetime.fromisoformat(str(value["expires_at"])) < self.now():
-                    key = (
-                        str(item.get("key", item.get("id", "")))
-                        if isinstance(item, dict)
-                        else item.key
-                    )
-                    expired_keys.append(key)
-            inspected += len(rows)
-            if len(rows) < page_limit:
-                break
-        for key in expired_keys:
-            await self.store.adelete(namespace, key)
-        return {"purged": purged, "expired_audits": len(expired_keys)}
-
     async def unsupported(self, operation: str) -> dict[str, str]:
         if operation not in {
-            "semantic",
             "vector",
             "ontology",
             "reindex",
@@ -1148,6 +1240,7 @@ class StoreCapabilities:
             "v1",
             "phase5-audit",
             f"tenant:{self.authority.tenant_id}",
+            f"trust:{self.authority.trust_domain}",
             f"owner:person:{self.authority.owner_id}",
         )
 
@@ -1176,9 +1269,15 @@ class StoreCapabilities:
         _identifier(correlation, "audit correlation")
         if corpus is not None:
             _identifier(corpus, "audit corpus")
-        if match_mode is not None and match_mode not in {"exact", "metadata", "lexical", "metadata+lexical"}:
+        if match_mode is not None and match_mode not in {
+            "exact",
+            "metadata",
+            "lexical",
+            "semantic",
+        }:
             raise CapabilityError("Invalid audit match mode")
-        timestamp = self.now().isoformat()
+        current = self.now()
+        timestamp = current.isoformat()
         key = hashlib.sha256(
             f"{timestamp}:{correlation}:{operation}:{record_id}:{decision}".encode()
         ).hexdigest()
@@ -1194,13 +1293,15 @@ class StoreCapabilities:
             "correlation": correlation,
             "time": timestamp,
             "count": count,
-            "expires_at": (self.now() + AUDIT_RETENTION).isoformat(),
+            "expires_at": (current + AUDIT_RETENTION).isoformat(),
         }
         if corpus is not None:
             event["corpus"] = corpus
         if match_mode is not None:
             event["match_mode"] = match_mode
-        await self.store.aput(self._audit_namespace(), key, event, index=False)
+        await self.store.aput(
+            self._audit_namespace(), key, event, index=False, ttl=AUDIT_TTL_MINUTES
+        )
 
     async def _audit(
         self,
@@ -1223,30 +1324,20 @@ class StoreCapabilities:
             match_mode=match_mode,
         )
 
-    async def read_audit(
-        self, *, limit: int = MAX_RESULTS, prune: bool = False
-    ) -> list[dict[str, Any]]:
+    async def read_audit(self, *, limit: int = MAX_RESULTS) -> list[dict[str, Any]]:
         self._permit("audit")
         if (
             self.authority.principal_id not in {"owner", self.authority.owner_id}
             or not 1 <= limit <= MAX_RESULTS
         ):
             raise CapabilityError("Owner-only audit access denied")
-        namespace = (
-            "app",
-            "v1",
-            "phase5-audit",
-            f"tenant:{self.authority.tenant_id}",
-            f"owner:person:{self.authority.owner_id}",
-        )
+        namespace = self._audit_namespace()
         rows = await self._search(namespace)
-        live = []
-        for row in rows:
-            if datetime.fromisoformat(str(row["expires_at"])) < self.now():
-                if prune:
-                    await self.store.adelete(namespace, row["_key"])
-            else:
-                live.append({k: v for k, v in row.items() if k != "_key"})
+        live = [
+            {key: value for key, value in row.items() if key != "_key"}
+            for row in rows
+            if datetime.fromisoformat(str(row["expires_at"])) >= self.now()
+        ]
         live.sort(
             key=lambda r: (str(r["time"]), str(r["correlation"]), str(r["record_id"]))
         )

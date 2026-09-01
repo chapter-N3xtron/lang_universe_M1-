@@ -10,8 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from langgraph_sdk import get_client
 from psycopg.rows import dict_row
 
-from src.installation_auth import installation_identity
-from src.session_catalog import SCHEMA, ensure_catalog_schema, query_sessions
+from src.session_catalog import (
+    DEFAULT_OWNER_ID,
+    SCHEMA,
+    ensure_catalog_schema,
+    query_sessions,
+)
 from src.session_catalog_models import (
     ModelPreferenceInput,
     SavedViewInput,
@@ -24,11 +28,10 @@ from src.session_catalog_models import (
 
 
 def _owner(claimed: str | None = None) -> str:
-    """Return authenticated installation owner and reject legacy impersonation."""
-    owner = str(installation_identity()["owner_id"])
-    if claimed is not None and claimed != owner:
-        raise HTTPException(403, "Owner scope does not match the authenticated installation.")
-    return owner
+    """Keep the legacy catalog owner behind the authenticated installation boundary."""
+    if claimed is not None and claimed != DEFAULT_OWNER_ID:
+        raise HTTPException(403, "Owner scope is unavailable.")
+    return DEFAULT_OWNER_ID
 
 
 def _reject_query_owner_override(owner_id: str | None = Query(default=None)) -> None:
@@ -46,7 +49,9 @@ router = APIRouter(
 @router.get("/preferences/model")
 async def get_model_preference(owner_id: str = Query(min_length=1, max_length=128)):
     client = _agent_server_client()
-    item = await client.store.get_item((_owner(owner_id), "preferences"), "model-selection")
+    item = await client.store.get_item(
+        (_owner(owner_id), "preferences"), "model-selection"
+    )
     value = item.get("value", {}) if item else {}
     return {"model_id": value.get("model_id")}
 
@@ -99,7 +104,9 @@ def _agent_server_client():
     if not api_key:
         raise HTTPException(503, "Installation authentication is unavailable.")
     return get_client(
-        url=f"http://127.0.0.1:{port}", headers={"X-Api-Key": api_key}
+        url=f"http://127.0.0.1:{port}",
+        api_key=None,
+        headers={"X-Api-Key": api_key},
     )
 
 
@@ -197,13 +204,18 @@ async def rename_session_artifact(
     if body.title.strip() != body.title or not body.title.strip():
         raise HTTPException(422, "Board title must not be empty.")
     client = _agent_server_client()
-    item = await client.store.get_item((_owner(body.owner_id), "session-artifacts", session_id), artifact_id)
+    item = await client.store.get_item(
+        (_owner(body.owner_id), "session-artifacts", session_id), artifact_id
+    )
     if not item:
         raise HTTPException(404, "Visualization board not found.")
     value = dict(item.get("value", {}))
     value["title"] = body.title
     await client.store.put_item(
-        (_owner(body.owner_id), "session-artifacts", session_id), artifact_id, value, index=False
+        (_owner(body.owner_id), "session-artifacts", session_id),
+        artifact_id,
+        value,
+        index=False,
     )
     await ensure_catalog_schema()
     async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:  # noqa: SIM117
@@ -214,21 +226,34 @@ async def rename_session_artifact(
                     FROM {SCHEMA}.session_artifact_links sal
                     WHERE sal.session_id = %s AND sal.artifact_id = a.artifact_id
                       AND sal.owner_id = %s AND a.owner_id = %s AND a.artifact_id = %s""",
-                (body.title, body.title, session_id, _owner(body.owner_id), _owner(body.owner_id), artifact_id),
+                (
+                    body.title,
+                    body.title,
+                    session_id,
+                    _owner(body.owner_id),
+                    _owner(body.owner_id),
+                    artifact_id,
+                ),
             )
     return {"artifact_id": artifact_id, "title": body.title}
 
 
 @router.delete("/{session_id}/artifacts/{artifact_id}")
 async def delete_session_artifact(
-    session_id: str, artifact_id: str, owner_id: str = Query(min_length=1, max_length=128)
+    session_id: str,
+    artifact_id: str,
+    owner_id: str = Query(min_length=1, max_length=128),
 ) -> dict[str, bool]:
     """Delete only this session's board reference and unshared board artifact."""
     client = _agent_server_client()
-    item = await client.store.get_item((owner_id, "session-artifacts", session_id), artifact_id)
+    item = await client.store.get_item(
+        (owner_id, "session-artifacts", session_id), artifact_id
+    )
     if not item:
         raise HTTPException(404, "Visualization board not found.")
-    await client.store.delete_item((owner_id, "session-artifacts", session_id), artifact_id)
+    await client.store.delete_item(
+        (owner_id, "session-artifacts", session_id), artifact_id
+    )
     await ensure_catalog_schema()
     async with await psycopg.AsyncConnection.connect(_database_uri()) as connection:  # noqa: SIM117
         async with connection.cursor() as cursor:
@@ -346,7 +371,9 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
     """Fork a settled Agent Server thread; pending actions are never copied."""
 
     client = _agent_server_client()
-    parent_item = await client.store.get_item((_owner(body.owner_id), "sessions"), session_id)
+    parent_item = await client.store.get_item(
+        (_owner(body.owner_id), "sessions"), session_id
+    )
     if not parent_item:
         raise HTTPException(404, "Session not found.")
     parent_value = dict(parent_item.get("value", {}))
@@ -354,7 +381,11 @@ async def fork_session(session_id: str, body: SessionForkInput) -> dict[str, Any
     checkpoint = await client.threads.get_state(
         source_thread_id, checkpoint_id=body.checkpoint_id
     )
-    if checkpoint.get("tasks") or checkpoint.get("next") or checkpoint.get("interrupts"):
+    if (
+        checkpoint.get("tasks")
+        or checkpoint.get("next")
+        or checkpoint.get("interrupts")
+    ):
         raise HTTPException(
             409, "Resolve the pending thread action before creating a fork."
         )

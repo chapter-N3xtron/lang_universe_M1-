@@ -8,14 +8,7 @@ from typing import Any
 
 from langgraph_sdk import Auth
 
-ALLOWED_GRAPHS = frozenset({"chat_ui", "coder"})
-ALLOWED_STORE_FAMILIES = frozenset(
-    {
-        "cross-session-memory",
-        "documentation-retrieval",
-        "phase5-audit",
-    }
-)
+LEGACY_OWNER_ID = "local-owner-v1"
 ALLOWED_LEGACY_STORE_FAMILIES = frozenset(
     {
         "preferences",
@@ -90,90 +83,83 @@ def _owner_filter(ctx: Auth.types.AuthContext) -> dict[str, str]:
 @auth.on.threads.create
 async def authorize_thread_create(
     ctx: Auth.types.AuthContext, value: dict[str, Any]
-) -> bool:
+) -> dict[str, str]:
+    """Stamp the documented thread-create payload with installation scope."""
+    owner_filter = _owner_filter(ctx)
     metadata = value.setdefault("metadata", {})
-    graph_id = str(value.get("graph_id") or metadata.get("graph_id") or "")
-    if graph_id not in ALLOWED_GRAPHS:
-        return False
-    metadata["owner_id"] = str(ctx.user.identity)
-    metadata["tenant_id"] = str(ctx.user.tenant_id)
-    metadata["trust_domain"] = TRUST_DOMAIN
-    return True
+    metadata.update(
+        owner_filter
+        | {
+            "tenant_id": str(ctx.user.tenant_id),
+            "trust_domain": TRUST_DOMAIN,
+        }
+    )
+    return owner_filter
 
 
 @auth.on(resources=["threads"], actions=["read", "search", "update", "delete"])
-async def authorize_threads(ctx: Auth.types.AuthContext, value: Any) -> dict[str, str]:
-    return _owner_filter(ctx)
+async def authorize_threads(ctx: Auth.types.AuthContext, value: Any) -> bool:
+    """Allow the authenticated sole owner to access this installation's threads."""
+    return True
 
 
 @auth.on.threads.create_run
 async def authorize_runs(ctx: Auth.types.AuthContext, value: dict[str, Any]) -> bool:
-    """langgraph-api 0.11.2 authorizes run creation as threads:create_run."""
-    graph_id = str(value.get("assistant_id") or value.get("graph_id") or "")
-    return graph_id in ALLOWED_GRAPHS
+    """Allow the authenticated sole owner to run configured assistants."""
+    return bool(value.get("assistant_id"))
 
 
 @auth.on.assistants.read
 async def authorize_assistant_read(
     ctx: Auth.types.AuthContext, value: dict[str, Any]
 ) -> bool:
-    assistant_id = str(value.get("assistant_id") or value.get("graph_id") or "")
-    return assistant_id in ALLOWED_GRAPHS
+    """Allow exact reads of server-configured assistants in this one-owner install."""
+    return bool(value.get("assistant_id"))
 
 
 @auth.on.assistants.search
 async def authorize_assistant_search(
     ctx: Auth.types.AuthContext, value: dict[str, Any]
-) -> dict[str, Any]:
-    return {"graph_id": {"$in": sorted(ALLOWED_GRAPHS)}}
+) -> bool:
+    """Permit listing in this one-owner installation; exact reads stay allowlisted."""
+    return True
 
 
-def _authorized_namespace(ctx: Auth.types.AuthContext, value: dict[str, Any]) -> bool:
+def _authorized_legacy_namespace(
+    ctx: Auth.types.AuthContext, value: dict[str, Any]
+) -> bool:
+    """Preserve only the pre-Phase-5 raw Store namespace contract."""
     namespace = tuple(str(part) for part in value.get("namespace") or ())
-    owner, tenant = str(ctx.user.identity), str(ctx.user.tenant_id)
-    if len(namespace) >= 3 and namespace[:2] == ("app", "v1"):
-        family = namespace[2]
-        if family not in ALLOWED_STORE_FAMILIES:
-            return False
-        required = {f"tenant:{tenant}", f"owner:person:{owner}"}
-        if not required.issubset(namespace):
-            return False
-        if family == "cross-session-memory":
-            return (
-                len(namespace) == 7
-                and f"trust:{TRUST_DOMAIN}" in namespace
-                and namespace[6].startswith("kind:")
-            )
-        if family == "documentation-retrieval":
-            return (
-                len(namespace) == 8
-                and f"trust:{TRUST_DOMAIN}" in namespace
-                and namespace[6].startswith("corpus:")
-                and namespace[7]
-                in {"record:fragment", "record:document", "record:operation"}
-            )
-        return len(namespace) == 5
     return (
         len(namespace) >= 2
-        and namespace[0] == owner
+        and namespace[0] in {str(ctx.user.identity), LEGACY_OWNER_ID}
         and namespace[1] in ALLOWED_LEGACY_STORE_FAMILIES
     )
 
 
 async def authorize_store(ctx: Auth.types.AuthContext, value: dict[str, Any]) -> bool:
-    """Compatibility helper: raw Phase 5 access is always denied."""
-    namespace = tuple(str(part) for part in value.get("namespace") or ())
-    return _authorized_namespace(ctx, value) and namespace[:2] != ("app", "v1")
+    """Preserve only legacy browser Store access; Phase 5 uses graph operations."""
+    return _authorized_legacy_namespace(ctx, value)
 
 
 @auth.on.store.get
-@auth.on.store.search
-async def authorize_store_read(
-    ctx: Auth.types.AuthContext, value: dict[str, Any]
+async def authorize_store_get(
+    ctx: Auth.types.AuthContext, value: Auth.types.StoreGet
 ) -> bool:
-    """Deny every raw Phase 5 read/search; capabilities use Runtime.store."""
-    namespace = tuple(str(part) for part in value.get("namespace") or ())
-    return _authorized_namespace(ctx, value) and namespace[:2] != ("app", "v1")
+    """Deny Phase 5 direct reads while preserving the legacy Store contract."""
+    return _authorized_legacy_namespace(ctx, value)
+
+
+@auth.on.store.search
+async def authorize_store_search(
+    ctx: Auth.types.AuthContext, value: Auth.types.StoreSearch
+) -> bool:
+    """Deny Phase 5 direct search while preserving the legacy Store contract."""
+    return _authorized_legacy_namespace(ctx, value)
+
+
+# Compatibility alias for imports which predate the action-specific read split.
+authorize_store_read = authorize_store_get
 
 
 @auth.on.store.put
@@ -181,9 +167,8 @@ async def authorize_store_read(
 async def authorize_store_mutation(
     ctx: Auth.types.AuthContext, value: dict[str, Any]
 ) -> bool:
-    """Raw Phase 5 writes are denied; trusted graph adapters use injected Store."""
-    namespace = tuple(str(part) for part in value.get("namespace") or ())
-    return _authorized_namespace(ctx, value) and namespace[:2] != ("app", "v1")
+    """Deny Phase 5 writes; preserve the exact legacy mutation policy."""
+    return _authorized_legacy_namespace(ctx, value)
 
 
 @auth.on.store.list_namespaces

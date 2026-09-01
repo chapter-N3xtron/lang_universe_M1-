@@ -1,5 +1,6 @@
 {
   "python_version": "3.12",
+  "api_version": "0.13.0",
   "dockerfile_lines": [
     "RUN apt-get update && apt-get install -y --no-install-recommends libxcb1 libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*",
     "COPY --from=node:22-bookworm-slim /usr/local /usr/local",
@@ -22,6 +23,19 @@
     "app": "./src/runtime_identity.py:app",
     "enable_custom_route_auth": true,
     "middleware_order": "auth_first"
+  },
+  "store": {
+    "index": {
+      "embed": "./src/phase5_embeddings.py:aembed_texts",
+      "dims": 768,
+      "fields": [
+        "content"
+      ]
+    },
+    "ttl": {
+      "refresh_on_read": false,
+      "sweep_interval_minutes": 60
+    }
   },
   "env": "./.env"
 }

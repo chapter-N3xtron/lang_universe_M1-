@@ -52,7 +52,9 @@ def test_roles_are_distinct_and_explicitly_unprivileged() -> None:
     assert text.count("CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE") == 2
     assert text.count("NOREPLICATION NOBYPASSRLS") == 2
     assert 'GRANT CONNECT, CREATE, TEMPORARY ON DATABASE :"database_name"' in text
-    assert 'GRANT CONNECT ON DATABASE :"database_name" TO :"session_catalog_role"' in text
+    assert (
+        'GRANT CONNECT ON DATABASE :"database_name" TO :"session_catalog_role"' in text
+    )
     assert "GRANT ALL" not in text.upper()
     assert "ALTER DATABASE" not in text.upper()
     assert "REASSIGN OWNED" not in text.upper()
@@ -84,5 +86,8 @@ def test_documented_boundary_does_not_claim_sql_namespace_isolation() -> None:
     text = README.read_text(encoding="utf-8")
     assert "PostgreSQL grants cannot make" in text
     assert "default-deny capability authorization" in text
-    assert "No browser, owner,\nJasper, Coder, Librarian, or OCR identity is a PostgreSQL role" in text
+    assert (
+        "No browser, owner,\nJasper, Coder, Librarian, or OCR identity is a PostgreSQL role"
+        in text
+    )
     assert "Do not add RLS" in text

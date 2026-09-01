@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
@@ -46,7 +44,10 @@ from src.jasper_tools import (
     read_file,
 )
 from src.llm import get_agent_llm
-from src.phase5_ingestion import DocumentationIngestionRequest
+from src.phase5_thread_state import (
+    normalize_session_document_ids,
+    replace_session_document_ids,
+)
 from src.phase5_tools import JASPER_PHASE5_TOOLS
 from src.secure_coding_tools import APPROVAL_INTERRUPT_ON, create_approval_tools
 from src.visual_models import (
@@ -109,6 +110,7 @@ class State(TypedDict, total=False):
     coding_status: str
     execution_manifest: ExecutionManifest
     session_evidence: list[dict]
+    session_document_ids: Annotated[list[str], replace_session_document_ids]
 
 
 class JasperToCoderRequest(TypedDict):
@@ -162,6 +164,7 @@ class JasperGraphRequest(TypedDict, total=False):
     user_identity: str
     coding_session_id: str
     session_evidence: list[dict]
+    session_document_ids: list[str]
 
 
 class JasperGraphResult(TypedDict, total=False):
@@ -181,6 +184,7 @@ class JasperGraphResult(TypedDict, total=False):
     ocr_task: str
     ocr_document_ref: str
     ocr_output_format: str
+    session_document_ids: list[str]
 
 
 class JasperGraphInputState(TypedDict):
@@ -218,8 +222,8 @@ class JasperDeepAgentState(DeepAgentState, total=False):
     ocr_task: str
     ocr_document_ref: str
     ocr_output_format: str
-    documentation_ingestion_request: dict
     session_evidence: list[dict]
+    session_document_ids: Annotated[list[str], replace_session_document_ids]
     ui: Annotated[list[AnyUIMessage], ui_message_reducer]
 
 
@@ -266,98 +270,6 @@ def transfer_to_ocr(
                 _last_ai_message(runtime),
                 ToolMessage(
                     content=f"OCR task: {task}\nDocument: {document_ref}",
-                    tool_call_id=runtime.tool_call_id,
-                ),
-            ],
-        },
-        graph=Command.PARENT,
-    )
-
-
-class SubmitDocumentationInput(BaseModel):
-    requester: Literal["librarian", "coder"]
-    document_id: str
-    fragment_id: str
-    document_ref: str
-    operation_id: str
-    source_type: Literal[
-        "public-https",
-        "public-pdf",
-        "owner-upload",
-        "approved-private-workspace",
-        "coder-report",
-    ]
-    title: str
-    locator: str
-    source_revision: str
-    source_uri: str = "unknown"
-    source_time: str = "unknown"
-    explicitly_selected: bool = False
-
-
-@tool(args_schema=SubmitDocumentationInput)
-def submit_documentation_for_ingestion(
-    requester: Literal["librarian", "coder"],
-    document_id: str,
-    fragment_id: str,
-    document_ref: str,
-    operation_id: str,
-    source_type: str,
-    title: str,
-    locator: str,
-    source_revision: str,
-    source_uri: str = "unknown",
-    source_time: str = "unknown",
-    explicitly_selected: bool = False,
-    *,
-    runtime: ToolRuntime,
-) -> Command[Literal["ocr_exit"]]:
-    """Submit a Librarian source or explicitly selected Coder artifact to trusted OCR.
-
-    This creates only an untrusted candidate. The outer supervisor validates and grants
-    any eventual Store write after Docling OCR succeeds.
-    """
-    state = runtime.state
-    workspace = str(state.get("workspace") or "")
-    marker = ""
-    if workspace:
-        root = Path(workspace).expanduser().resolve()
-        candidate = Path(document_ref).expanduser()
-        resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
-        try:
-            relative = resolved.relative_to(root).as_posix()
-        except ValueError:
-            relative = "outside-workspace"
-        marker = hashlib.sha256(f"{root}\n{relative}".encode()).hexdigest()
-    request = DocumentationIngestionRequest(
-        requester=requester,
-        corpus="installation-docs",
-        document_id=document_id,
-        document_ref=document_ref,
-        fragment_id=fragment_id,
-        operation_id=operation_id,
-        source_type=source_type,
-        title=title,
-        locator=locator,
-        source_revision=source_revision,
-        source_uri=source_uri,
-        source_time=source_time,
-        explicitly_selected=explicitly_selected,
-        selection_marker=marker,
-        workspace_root=workspace,
-    )
-    return Command(
-        goto="ocr_exit",
-        update={
-            "ocr_task": "Ingest approved documentation candidate",
-            "ocr_document_ref": document_ref,
-            "ocr_output_format": "structured",
-            "documentation_ingestion_request": asdict(request),
-            "workspace": workspace,
-            "messages": [
-                _last_ai_message(runtime),
-                ToolMessage(
-                    content="Documentation candidate routed to trusted OCR supervisor.",
                     tool_call_id=runtime.tool_call_id,
                 ),
             ],
@@ -513,6 +425,17 @@ def read_host_file(
     return str(result.get("content") or "")
 
 
+def _capture_session_document_ids(
+    agent_result: dict[str, Any], agent_context: dict | None
+) -> None:
+    """Retain only the agent's validated complete link list for outer projection."""
+
+    if agent_context is not None and "session_document_ids" in agent_result:
+        agent_context["session_document_ids"] = normalize_session_document_ids(
+            agent_result["session_document_ids"]
+        )
+
+
 ACTIVE_TOOLS = [
     list_todos,
     read_file,
@@ -522,7 +445,6 @@ ACTIVE_TOOLS = [
     transfer_to_coding,
     transfer_to_librarian,
     transfer_to_ocr,
-    submit_documentation_for_ingestion,
     *JASPER_PHASE5_TOOLS,
 ]
 
@@ -603,8 +525,12 @@ At the beginning of a genuinely new session, use this standard greeting exactly:
 
 OPERATIONAL GUIDANCE
 
-Use tools when they materially improve correctness. Use list_todos for project task
-status and attribution. Use draw_concept_map when the user asks for a diagram or a
+Use tools when they materially improve correctness. Documentation search is read-only
+and never links a result. Before relying on a documentation search result as evidence,
+call jasper_documentation_fragment_use with only that result's stable fragment_id and
+rely on the excerpt only when that exact-use call succeeds. Never claim use after a
+failed exact-use call. Use list_todos for project task status and attribution. Use
+draw_concept_map when the user asks for a diagram or a
 visual map would materially improve understanding. Do not create a visual merely to
 decorate a simple answer. For explicit document OCR, delegate with transfer_to_ocr
 and set output_format to markdown, json, or structured.
@@ -849,6 +775,7 @@ async def _invoke_combined(
         workspace=workspace,
         execution_mode=(agent_context or {}).get("execution_mode"),
     ).ainvoke(_agent_input(messages, workspace, agent_context))
+    _capture_session_document_ids(result, agent_context)
     response = JasperResponse.model_validate(result["structured_response"])
     tool_artifacts = _tool_artifacts(result.get("messages", []))
     return response.model_copy(
@@ -875,6 +802,7 @@ async def _invoke_plain(
         workspace=workspace,
         execution_mode=(agent_context or {}).get("execution_mode"),
     ).ainvoke(_agent_input(messages, workspace, agent_context))
+    _capture_session_document_ids(result, agent_context)
     result_messages = result.get("messages", [])
     plain_text = _last_assistant_text(result_messages)
     if plain_text:
@@ -1072,11 +1000,11 @@ async def call_jasper(state: State):
     )
     manifest = execution_manifest(canonical) if canonical is not None else None
     workspace = str(canonical) if canonical is not None else None
-
-    try:
-        model = get_agent_llm(selected_model)
-        strategy = select_response_strategy(model, selected_model)
-        agent_context = {
+    agent_context = {
+        "session_document_ids": normalize_session_document_ids(
+            state.get("session_document_ids", [])
+        ),
+        **{
             key: state[key]
             for key in (
                 "model",
@@ -1087,7 +1015,12 @@ async def call_jasper(state: State):
                 "session_evidence",
             )
             if state.get(key) is not None
-        }
+        },
+    }
+
+    try:
+        model = get_agent_llm(selected_model)
+        strategy = select_response_strategy(model, selected_model)
         if manifest is not None:
             agent_context["execution_manifest"] = manifest
         with (
@@ -1149,6 +1082,9 @@ async def call_jasper(state: State):
         )
         strategy = "text"
 
+    projected_session_document_ids = normalize_session_document_ids(
+        agent_context["session_document_ids"]
+    )
     artifacts = []
     for artifact in response.artifacts:
         if artifact.source_message_id is None:
@@ -1184,6 +1120,7 @@ async def call_jasper(state: State):
         "layout_suggestion": layout_suggestion,
         "jasper_strategy": strategy,
         "jasper_diagnostic": diagnostic,
+        "session_document_ids": projected_session_document_ids,
     }
     if workspace is not None and manifest is not None:
         result.update(
@@ -1337,6 +1274,7 @@ def _prepare_jasper_input(state: JasperGraphState) -> dict[str, Any]:
             "user_identity",
             "coding_session_id",
             "session_evidence",
+            "session_document_ids",
         )
         if key in request
     }
@@ -1361,6 +1299,7 @@ def _normal_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
         "jasper_diagnostic",
         "workspace",
         "execution_manifest",
+        "session_document_ids",
     ):
         if key in state:
             result[key] = state[key]
@@ -1407,9 +1346,6 @@ def _ocr_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
             "ocr_task": state.get("ocr_task", ""),
             "ocr_document_ref": state.get("ocr_document_ref", ""),
             "ocr_output_format": state.get("ocr_output_format", "markdown"),
-            "documentation_ingestion_request": state.get(
-                "documentation_ingestion_request", {}
-            ),
         }
     }
 

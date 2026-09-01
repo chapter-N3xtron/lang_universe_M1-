@@ -57,10 +57,13 @@ You can bypass the initial setup form by setting the following environment varia
 NEXT_PUBLIC_API_URL=http://localhost:2024
 NEXT_PUBLIC_ASSISTANT_ID=agent
 NEXT_PUBLIC_AUTH_SCHEME=
+NEXT_PUBLIC_AUTH_REQUIRED=false
 ```
 
 > [!NOTE]
 > If you are connecting to a LangSmith Agent Builder deployment, set `NEXT_PUBLIC_AUTH_SCHEME=langsmith-api-key`.
+>
+> For a custom-auth Agent Server, set `NEXT_PUBLIC_AUTH_REQUIRED=true`. This is a non-secret flag: the API key is entered by the user and stored only in browser local storage, never in `NEXT_PUBLIC_*` configuration.
 
 > [!TIP]
 > If you want to connect to a production LangGraph server, read the [Going to Production](#going-to-production) section.

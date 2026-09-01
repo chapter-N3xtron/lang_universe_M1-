@@ -23,6 +23,7 @@ services:
       SESSION_RUNTIME_ID: backend-postgres-v1
       CODING_OLLAMA_BASE_URL: http://host.docker.internal:11434
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_HOST: http://host.docker.internal:11434
       CUSTODIAN_WORKER_URL: http://host.docker.internal:8765
       CUSTODIAN_API_TOKEN_FILE: /run/secrets/custodian_api_token
     secrets:
@@ -37,7 +38,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/info')"]
+      test: ["CMD", "python", "-c", "import os,urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/info', headers={'X-Api-Key': os.environ['INSTALLATION_OWNER_API_KEY']}))"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -108,6 +109,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: http://127.0.0.1:8123
         NEXT_PUBLIC_ASSISTANT_ID: chat_ui
+        NEXT_PUBLIC_AUTH_REQUIRED: "true"
     restart: unless-stopped
     ports:
       - "127.0.0.1:3002:3000"

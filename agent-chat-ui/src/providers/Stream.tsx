@@ -102,9 +102,12 @@ async function checkGraphStatus(
     const res = await fetch(`${apiUrl}/info`, {
       headers,
     });
-    if (!res.ok) return { ok: false, reason: "The Agent Server is unavailable." };
+    if (!res.ok)
+      return { ok: false, reason: "The Agent Server is unavailable." };
 
-    const identityResponse = await fetch(`${apiUrl}/runtime-identity`, { headers });
+    const identityResponse = await fetch(`${apiUrl}/runtime-identity`, {
+      headers,
+    });
     if (!identityResponse.ok) {
       return {
         ok: false,
@@ -165,7 +168,9 @@ const DurableRuntimeBoundary = ({
   if (status.checking) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
-        <p className="text-muted-foreground">Verifying durable session storage…</p>
+        <p className="text-muted-foreground">
+          Verifying durable session storage…
+        </p>
       </div>
     );
   }
@@ -249,6 +254,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const envAssistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID;
   const envAuthScheme: string | undefined = process.env.NEXT_PUBLIC_AUTH_SCHEME;
+  const authRequired = process.env.NEXT_PUBLIC_AUTH_REQUIRED === "true";
 
   // Use URL params with env var fallbacks
   const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
@@ -282,8 +288,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const finalAssistantId = assistantId || envAssistantId;
   const finalAuthScheme = authScheme || envAuthScheme || "";
 
-  // Show the form if we: don't have an API URL, or don't have an assistant ID
-  if (!finalApiUrl || !finalAssistantId) {
+  // Custom-auth installations still need a browser-entered credential when public
+  // URL/assistant configuration bypasses the rest of the setup form.
+  if (!finalApiUrl || !finalAssistantId || (authRequired && !apiKey)) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
@@ -354,19 +361,22 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="apiKey">LangSmith API Key</Label>
+              <Label htmlFor="apiKey">
+                Agent Server API Key
+                {authRequired && <span className="text-rose-500">*</span>}
+              </Label>
               <p className="text-muted-foreground text-sm">
-                This is <strong>NOT</strong> required if using a local LangGraph
-                server. This value is stored in your browser's local storage and
-                is only used to authenticate requests sent to your LangGraph
-                server.
+                Enter the credential required by this Agent Server. It is stored
+                in your browser's local storage and is only sent to that server;
+                no secret is read from public frontend configuration.
               </p>
               <PasswordInput
                 id="apiKey"
                 name="apiKey"
                 defaultValue={apiKey ?? ""}
                 className="bg-background"
-                placeholder="lsv2_pt_..."
+                placeholder="API key"
+                required={authRequired}
               />
             </div>
 

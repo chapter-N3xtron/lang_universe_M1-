@@ -6,11 +6,13 @@ import os
 
 from fastapi import FastAPI
 
+from src.phase5_routes import router as phase5_router
 from src.session_catalog_routes import router as session_catalog_router
 from src.workspace_policy import host_worker_available
 
 app = FastAPI()
 app.include_router(session_catalog_router)
+app.include_router(phase5_router)
 
 
 @app.get("/runtime-identity")

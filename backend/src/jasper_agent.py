@@ -50,6 +50,7 @@ from src.phase5_thread_state import (
 )
 from src.phase5_tools import JASPER_PHASE5_TOOLS
 from src.secure_coding_tools import APPROVAL_INTERRUPT_ON, create_approval_tools
+from src.technical_report import TechnicalReport
 from src.visual_models import (
     ConceptMapArtifact,
     JasperResponse,
@@ -108,6 +109,7 @@ class State(TypedDict, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: str
+    technical_report: TechnicalReport
     execution_manifest: ExecutionManifest
     session_evidence: list[dict]
     session_document_ids: Annotated[list[str], replace_session_document_ids]
@@ -129,6 +131,7 @@ class CoderToJasperResult(TypedDict, total=False):
     execution_manifest: ExecutionManifest
     coding_session_id: str
     coding_status: str
+    technical_report: TechnicalReport | dict[str, Any]
 
 
 class CoderBridgeInputState(TypedDict):
@@ -149,6 +152,7 @@ class CoderBridgeState(TypedDict, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: str
+    technical_report: TechnicalReport | dict[str, Any]
     execution_manifest: ExecutionManifest
     coding_result: CoderToJasperResult
 
@@ -180,6 +184,7 @@ class JasperGraphResult(TypedDict, total=False):
     execution_manifest: ExecutionManifest
     coding_session_id: str
     coding_status: str
+    technical_report: TechnicalReport | dict[str, Any]
     librarian_task: str
     ocr_task: str
     ocr_document_ref: str
@@ -563,11 +568,10 @@ They are unavailable in read-only and autonomous modes. Call transfer_to_coding,
 transfer_to_librarian, or transfer_to_ocr by itself, never in parallel with another tool
 call.
 
-When an assistant message named coding returns from the nested Coding subgraph,
-relay its result to the human. Treat a question, blocker, cancellation, or error as
-such. Do not claim the requested work completed unless Coding's returned message
-explicitly reports completion and verification. Do not expose Coding's internal
-reasoning or tool transcript.
+When Coding returns from the nested Coding subgraph, its validated technical report
+is the authoritative result. The system derives the concise user summary from that
+report, never from legacy Coding assistant text. Do not expose Coding's internal
+reasoning, report serialization, or tool transcript.
 
 Every diagram must be evidence-grounded. Before drawing a repository or code diagram,
 read the relevant repository files and cite the evidence IDs returned by
@@ -1224,6 +1228,60 @@ def _final_coder_messages(messages: list[Any]) -> list[Any]:
     return attributed
 
 
+def _technical_report_voice_text(report: TechnicalReport) -> str:
+    """Produce bounded, evidence-aware speech from the validated handoff only."""
+
+    outcome = {
+        "completed": "The requested coding work is complete.",
+        "partial": "The requested coding work is only partially complete.",
+        "blocked": "The requested coding work is blocked.",
+        "failed": "The requested coding work failed.",
+        "cancelled": "The requested coding work was cancelled.",
+    }[report.completion_status]
+    completed = [note.task for note in report.task_notes if note.status == "completed"]
+    details = []
+    if completed:
+        details.append(f"Completed: {completed[0]}.")
+    passed = [e.type.replace("_", " ") for e in report.validation_evidence if e.result == "passed"]
+    failed = [e.type.replace("_", " ") for e in report.validation_evidence if e.result == "failed"]
+    inconclusive = [
+        evidence.type.replace("_", " ")
+        for evidence in report.validation_evidence
+        if evidence.result in {"not_run", "inconclusive"}
+    ]
+    if passed:
+        details.append(f"Passed {passed[0]}.")
+    if failed:
+        details.append(f"Failed {failed[0]}.")
+    if inconclusive:
+        details.append(f"{inconclusive[0].capitalize()} was not conclusive.")
+    # Deployment is never inferred from source checks. It is named only from its own evidence.
+    deployment = [
+        evidence for evidence in report.validation_evidence if evidence.type == "deployment_check"
+    ]
+    if deployment and deployment[0].result == "passed":
+        details.append("The reported deployment check passed.")
+    elif deployment and deployment[0].result != "passed":
+        details.append("The reported deployment check did not pass.")
+    concerns = []
+    if report.blockers:
+        concerns.append(f"Blocker: {report.blockers[0]}.")
+    if report.remaining_authorization_needs:
+        need = report.remaining_authorization_needs[0]
+        concerns.append(f"Authorization still needed for {need.action}: {need.reason}.")
+    if report.material_risks:
+        concerns.append(f"Risk: {report.material_risks[0].risk}.")
+    paragraph_one = " ".join([outcome, *details]).strip()
+    return "\n\n".join(part for part in (paragraph_one, " ".join(concerns)) if part)[:12000]
+
+
+def _invalid_coder_report_voice_text() -> str:
+    return (
+        "The coding result could not be verified from its required technical report. "
+        "No completion or deployment claim can be made."
+    )
+
+
 def _project_coder_output(state: CoderBridgeState) -> CoderBridgeOutputState:
     final_messages = _final_coder_messages(list(state.get("messages", [])))
     status = state.get("coding_status", "error")
@@ -1238,6 +1296,8 @@ def _project_coder_output(state: CoderBridgeState) -> CoderBridgeOutputState:
         result["workspace"] = state["workspace"]
     if state.get("execution_manifest") is not None:
         result["execution_manifest"] = state["execution_manifest"]
+    if "technical_report" in state:
+        result["technical_report"] = state["technical_report"]
     return {"coding_result": result}
 
 
@@ -1307,12 +1367,38 @@ def _normal_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
 
 
 def _coder_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
+    """Consume Coder's typed handoff; legacy assistant text is never a fallback."""
+
     coding_result = dict(state.get("coding_result") or {})
+    raw_report = coding_result.get("technical_report")
+    try:
+        report = TechnicalReport.model_validate(raw_report)
+        voice_text = _technical_report_voice_text(report)
+        # The report is authoritative. Preserve legacy status values where they
+        # have an equivalent, while retaining an observable cancelled outcome.
+        coding_status = {
+            "completed": "completed",
+            "partial": "blocked",
+            "blocked": "blocked",
+            "failed": "error",
+            "cancelled": "cancelled",
+        }[report.completion_status]
+        structured_response = JasperResponse(voice_text=voice_text).model_dump(mode="json")
+        report_value: TechnicalReport | dict[str, Any] = report
+    except Exception:
+        logger.warning("Coder technical report validation failed")
+        voice_text = _invalid_coder_report_voice_text()
+        coding_status = "error"
+        structured_response = JasperResponse(voice_text=voice_text).model_dump(mode="json")
+        report_value = raw_report if isinstance(raw_report, dict) else {}
     result: JasperGraphResult = {
         "route": "record_session",
-        "messages": _messages_to_dicts(list(coding_result.get("messages", []))),
+        "messages": [{"role": "assistant", "content": voice_text, "name": "jasper"}],
+        "jasper_response": voice_text,
+        "jasper_structured_response": structured_response,
         "coding_session_id": coding_result.get("coding_session_id", ""),
-        "coding_status": coding_result.get("coding_status", "error"),
+        "coding_status": coding_status,
+        "technical_report": report_value,
     }
     if coding_result.get("workspace") is not None:
         result["workspace"] = coding_result["workspace"]

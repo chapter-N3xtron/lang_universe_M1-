@@ -52,6 +52,35 @@ def _request(tmp_path, mode="read_only"):
     }
 
 
+def _technical_report(workspace, status="completed"):
+    blockers = ["Requested work is blocked."] if status == "blocked" else []
+    return {
+        "version": "1.0",
+        "completion_status": status,
+        "task_notes": [
+            {
+                "task": "Requested coding work",
+                "status": "completed" if status == "completed" else "incomplete",
+                "note": "Completed during this run." if status == "completed" else "Not completed during this run.",
+            }
+        ],
+        "changed_files": [],
+        "validation_evidence": [],
+        "blockers": blockers,
+        "remaining_authorization_needs": [],
+        "material_risks": [],
+        "provenance": {
+            "producer": "Coder",
+            "coding_session_id": "coding-session-1",
+            "thread_identity": "jasper-coder-thread",
+            "workspace": str(workspace),
+            "model": None,
+            "generated_at": "2026-01-01T00:00:00Z",
+        },
+        "supporting_references": [],
+    }
+
+
 def _patch_coder(monkeypatch, captured):
     async def fake_coder(state, config=None):
         captured.append((dict(state), config))
@@ -81,6 +110,7 @@ def _patch_coder(monkeypatch, captured):
             },
             "coding_session_id": "coding-session-1",
             "coding_status": "completed",
+            "technical_report": _technical_report(state["workspace"]),
         }
 
     monkeypatch.setattr(coding_agent, "deep_agents_coding_node", fake_coder)
@@ -211,6 +241,7 @@ async def test_bridge_maps_exact_inputs_and_only_supported_final_output(
         "execution_manifest",
         "coding_session_id",
         "coding_status",
+        "technical_report",
     }
     assert len(projected["messages"]) == 1
     assert projected["messages"][0].name == "coding"
@@ -332,23 +363,34 @@ async def test_embedded_sanitized_error_matches_authoritative_coder():
     assert "invalid_workspace" in projected["messages"][0].content
 
 
-@pytest.mark.parametrize("status", ["completed", "blocked", "error"])
-def test_jasper_boundary_preserves_coder_status(status):
+@pytest.mark.parametrize(
+    ("report_status", "expected_status"),
+    [
+        ("completed", "completed"),
+        ("partial", "blocked"),
+        ("blocked", "blocked"),
+        ("failed", "error"),
+        ("cancelled", "cancelled"),
+    ],
+)
+def test_jasper_boundary_uses_valid_report_status(report_status, expected_status):
     result = jasper_agent._coder_jasper_output(
         {
             "coding_result": {
-                "messages": [
-                    AIMessage(content=f"Coder status: {status}", name="coding")
-                ],
+                "messages": [AIMessage(content="legacy completion text", name="coding")],
                 "coding_session_id": "coding-session-status",
-                "coding_status": status,
+                "coding_status": "completed",
+                "technical_report": _technical_report("/repo", report_status),
             }
         }
     )
 
-    assert result["jasper_result"]["route"] == "record_session"
-    assert result["jasper_result"]["coding_status"] == status
-    assert result["jasper_result"]["messages"][0]["name"] == "coding"
+    output = result["jasper_result"]
+    assert output["route"] == "record_session"
+    assert output["coding_status"] == expected_status
+    assert output["messages"][0]["name"] == "jasper"
+    assert "legacy completion text" not in output["jasper_response"]
+    assert report_status in output["jasper_response"].lower() or report_status == "completed"
 
 
 @pytest.mark.asyncio
@@ -376,13 +418,11 @@ async def test_jasper_command_enters_local_bridge_and_returns_coder_result(
     assert captured
     assert result["jasper_result"]["route"] == "record_session"
     assert result["jasper_result"]["coding_status"] == "completed"
-    assert result["jasper_result"]["messages"] == [
-        {
-            "role": "assistant",
-            "content": "Coder completed and verified the task.",
-            "name": "coding",
-        }
-    ]
+    assert result["jasper_result"]["messages"][0]["name"] == "jasper"
+    assert result["jasper_result"]["jasper_response"].startswith(
+        "The requested coding work is complete."
+    )
+    assert "Coder completed and verified" not in result["jasper_result"]["jasper_response"]
 
 
 class ParentState(TypedDict, total=False):
@@ -475,10 +515,11 @@ async def test_parent_only_checkpointer_restores_nested_interrupt(
 
     assert result["jasper_result"]["coding_status"] == "completed"
     assert result["jasper_result"]["coding_session_id"] == "jasper-coder-thread"
-    assert (
-        "Coder completed the approved write."
-        in result["jasper_result"]["messages"][0]["content"]
+    assert result["jasper_result"]["messages"][0]["name"] == "jasper"
+    assert result["jasper_result"]["jasper_response"].startswith(
+        "The requested coding work is complete."
     )
+    assert "Coder completed the approved write." not in result["jasper_result"]["jasper_response"]
     assert (tmp_path / "durable.txt").read_text() == "persisted"
     assert jasper_agent.create_jasper_graph().checkpointer is None
 

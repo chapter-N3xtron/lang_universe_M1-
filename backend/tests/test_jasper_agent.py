@@ -50,6 +50,34 @@ def _grounded_edge(source: str, target: str) -> ConceptMapEdge:
     )
 
 
+def _coder_report(workspace: str) -> dict:
+    return {
+        "version": "1.0",
+        "completion_status": "completed",
+        "task_notes": [
+            {
+                "task": "Inspect the repository",
+                "status": "completed",
+                "note": "Inspection completed.",
+            }
+        ],
+        "changed_files": [],
+        "validation_evidence": [],
+        "blockers": [],
+        "remaining_authorization_needs": [],
+        "material_risks": [],
+        "provenance": {
+            "producer": "Coder",
+            "coding_session_id": "coding-session-real-handoff",
+            "thread_identity": "real-handoff-thread",
+            "workspace": workspace,
+            "model": None,
+            "generated_at": "2026-01-01T00:00:00Z",
+        },
+        "supporting_references": [],
+    }
+
+
 def _clear_src_modules():
     src_package = sys.modules.get("src")
     for key in ("src.jasper_agent", "src.llm"):
@@ -622,7 +650,6 @@ def test_jasper_delegates_web_access_to_librarian_without_direct_web_tools():
         "transfer_to_coding",
         "transfer_to_librarian",
         "transfer_to_ocr",
-        "submit_documentation_for_ingestion",
         "jasper_memory_write",
         "jasper_memory_read",
         "jasper_memory_delete",
@@ -652,7 +679,6 @@ def test_jasper_deep_agent_exposes_documented_tools_and_task(tmp_path):
         "transfer_to_coding",
         "transfer_to_librarian",
         "transfer_to_ocr",
-        "submit_documentation_for_ingestion",
         "jasper_memory_write",
         "jasper_memory_read",
         "jasper_memory_delete",
@@ -781,6 +807,7 @@ def test_real_jasper_tool_handoff_enters_local_coder_subgraph(tmp_path):
             "workspace": state["workspace"],
             "coding_session_id": "coding-session-real-handoff",
             "coding_status": "completed",
+            "technical_report": _coder_report(state["workspace"]),
         }
 
     with (
@@ -808,7 +835,10 @@ def test_real_jasper_tool_handoff_enters_local_coder_subgraph(tmp_path):
 
     assert captured[0][0]["messages"][0].content == "Inspect the repository"
     assert result["jasper_result"]["coding_status"] == "completed"
-    assert result["jasper_result"]["messages"][-1]["name"] == "coding"
+    assert result["jasper_result"]["messages"][-1]["name"] == "jasper"
+    assert result["jasper_result"]["jasper_response"].startswith(
+        "The requested coding work is complete."
+    )
 
 
 def test_jasper_autonomous_handoff_targets_local_coder_bridge(tmp_path):

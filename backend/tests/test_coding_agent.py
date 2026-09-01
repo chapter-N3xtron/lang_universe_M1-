@@ -281,7 +281,12 @@ def test_build_deep_agent_is_workspace_confined_and_read_only(monkeypatch, tmp_p
     }
     assert captured["agent"]["model"] is model
     assert captured["agent"]["checkpointer"] is None
-    assert captured["agent"]["tools"] == []
+    assert [tool.name for tool in captured["agent"]["tools"]] == [
+        "coder_memory_write",
+        "coder_memory_read",
+        "coder_memory_delete",
+        "coder_documentation_read",
+    ]
     assert captured["agent"]["interrupt_on"] is None
     assert captured["agent"]["permissions"] is None
     assert len(captured["agent"]["middleware"]) == 1
@@ -332,6 +337,10 @@ def test_build_deep_agent_approval_mode_uses_only_native_custodian(monkeypatch, 
         "custodian_compose_read",
         "custodian_compose_change",
         "custodian_github_publish",
+        "coder_memory_write",
+        "coder_memory_read",
+        "coder_memory_delete",
+        "coder_documentation_read",
     ]
     assert set(captured["agent"]["interrupt_on"]) == {
         "write_file",

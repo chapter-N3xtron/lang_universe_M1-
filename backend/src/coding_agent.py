@@ -7,6 +7,7 @@ import logging
 import operator
 import os
 from collections import OrderedDict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias
 
@@ -28,6 +29,16 @@ from src.custodian_backend import CustodianBackend, CustodianClient, CustodianEr
 from src.llm import get_coding_llm
 from src.phase5_tools import CODER_PHASE5_TOOLS
 from src.runtime_authority import RuntimeIdentityError, authoritative_thread_id
+from src.technical_report import (
+    AuthorizationNeed,
+    ChangedFile,
+    MaterialRisk,
+    ReportProvenance,
+    SupportingReference,
+    TaskNote,
+    TechnicalReport,
+    ValidationEvidence,
+)
 from src.workspace_policy import (
     ExecutionManifest,
     WorkspacePolicyError,
@@ -41,7 +52,7 @@ InvalidWorkspaceError = WorkspacePolicyError
 
 CoderMessages: TypeAlias = Annotated[list[Any], operator.add]
 CoderUIEvents: TypeAlias = Annotated[list[AnyUIMessage], ui_message_reducer]
-CoderStatus: TypeAlias = Literal["completed", "blocked", "error"]
+CoderStatus: TypeAlias = Literal["completed", "blocked", "error", "cancelled"]
 
 
 class CoderInputState(TypedDict, total=False):
@@ -60,6 +71,7 @@ class CoderOutputState(TypedDict, total=False):
     execution_manifest: ExecutionManifest
     coding_session_id: str
     coding_status: CoderStatus
+    technical_report: TechnicalReport
     ui: CoderUIEvents
 
 
@@ -72,6 +84,7 @@ class CoderState(TypedDict, total=False):
     user_identity: str
     coding_session_id: str
     coding_status: CoderStatus
+    technical_report: TechnicalReport
     execution_manifest: ExecutionManifest
     ui: CoderUIEvents
 
@@ -567,6 +580,132 @@ def _has_incomplete_tasks(raw_todos: Any) -> bool:
     return bool(tasks) and any(task["status"] != "completed" for task in tasks)
 
 
+def assemble_technical_report(
+    *,
+    completion_status: Literal["completed", "partial", "blocked", "failed", "cancelled"],
+    raw_todos: Any,
+    workspace: str,
+    thread_identity: str,
+    coding_session_id: str,
+    model: str | None,
+    manifest: ExecutionManifest | None,
+    changed_files: Any = None,
+    validation_evidence: Any = None,
+    blockers: Any = None,
+    authorization_needs: Any = None,
+    material_risks: Any = None,
+    supporting_references: Any = None,
+    failure_note: str | None = None,
+) -> TechnicalReport:
+    """Deterministically assemble the strict terminal Coder handoff."""
+
+    todo_statuses = {
+        "completed": "completed",
+        "in_progress": "incomplete",
+        "pending": "incomplete",
+        "blocked": "blocked",
+        "failed": "failed",
+        "skipped": "skipped",
+    }
+    task_notes: list[TaskNote] = []
+    for todo in raw_todos if isinstance(raw_todos, list) else []:
+        if not isinstance(todo, dict):
+            continue
+        task = todo.get("content")
+        status = todo_statuses.get(todo.get("status"))
+        if isinstance(task, str) and task.strip() and status:
+            task_notes.append(
+                TaskNote(
+                    task=task.strip()[:1000],
+                    status=status,
+                    note=(
+                        "Completed during this run."
+                        if status == "completed"
+                        else "Not completed during this run."
+                    ),
+                )
+            )
+    if not task_notes:
+        task_notes = [
+            TaskNote(
+                task="Requested coding work",
+                status=(
+                    "completed"
+                    if completion_status == "completed"
+                    else "incomplete"
+                    if completion_status in {"partial", "blocked", "cancelled"}
+                    else "failed"
+                ),
+                note=(failure_note or "Coder completed the requested work.")[:1000],
+            )
+        ]
+
+    def valid_records(value: Any, record_type: Any, limit: int) -> list[Any]:
+        records = []
+        for item in value if isinstance(value, list) else []:
+            try:
+                records.append(record_type.model_validate(item))
+            except Exception:
+                logger.warning("Coder report omitted invalid %s record", record_type.__name__)
+            if len(records) == limit:
+                break
+        return records
+
+    report_blockers = [
+        item.strip()[:1000]
+        for item in (blockers if isinstance(blockers, list) else [])
+        if isinstance(item, str) and item.strip()
+    ][:32]
+    if completion_status == "completed" and (
+        report_blockers or (isinstance(authorization_needs, list) and authorization_needs)
+    ):
+        completion_status = "blocked" if report_blockers else "partial"
+    for note in task_notes:
+        if note.status == "blocked" and note.task not in report_blockers:
+            report_blockers.append(note.task[:1000])
+    if failure_note and completion_status in {"failed", "blocked"}:
+        report_blockers = (report_blockers + [failure_note[:1000]])[:32]
+
+    references = valid_records(supporting_references, SupportingReference, 16)
+    if manifest is not None and len(references) < 16:
+        references.append(
+            SupportingReference(
+                id="execution-manifest",
+                kind="execution_manifest",
+                locator="execution_manifest",
+                summary="Execution identity supplied by the server.",
+            )
+        )
+    evidence_records = valid_records(validation_evidence, ValidationEvidence, 64)
+    known_reference_ids = {reference.id for reference in references}
+    evidence_records = [
+        evidence
+        for evidence in evidence_records
+        if set(evidence.reference_ids).issubset(known_reference_ids)
+    ]
+    return TechnicalReport(
+        version="1.0",
+        completion_status=completion_status,
+        task_notes=task_notes[:64],
+        changed_files=valid_records(changed_files, ChangedFile, 256),
+        validation_evidence=evidence_records,
+        blockers=report_blockers,
+        remaining_authorization_needs=valid_records(
+            authorization_needs, AuthorizationNeed, 32
+        ),
+        material_risks=valid_records(material_risks, MaterialRisk, 32),
+        provenance=ReportProvenance(
+            producer="Coder",
+            coding_session_id=(coding_session_id or thread_identity or "unknown")[:256],
+            thread_identity=(thread_identity or "unknown")[:256],
+            workspace=workspace[:1024],
+            model=model[:256] if isinstance(model, str) else None,
+            generated_at=datetime.now(UTC),
+        ),
+        supporting_references=references,
+    )
+
+
 def _completion_report_text(content: str, raw_todos: Any) -> str:
     if content.lstrip().lower().startswith("completion report"):
         return content
@@ -722,6 +861,8 @@ async def deep_agents_coding_node(
     state: CoderState, config: RunnableConfig = None
 ) -> CoderOutputState:
     session_id = ""
+    thread_identity = "unknown"
+    raw_todos: Any = []
     manifest: ExecutionManifest | None = None
     workspace: Path | None = None
     try:
@@ -754,18 +895,59 @@ async def deep_agents_coding_node(
                 "execution_manifest": manifest,
                 "coding_session_id": session_id,
                 "coding_status": "error",
+                "technical_report": assemble_technical_report(
+                    completion_status="failed",
+                    raw_todos=raw_todos,
+                    workspace=str(workspace),
+                    thread_identity=thread_identity,
+                    coding_session_id=session_id,
+                    model=state.get("model"),
+                    manifest=manifest,
+                    failure_note="Coder did not return a final result.",
+                ),
             }
+        completion_status = "partial" if _has_incomplete_tasks(raw_todos) else "completed"
+        report = assemble_technical_report(
+            completion_status=completion_status,
+            raw_todos=raw_todos,
+            workspace=str(workspace),
+            thread_identity=thread_identity,
+            coding_session_id=session_id,
+            model=state.get("model"),
+            manifest=manifest,
+            changed_files=result.get("changed_files"),
+            validation_evidence=result.get("validation_evidence"),
+            blockers=result.get("blockers"),
+            authorization_needs=result.get("remaining_authorization_needs"),
+            material_risks=result.get("material_risks"),
+            supporting_references=result.get("supporting_references"),
+        )
         completion_messages = _format_completion_report(new_messages, raw_todos)
         return {
             "messages": _format_coding_result(completion_messages, manifest),
             "workspace": str(workspace),
             "execution_manifest": manifest,
             "coding_session_id": session_id,
-            "coding_status": (
-                "blocked" if _has_incomplete_tasks(raw_todos) else "completed"
-            ),
+            "coding_status": "blocked" if completion_status == "partial" else "completed",
+            "technical_report": report,
         }
-    except (asyncio.CancelledError, GraphBubbleUp, RuntimeIdentityError):
+    except asyncio.CancelledError as exc:
+        # Cancellation must continue to bubble up so LangGraph can cancel and preserve
+        # its interrupt/checkpoint semantics.  Attach the validated terminal handoff to
+        # the exception for a runtime that records cancelled task results; a normal
+        # state update here would incorrectly turn cancellation into completion.
+        exc.technical_report = assemble_technical_report(
+            completion_status="cancelled",
+            raw_todos=raw_todos,
+            workspace=str(workspace) if workspace is not None else "unavailable",
+            thread_identity=thread_identity,
+            coding_session_id=session_id or thread_identity,
+            model=state.get("model"),
+            manifest=manifest,
+            failure_note="Coder execution was cancelled before a final result.",
+        )
+        raise
+    except (GraphBubbleUp, RuntimeIdentityError):
         raise
     except InvalidWorkspaceError:
         error_code = "invalid_workspace"
@@ -793,6 +975,16 @@ async def deep_agents_coding_node(
         "messages": error_messages,
         "coding_session_id": session_id,
         "coding_status": "error",
+        "technical_report": assemble_technical_report(
+            completion_status="failed",
+            raw_todos=[],
+            workspace=str(workspace) if workspace is not None else "unavailable",
+            thread_identity=session_id or "unknown",
+            coding_session_id=session_id or "unknown",
+            model=state.get("model"),
+            manifest=manifest,
+            failure_note=f"Coder stopped because of {error_code}.",
+        ),
     }
     if workspace is not None and manifest is not None:
         response.update(

@@ -449,7 +449,7 @@
       "type": "integer"
     },
     "voice_text": {
-      "maxLength": 12000,
+      "maxLength": 24000,
       "minLength": 1,
       "title": "Voice Text",
       "type": "string"

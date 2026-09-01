@@ -46,7 +46,7 @@ Alternative considered: keep a free-form final message and prompt Coder to use h
 
 ### 2. Build the report at the Coder boundary on every terminal path
 
-Coder's terminal adapter converts session output, todos, execution state, and safe evidence metadata into a report. Normal completion, missing final result, caught failure, and cancellation handling each have an explicit status mapping. Existing `coding_status` may remain temporarily for compatibility, but it is derived from or checked against the report and is not Jasper's authoritative result.
+Coder's terminal adapter converts session output, todos, execution state, and safe evidence metadata into a report. Normal completion, missing final result, caught failure, and cancellation handling each have an explicit status mapping. A caught `asyncio.CancelledError` is converted to a normal Coder state/output return containing a validated `completion_status="cancelled"` report, compatible `coding_status="cancelled"`, and safe legacy cancellation diagnostic, so the existing bridge can deliver it to Jasper; it is not re-raised. `GraphBubbleUp` propagation remains unchanged. Existing `coding_status` may remain temporarily for compatibility, but it is derived from or checked against the report and is not Jasper's authoritative result.
 
 Provenance is populated from run state and the canonical workspace: fixed producer `Coder`, coding session ID, thread identity, canonical workspace, nullable selected model, and an ISO-8601 generation time. Existing execution-manifest identity can be represented by a bounded `execution_manifest` supporting reference; the report does not redefine deployment truth.
 
@@ -62,13 +62,13 @@ Alternative considered: serialize JSON into an assistant message. Rejected becau
 
 When the latest return is from Coder, Jasper validates the typed report and passes a bounded report projection to its existing response-generation path with explicit summary rules. The projection retains completion status, material notes, evidence types/results, blockers, authorization needs, and risks while limiting file/reference detail. Tests must prove that available legacy assistant text cannot become the response when a report exists.
 
-The output remains normal `JasperResponse.voice_text`. It is at most two short paragraphs, starts with outcome, and avoids JSON, tables, report labels, raw output, and exhaustive lists. Failure and non-completion language is mandatory when indicated by the report.
+The output remains normal `JasperResponse.voice_text`, whose validated maximum is 24,000 characters. It is at most two short paragraphs, starts with outcome, and avoids JSON, tables, raw output, and exhaustive file lists. Every typed task note is rendered as a voice-friendly task/status/explanatory-note sentence; legacy Coder assistant text is never used. If all whole task sentences cannot fit the 24,000-character `voice_text` maximum, Jasper explicitly discloses the overflow and that the complete typed report remains available for later use instead of silently dropping later tasks. Failure and non-completion language is mandatory when indicated by the report.
 
 Alternative considered: expose the report verbatim and rely on the browser to summarize or speak selected fields. Rejected because it leaks an internal contract into the user experience and would change the browser-sidecar/TTS boundary.
 
 ### 5. Gate deployment wording on typed evidence
 
-Summary logic preserves validation `type` and `result`. Source tests, static analysis, and builds can support only claims about those activities. Positive deployment wording is enabled only by relevant passed `deployment_check` evidence and must not be inferred from source-level evidence. This does not add deployed acceptance; it only governs claims about evidence already present.
+Summary logic preserves validation `type` and `result`. Source tests, static analysis, and builds can support only claims about those activities. Positive deployment wording is enabled only when every relevant reported `deployment_check` passes; any failed, inconclusive, or not-run check prevents an unqualified positive conclusion. This does not add deployed acceptance; it only governs claims about evidence already present.
 
 Alternative considered: reduce validation to passed/failed text. Rejected because Jasper could no longer distinguish source verification from runtime or deployment verification.
 

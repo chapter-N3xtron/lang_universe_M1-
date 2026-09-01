@@ -526,12 +526,12 @@ def test_outer_legacy_coding_alias_enters_jasper_and_surfaces_openspec_approval(
         )
     )
 
-    assert result["messages"][-1]["name"] == "coding"
+    assert result["messages"][-1]["name"] == "jasper"
     content = result["messages"][-1]["content"]
-    assert content.startswith("Completion report")
-    assert "OpenSpec installation was rejected and was not completed." in content
-    assert "command runtime: native_custodian_host" in content
-    assert f"selected repository: {tmp_path}" in content
+    assert content.startswith("The requested coding work is complete.")
+    assert "OpenSpec installation was rejected and was not completed." not in content
+    assert "command runtime: native_custodian_host" not in content
+    assert str(tmp_path) not in content
     assert result["coding_status"] == "completed"
 
 
@@ -603,8 +603,10 @@ def test_coding_node_propagates_cancellation(monkeypatch, tmp_path):
         )
         await asyncio.sleep(0)
         task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        result = await task
+        assert result["coding_status"] == "cancelled"
+        assert result["technical_report"].completion_status == "cancelled"
+        assert "was cancelled" in result["messages"][0].content
 
     asyncio.run(cancel())
 

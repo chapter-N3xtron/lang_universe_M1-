@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from src.coding_agent import assemble_technical_report, deep_agents_coding_node
+from src.coding_agent import _compatibility_coding_status, assemble_technical_report
 from src.jasper_agent import _coder_jasper_output
 from src.technical_report import TechnicalReport
 
@@ -85,38 +85,69 @@ def test_jasper_report_is_authoritative_evidence_aware_and_fail_closed():
     assert "completed" not in invalid["jasper_result"]["jasper_response"].lower()
 
 
+def test_jasper_revalidates_a_mutated_report_instance():
+    report = TechnicalReport.model_validate(report_data())
+    report.blockers.append("The report changed after validation.")
+
+    result = _coder_jasper_output({"coding_result": {"technical_report": report}})
+
+    assert "could not be verified" in result["jasper_result"]["jasper_response"]
+
+
 @pytest.mark.asyncio
-@pytest.mark.asyncio
-async def test_cancellation_preserves_langgraph_semantics_and_carries_valid_report(
+async def test_cancellation_returns_valid_report_through_coder_bridge_to_jasper(
     monkeypatch, tmp_path
 ):
+    from langchain_core.messages import HumanMessage
+
+    from src import jasper_agent
+
+    started = asyncio.Event()
+
     class SlowApp:
         async def ainvoke(self, _payload, config=None):
+            started.set()
             await asyncio.sleep(10)
 
     async def session_agent(*_args):
         return SlowApp()
 
     monkeypatch.setattr("src.coding_agent._session_agent", session_agent)
+    bridge = jasper_agent.create_jasper_coder_bridge()
     task = asyncio.create_task(
-        deep_agents_coding_node(
+        bridge.ainvoke(
             {
-                "messages": [{"role": "user", "content": "Wait"}],
-                "workspace": str(tmp_path),
-                "thread_identity": "cancelled-thread",
+                "coding_request": {
+                    "messages": [HumanMessage(content="Wait")],
+                    "workspace": str(tmp_path),
+                    "model": None,
+                    "execution_mode": "read_only",
+                    "thread_identity": "cancelled-thread",
+                    "user_identity": "user",
+                    "coding_session_id": "cancelled-thread",
+                }
             }
         )
     )
-    await asyncio.sleep(0)
+    await asyncio.wait_for(started.wait(), timeout=1)
     task.cancel()
-    with pytest.raises(asyncio.CancelledError) as cancellation:
-        await task
+    bridge_result = await task
 
-    report = cancellation.value.technical_report
+    coder_result = bridge_result["coding_result"]
+    report = coder_result["technical_report"]
     assert isinstance(report, TechnicalReport)
     assert report.completion_status == "cancelled"
     assert report.task_notes[0].status == "incomplete"
-    assert "cancelled" in report.task_notes[0].note
+    assert report.task_notes[0].note == "Coder execution was cancelled before a final result."
+    assert coder_result["coding_status"] == "cancelled"
+    assert "was cancelled" in coder_result["messages"][0].content
+
+    jasper_result = _coder_jasper_output({"coding_result": coder_result})["jasper_result"]
+    assert jasper_result["coding_status"] == "cancelled"
+    assert jasper_result["jasper_response"].startswith(
+        "The requested coding work was cancelled."
+    )
+    assert "coding work is complete" not in jasper_result["jasper_response"].lower()
 
 
 @pytest.mark.asyncio
@@ -145,11 +176,73 @@ async def test_existing_coder_bridge_path_carries_and_consumes_typed_report(monk
     assert len(output["jasper_response"].split("\n\n")) <= 2
 
 
+def test_jasper_covers_every_task_status_and_note_in_voice_summary():
+    task_notes = [
+        {"task": "Implement parser", "status": "completed", "note": "Parser was added."},
+        {"task": "Write migration", "status": "incomplete", "note": "Migration needs review."},
+        {"task": "Get credentials", "status": "blocked", "note": "Access was not granted."},
+        {"task": "Run integration", "status": "failed", "note": "The service rejected the request."},
+        {"task": "Remove old flag", "status": "skipped", "note": "The flag remains required."},
+    ]
+    voice = _coder_jasper_output(
+        {"coding_result": {"technical_report": report_data(task_notes=task_notes)}}
+    )["jasper_result"]["jasper_response"]
+
+    for index, task_note in enumerate(task_notes, start=1):
+        assert f"Task {index}: {task_note['task']} is {task_note['status']}." in voice
+        assert task_note["note"] in voice
+    assert "complete task digest exceeds" not in voice
+
+
+def test_jasper_discloses_task_digest_overflow_and_retains_full_report():
+    task_notes = [
+        {
+            "task": f"Task {index}",
+            "status": "completed",
+            "note": "x" * 1000,
+        }
+        for index in range(64)
+    ]
+    result = _coder_jasper_output(
+        {"coding_result": {"technical_report": report_data(task_notes=task_notes)}}
+    )["jasper_result"]
+    voice = result["jasper_response"]
+
+    assert len(voice) <= 24000
+    assert "complete task digest exceeds the voice response limit" in voice
+    assert "full typed report is retained for later use" in voice
+    assert result["technical_report"].task_notes[-1].task == "Task 63"
+    assert "Task 64: Task 63 is completed." not in voice
+
+
+def test_jasper_aggregates_conflicting_deployment_checks():
+    raw = report_data(
+        validation_evidence=[
+            {"type": "deployment_check", "result": "passed", "description": "First region passed.", "reference_ids": ["test-1"]},
+            {"type": "deployment_check", "result": "inconclusive", "description": "Second region timed out.", "reference_ids": ["test-1"]},
+            {"type": "deployment_check", "result": "failed", "description": "Third region failed.", "reference_ids": ["test-1"]},
+        ]
+    )
+    voice = _coder_jasper_output({"coding_result": {"technical_report": raw}})["jasper_result"]["jasper_response"]
+
+    assert "At least one reported deployment check failed." in voice
+    assert "All reported deployment checks passed." not in voice
+
+
+def test_compatibility_status_uses_final_assembled_report_status():
+    report = assemble_technical_report(
+        completion_status="completed", raw_todos=[], workspace="/repo", thread_identity="thread",
+        coding_session_id="session", model=None, manifest=None, blockers=["Release is blocked."],
+    )
+
+    assert report.completion_status == "blocked"
+    assert _compatibility_coding_status(report) == "blocked"
+
+
 def test_jasper_discloses_failed_deployment_and_noncompletion_in_two_paragraphs():
     raw = report_data(
         completion_status="blocked", blockers=["Service credentials are unavailable."],
         material_risks=[{"risk": "Configuration drift.", "impact": "Unexpected behavior.", "mitigation": "Review configuration."}],
-        task_notes=[{"task": f"Task {index}", "status": "completed", "note": "Done."} for index in range(64)],
         validation_evidence=[
             {"type": "source_test", "result": "passed", "description": "Tests passed.", "reference_ids": ["test-1"]},
             {"type": "deployment_check", "result": "failed", "description": "Deployment failed.", "reference_ids": ["test-1"]},
@@ -157,8 +250,7 @@ def test_jasper_discloses_failed_deployment_and_noncompletion_in_two_paragraphs(
     )
     voice = _coder_jasper_output({"coding_result": {"technical_report": raw}})["jasper_result"]["jasper_response"]
     assert voice.startswith("The requested coding work is blocked.")
-    assert "deployment check did not pass" in voice
+    assert "deployment check failed" in voice
     assert "Blocker:" in voice
     assert "Risk: Configuration drift." in voice
-    assert "Task 63" not in voice
     assert len(voice.split("\n\n")) <= 2

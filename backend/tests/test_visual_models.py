@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.visual_models import (
+    MAX_VOICE_TEXT_CHARACTERS,
     ConceptMapArtifact,
     ConceptMapEdge,
     ConceptMapNode,
@@ -80,6 +81,23 @@ def test_jasper_confidence_is_bounded_or_unknown():
     assert JasperResponse(voice_text="Unknown.").confidence_score is None
     with pytest.raises(ValidationError):
         JasperResponse(voice_text="Overconfident.", confidence_score=1.01)
+
+
+def test_voice_text_limit_is_24000_in_model_schema_and_fallback():
+    assert MAX_VOICE_TEXT_CHARACTERS == 24_000
+    assert len(JasperResponse(voice_text="x" * 24_000).voice_text) == 24_000
+    with pytest.raises(ValidationError):
+        JasperResponse(voice_text="x" * 24_001)
+    assert JasperResponse.model_json_schema()["properties"]["voice_text"][
+        "maxLength"
+    ] == 24_000
+    assert len(
+        safe_text_response(
+            "x" * 24_001,
+            code="structured_output_invalid",
+            message="Invalid structured response.",
+        ).voice_text
+    ) == 24_000
 
 
 def test_unknown_fields_are_rejected():

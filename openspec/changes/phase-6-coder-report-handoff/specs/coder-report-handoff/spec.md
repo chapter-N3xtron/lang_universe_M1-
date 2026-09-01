@@ -44,6 +44,10 @@ Coder SHALL select `completed` only when all requested in-scope tasks are comple
 - **WHEN** Coder changes files and a relevant validation command fails
 - **THEN** the report uses a non-completed status, retains the changed-file entries, and records failed typed validation evidence rather than concealing the failure
 
+#### Scenario: Coder execution is cancelled
+- **WHEN** Coder catches `asyncio.CancelledError` before producing a final result
+- **THEN** it returns a normal Coder state/output result with a validated report whose `completion_status` is `cancelled`, compatible `coding_status` is `cancelled`, and safe legacy cancellation diagnostics; the existing Coder-to-Jasper bridge delivers that result rather than receiving a re-raised cancellation
+
 ### Requirement: Jasper consumes the report after Coder returns
 After Coder returns, Jasper SHALL consume the validated `TechnicalReport` as the authoritative handoff input before producing the user-facing result. Jasper SHALL NOT bypass the report by directly relaying Coder's legacy plain-text completion message, and Coder's raw report serialization SHALL NOT be used as user-facing prose.
 
@@ -56,18 +60,22 @@ After Coder returns, Jasper SHALL consume the validated `TechnicalReport` as the
 - **THEN** Jasper's summary clearly states that outcome and includes the material reason without presenting the requested work as complete
 
 ### Requirement: Jasper produces a concise voice-friendly summary
-Jasper SHALL transform the report into plain-English `voice_text` suitable for the existing browser sidecar speech path. The summary SHALL use no more than two short paragraphs, lead with the completion outcome, concisely cover material work and validation, and mention blockers, remaining authorization needs, or material risks when present. It SHALL NOT dump serialized report text, JSON, tables, raw command output, exhaustive file lists, or internal tool transcripts.
+Jasper SHALL transform the report into plain-English `voice_text` suitable for the existing browser sidecar speech path. `voice_text` SHALL be validated and bounded to 24,000 characters. The summary SHALL use no more than two short paragraphs, lead with the completion outcome, concisely cover material work and validation, and mention blockers, remaining authorization needs, or material risks when present. It SHALL include every `task_notes` item's task, exact status, and explanatory note when the complete digest fits; it SHALL NOT omit later task items merely to remain terse. It SHALL NOT dump serialized report text, JSON, tables, raw command output, exhaustive file lists, or internal tool transcripts.
 
-#### Scenario: Large successful report
-- **WHEN** a valid completed report contains many task, file, and evidence entries
-- **THEN** Jasper produces a concise plain-English synthesis rather than enumerating or serializing every report entry
+#### Scenario: Large task digest exceeds the voice bound
+- **WHEN** a valid report's complete task/status/note digest cannot fit within `JasperResponse.voice_text`'s 24,000-character maximum size
+- **THEN** Jasper includes only whole task entries that fit, explicitly says that the complete task digest exceeds the voice response limit and that the full typed report is retained for later use, and does not silently omit later task items
+
+#### Scenario: Multiple task outcomes
+- **WHEN** a valid report has multiple task notes with different statuses
+- **THEN** Jasper's spoken summary includes each task's status and explanatory note, including later incomplete, blocked, failed, or skipped tasks
 
 #### Scenario: Material risk accompanies completion
 - **WHEN** a report is otherwise complete but contains a material risk
 - **THEN** Jasper includes that risk in the concise summary rather than omitting it to make the result sound unqualified
 
 ### Requirement: Validation claims preserve evidence type and limits
-Jasper SHALL distinguish source tests, static analysis, builds, runtime checks, deployment checks, and manual inspection when describing validation. A passed `source_test`, `static_analysis`, or `build` entry SHALL NOT be described as proof that deployment succeeded. Jasper SHALL make a positive deployment claim only when the report contains relevant passed `deployment_check` evidence; adding deployed acceptance execution is outside this capability.
+Jasper SHALL distinguish source tests, static analysis, builds, runtime checks, deployment checks, and manual inspection when describing validation. A passed `source_test`, `static_analysis`, or `build` entry SHALL NOT be described as proof that deployment succeeded. Jasper SHALL make a positive deployment claim only when every relevant reported `deployment_check` passes; any failed, inconclusive, or not-run relevant deployment check prevents an unqualified positive deployment conclusion. Adding deployed acceptance execution is outside this capability.
 
 #### Scenario: Only source tests pass
 - **WHEN** the report contains passed source-test evidence and no passed deployment-check evidence

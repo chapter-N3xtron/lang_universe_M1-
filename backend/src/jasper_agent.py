@@ -52,6 +52,7 @@ from src.phase5_tools import JASPER_PHASE5_TOOLS
 from src.secure_coding_tools import APPROVAL_INTERRUPT_ON, create_approval_tools
 from src.technical_report import TechnicalReport
 from src.visual_models import (
+    MAX_VOICE_TEXT_CHARACTERS,
     ConceptMapArtifact,
     JasperResponse,
     LayoutSuggestion,
@@ -1238,12 +1239,17 @@ def _technical_report_voice_text(report: TechnicalReport) -> str:
         "failed": "The requested coding work failed.",
         "cancelled": "The requested coding work was cancelled.",
     }[report.completion_status]
-    completed = [note.task for note in report.task_notes if note.status == "completed"]
     details = []
-    if completed:
-        details.append(f"Completed: {completed[0]}.")
-    passed = [e.type.replace("_", " ") for e in report.validation_evidence if e.result == "passed"]
-    failed = [e.type.replace("_", " ") for e in report.validation_evidence if e.result == "failed"]
+    passed = [
+        evidence.type.replace("_", " ")
+        for evidence in report.validation_evidence
+        if evidence.result == "passed"
+    ]
+    failed = [
+        evidence.type.replace("_", " ")
+        for evidence in report.validation_evidence
+        if evidence.result == "failed"
+    ]
     inconclusive = [
         evidence.type.replace("_", " ")
         for evidence in report.validation_evidence
@@ -1255,14 +1261,23 @@ def _technical_report_voice_text(report: TechnicalReport) -> str:
         details.append(f"Failed {failed[0]}.")
     if inconclusive:
         details.append(f"{inconclusive[0].capitalize()} was not conclusive.")
-    # Deployment is never inferred from source checks. It is named only from its own evidence.
+
+    # Deployment is never inferred from source checks. Every deployment check must
+    # pass before Jasper can make a positive deployment statement.
     deployment = [
-        evidence for evidence in report.validation_evidence if evidence.type == "deployment_check"
+        evidence
+        for evidence in report.validation_evidence
+        if evidence.type == "deployment_check"
     ]
-    if deployment and deployment[0].result == "passed":
-        details.append("The reported deployment check passed.")
-    elif deployment and deployment[0].result != "passed":
-        details.append("The reported deployment check did not pass.")
+    if deployment and all(evidence.result == "passed" for evidence in deployment):
+        details.append("All reported deployment checks passed.")
+    elif any(evidence.result == "failed" for evidence in deployment):
+        details.append("At least one reported deployment check failed.")
+    elif deployment:
+        details.append(
+            "At least one reported deployment check was inconclusive or not run."
+        )
+
     concerns = []
     if report.blockers:
         concerns.append(f"Blocker: {report.blockers[0]}.")
@@ -1271,8 +1286,48 @@ def _technical_report_voice_text(report: TechnicalReport) -> str:
         concerns.append(f"Authorization still needed for {need.action}: {need.reason}.")
     if report.material_risks:
         concerns.append(f"Risk: {report.material_risks[0].risk}.")
-    paragraph_one = " ".join([outcome, *details]).strip()
-    return "\n\n".join(part for part in (paragraph_one, " ".join(concerns)) if part)[:12000]
+
+    prefix = " ".join([outcome, *details]).strip()
+    concerns_text = " ".join(concerns)
+    task_updates = [
+        f"Task {index}: {note.task} is {note.status}. {note.note}"
+        for index, note in enumerate(report.task_notes, start=1)
+    ]
+
+    def render(task_text: str) -> str:
+        first_paragraph = " ".join(
+            part for part in (prefix, task_text) if part
+        )
+        return "\n\n".join(
+            part for part in (first_paragraph, concerns_text) if part
+        )
+
+    complete_digest = " ".join(("Task updates:", *task_updates)) if task_updates else ""
+    complete_voice_text = render(complete_digest)
+    if len(complete_voice_text) <= MAX_VOICE_TEXT_CHARACTERS:
+        return complete_voice_text
+
+    # Never silently truncate task notes: include whole task/status/note entries
+    # only, then explicitly identify that the retained report has more detail.
+    included: list[str] = []
+    for task_update in task_updates:
+        next_included_count = len(included) + 1
+        disclosure = (
+            "The complete task digest exceeds the voice response limit; "
+            f"{next_included_count} of {len(task_updates)} task updates are spoken here. "
+            "The full typed report is retained for later use."
+        )
+        candidate = " ".join(("Task updates:", *included, task_update, disclosure))
+        if len(render(candidate)) > MAX_VOICE_TEXT_CHARACTERS:
+            break
+        included.append(task_update)
+
+    disclosure = (
+        "The complete task digest exceeds the voice response limit; "
+        f"{len(included)} of {len(task_updates)} task updates are spoken here. "
+        "The full typed report is retained for later use."
+    )
+    return render(" ".join(("Task updates:", *included, disclosure)))
 
 
 def _invalid_coder_report_voice_text() -> str:

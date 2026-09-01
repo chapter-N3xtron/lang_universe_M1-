@@ -6,8 +6,8 @@ Coder currently returns completion information as plain assistant text, so Jaspe
 
 ## What Changes
 
-- Introduce a strict, versioned `TechnicalReport` contract produced whenever Coder returns to Jasper, with required fields for completion status, task notes, changed files, typed validation evidence, blockers, remaining authorization needs, material risks, provenance, and bounded supporting references.
-- Require Jasper to consume the validated report after Coder returns and generate a concise, voice-friendly plain-English user summary rather than dumping the raw report.
+- Introduce a strict, versioned `TechnicalReport` contract produced whenever Coder returns to Jasper, with required fields for completion status, task notes, changed files, typed validation evidence, blockers, remaining authorization needs, material risks, provenance, and bounded supporting references. A caught Coder cancellation returns this normal typed handoff with `completion_status="cancelled"` and compatible `coding_status="cancelled"` for Jasper consumption; it is not re-raised.
+- Require Jasper to consume the validated report after Coder returns and generate a concise, voice-friendly plain-English user summary rather than dumping the raw report. The summary must cover every task note's status and explanatory note; when that complete digest cannot fit the 24,000-character `voice_text` limit, it must disclose the limit rather than silently omit later tasks while retaining the typed report.
 - Require summaries to disclose failure or incomplete work and to distinguish source-level test evidence from deployment evidence; source tests alone cannot support a deployment-success claim.
 - Replace the current bypass/plain-text completion handoff as the authoritative Coder-to-Jasper result while retaining a safe, explicit invalid-report failure path.
 - Preserve the existing browser-sidecar speech architecture and its `JasperResponse.voice_text` output; do not add or change text-to-speech transport.

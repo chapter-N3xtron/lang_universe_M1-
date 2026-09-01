@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SCHEMA_VERSION = 2
 MAX_ARTIFACT_BYTES = 256 * 1024
+MAX_VOICE_TEXT_CHARACTERS = 24_000
 SAFE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
 
 
@@ -226,7 +227,7 @@ class ResponseDiagnostic(StrictModel):
 
 class JasperResponse(StrictModel):
     version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
-    voice_text: str = Field(min_length=1, max_length=12000)
+    voice_text: str = Field(min_length=1, max_length=MAX_VOICE_TEXT_CHARACTERS)
     confidence_score: float | None = Field(default=None, ge=0.0, le=1.0)
     confidence_basis: str | None = Field(default=None, min_length=1, max_length=240)
     artifacts: list[VisualArtifact] = Field(default_factory=list, max_length=4)
@@ -342,6 +343,6 @@ def safe_text_response(
 
     safe_text = text.strip() or "I could not complete that response. Please try again."
     return JasperResponse(
-        voice_text=safe_text[:12000],
+        voice_text=safe_text[:MAX_VOICE_TEXT_CHARACTERS],
         diagnostic=ResponseDiagnostic(code=code, message=message),
     )

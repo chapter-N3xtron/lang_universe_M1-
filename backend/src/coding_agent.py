@@ -580,6 +580,18 @@ def _has_incomplete_tasks(raw_todos: Any) -> bool:
     return bool(tasks) and any(task["status"] != "completed" for task in tasks)
 
 
+def _compatibility_coding_status(report: TechnicalReport) -> str:
+    """Map the assembled authoritative report to the legacy status field."""
+
+    return {
+        "completed": "completed",
+        "partial": "blocked",
+        "blocked": "blocked",
+        "failed": "error",
+        "cancelled": "cancelled",
+    }[report.completion_status]
+
+
 def assemble_technical_report(
     *,
     completion_status: Literal["completed", "partial", "blocked", "failed", "cancelled"],
@@ -755,6 +767,19 @@ def _failure_report(error_code: str) -> str:
     )
 
 
+def _cancelled_report() -> str:
+    """Return the safe legacy diagnostic paired with a cancelled typed report."""
+
+    return (
+        "Completion report\n\n"
+        "Tasks\n"
+        "- Not completed: Requested coding work. "
+        "Note: Coder execution was cancelled before a final result.\n\n"
+        "Status\n"
+        "The requested coding work was cancelled."
+    )
+
+
 def _format_coding_result(
     messages: list[Any], manifest: ExecutionManifest
 ) -> list[Any]:
@@ -889,22 +914,23 @@ async def deep_agents_coding_node(
             error_messages = [
                 AIMessage(content=_failure_report("missing_final_result"))
             ]
+            report = assemble_technical_report(
+                completion_status="failed",
+                raw_todos=raw_todos,
+                workspace=str(workspace),
+                thread_identity=thread_identity,
+                coding_session_id=session_id,
+                model=state.get("model"),
+                manifest=manifest,
+                failure_note="Coder did not return a final result.",
+            )
             return {
                 "messages": _format_coding_result(error_messages, manifest),
                 "workspace": str(workspace),
                 "execution_manifest": manifest,
                 "coding_session_id": session_id,
-                "coding_status": "error",
-                "technical_report": assemble_technical_report(
-                    completion_status="failed",
-                    raw_todos=raw_todos,
-                    workspace=str(workspace),
-                    thread_identity=thread_identity,
-                    coding_session_id=session_id,
-                    model=state.get("model"),
-                    manifest=manifest,
-                    failure_note="Coder did not return a final result.",
-                ),
+                "coding_status": _compatibility_coding_status(report),
+                "technical_report": report,
             }
         completion_status = "partial" if _has_incomplete_tasks(raw_todos) else "completed"
         report = assemble_technical_report(
@@ -928,15 +954,14 @@ async def deep_agents_coding_node(
             "workspace": str(workspace),
             "execution_manifest": manifest,
             "coding_session_id": session_id,
-            "coding_status": "blocked" if completion_status == "partial" else "completed",
+            "coding_status": _compatibility_coding_status(report),
             "technical_report": report,
         }
-    except asyncio.CancelledError as exc:
-        # Cancellation must continue to bubble up so LangGraph can cancel and preserve
-        # its interrupt/checkpoint semantics.  Attach the validated terminal handoff to
-        # the exception for a runtime that records cancelled task results; a normal
-        # state update here would incorrectly turn cancellation into completion.
-        exc.technical_report = assemble_technical_report(
+    except asyncio.CancelledError:
+        # Cancellation is a product-facing terminal Coder outcome. Return its validated
+        # handoff so the established bridge can deliver it to Jasper; do not expose an
+        # exception object or its diagnostics through state.
+        report = assemble_technical_report(
             completion_status="cancelled",
             raw_todos=raw_todos,
             workspace=str(workspace) if workspace is not None else "unavailable",
@@ -946,7 +971,25 @@ async def deep_agents_coding_node(
             manifest=manifest,
             failure_note="Coder execution was cancelled before a final result.",
         )
-        raise
+        cancellation_messages = [AIMessage(content=_cancelled_report())]
+        response: dict[str, Any] = {
+            "messages": (
+                _format_coding_result(cancellation_messages, manifest)
+                if manifest is not None
+                else cancellation_messages
+            ),
+            "coding_session_id": session_id or thread_identity,
+            "coding_status": _compatibility_coding_status(report),
+            "technical_report": report,
+        }
+        if workspace is not None and manifest is not None:
+            response.update(
+                {
+                    "workspace": str(workspace),
+                    "execution_manifest": manifest,
+                }
+            )
+        return response
     except (GraphBubbleUp, RuntimeIdentityError):
         raise
     except InvalidWorkspaceError:
@@ -971,20 +1014,21 @@ async def deep_agents_coding_node(
     error_messages = [AIMessage(content=_failure_report(error_code))]
     if manifest is not None:
         error_messages = _format_coding_result(error_messages, manifest)
+    report = assemble_technical_report(
+        completion_status="failed",
+        raw_todos=[],
+        workspace=str(workspace) if workspace is not None else "unavailable",
+        thread_identity=session_id or "unknown",
+        coding_session_id=session_id or "unknown",
+        model=state.get("model"),
+        manifest=manifest,
+        failure_note=f"Coder stopped because of {error_code}.",
+    )
     response: dict[str, Any] = {
         "messages": error_messages,
         "coding_session_id": session_id,
-        "coding_status": "error",
-        "technical_report": assemble_technical_report(
-            completion_status="failed",
-            raw_todos=[],
-            workspace=str(workspace) if workspace is not None else "unavailable",
-            thread_identity=session_id or "unknown",
-            coding_session_id=session_id or "unknown",
-            model=state.get("model"),
-            manifest=manifest,
-            failure_note=f"Coder stopped because of {error_code}.",
-        ),
+        "coding_status": _compatibility_coding_status(report),
+        "technical_report": report,
     }
     if workspace is not None and manifest is not None:
         response.update(

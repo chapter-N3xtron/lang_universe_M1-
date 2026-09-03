@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from src.agent_utils import get_user_query
-from src.coding_agent import create_coding_agent_graph
+from src.coding_agent import capture_repository_diffs, create_coding_agent_graph
 from src.custodian_backend import CustodianBackend, CustodianClient, CustodianError
 from src.jasper_tools import (
     agent_evidence,
@@ -56,6 +56,7 @@ from src.visual_models import (
     ConceptMapArtifact,
     JasperResponse,
     LayoutSuggestion,
+    coder_report_artifact,
     openai_jasper_response_json_schema,
     safe_text_response,
 )
@@ -1438,7 +1439,39 @@ def _coder_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
             "failed": "error",
             "cancelled": "cancelled",
         }[report.completion_status]
-        structured_response = JasperResponse(voice_text=voice_text).model_dump(mode="json")
+        # This is the only report-artifact construction point: it derives from the
+        # revalidated handoff and reads Git solely from the selected Coder workspace.
+        artifact = None
+        raw_workspace = coding_result.get("workspace")
+        if isinstance(raw_workspace, str) and raw_workspace:
+            try:
+                workspace = canonical_workspace(raw_workspace)
+                evidence = capture_repository_diffs(workspace, report.changed_files)
+                final_messages = coding_result.get("messages", [])
+                source_message_id = next(
+                    (
+                        str(getattr(message, "id", "") or message.get("id", ""))
+                        for message in reversed(final_messages)
+                        if isinstance(message, (BaseMessage, dict))
+                        and (
+                            getattr(message, "id", "")
+                            or (message.get("id", "") if isinstance(message, dict) else "")
+                        )
+                    ),
+                    None,
+                )
+                artifact = coder_report_artifact(
+                    report,
+                    evidence,
+                    source_message_id=(source_message_id[:128] if source_message_id else None),
+                )
+            except Exception:
+                # Collection is non-authoritative: do not substitute another workspace.
+                logger.warning("Coder report diff capture unavailable")
+        artifacts = [artifact.model_dump(mode="json")] if artifact is not None else []
+        structured_response = JasperResponse(
+            voice_text=voice_text, artifacts=[artifact] if artifact is not None else []
+        ).model_dump(mode="json")
         report_value: TechnicalReport | dict[str, Any] = report
     except Exception:
         logger.warning("Coder technical report validation failed")
@@ -1451,6 +1484,7 @@ def _coder_jasper_output(state: JasperGraphState) -> JasperGraphOutputState:
         "messages": [{"role": "assistant", "content": voice_text, "name": "jasper"}],
         "jasper_response": voice_text,
         "jasper_structured_response": structured_response,
+        "visual_artifacts": artifacts if "artifacts" in locals() else [],
         "coding_session_id": coding_result.get("coding_session_id", ""),
         "coding_status": coding_status,
         "technical_report": report_value,

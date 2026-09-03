@@ -11,7 +11,7 @@ Phase 5 item recovery and disaster recovery are different controls:
 
 ### Destination and products
 
-- Hetzner describes Storage Share as managed Nextcloud. Nextcloud officially documents WebDAV access. Sources: https://www.hetzner.com/storage/storage-share/ and https://docs.nextcloud.com/server/latest/user_manual/en/files/access_webdav.html
+- The designated Hetzner Storage Share host is `host105984.frontdesk.de`. Hetzner describes Storage Share as managed Nextcloud, and Nextcloud officially documents WebDAV access. The exact account-specific WebDAV path and application password remain backup-product configuration, not application or agent configuration. Sources: https://www.hetzner.com/storage/storage-share/ and https://docs.nextcloud.com/server/latest/user_manual/en/files/access_webdav.html
 - Duplicati officially documents a browser-based UI, scheduled backups, retention, encryption, restore, and WebDAV support. Its combination makes it the leading candidate, not the selected product. Sources: https://docs.duplicati.com/getting-started/set-up-a-backup-in-the-ui , https://docs.duplicati.com/backup-destinations/standard-based-destinations/webdav-destination , https://docs.duplicati.com/configuration-and-management/retention-settings , and https://docs.duplicati.com/getting-started/restoring-files
 - Kopia officially supports WebDAV storage and client-side encryption. Its browser/server mode exists, but repository creation and server/UI deployment require a more involved setup to validate. Sources: https://kopia.io/docs/repositories/ , https://kopia.io/docs/repositories/#webdav , https://kopia.io/docs/features/ , and https://kopia.io/docs/reference/command-line/common/server-start/
 - Backrest is a web UI/orchestrator for restic. Restic's backend list does not natively include WebDAV; official restic documentation uses rclone for additional services, adding rclone remote configuration and associated secret/config layers. Sources: https://garethgeorge.github.io/backrest/ , https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html , https://restic.readthedocs.io/en/stable/040_backup.html#rclone , and https://rclone.org/webdav/
@@ -55,7 +55,7 @@ Duplicati leads only on documented fit. Selection remains blocked pending the co
 ## Proposed architecture constraints
 
 1. The future product must be established and browser-manageable.
-2. The destination must be Hetzner Storage Share's Nextcloud WebDAV interface.
+2. The destination must be the Nextcloud WebDAV interface of the designated Hetzner Storage Share host, `host105984.frontdesk.de`.
 3. Backups must be encrypted client-side by the selected product using its documented mechanism; the application must not invent cryptography or a backup format.
 4. The owner chooses daily or weekly operation. Daily retains seven daily versions; weekly retains four weekly versions.
 5. Deleted source data must disappear from all retained backups within 30 days. There is no legal hold.
@@ -65,6 +65,7 @@ Duplicati leads only on documented fit. Selection remains blocked pending the co
 9. Backup and restore must use a tested compatibility matrix covering Agent Server, PostgreSQL, backup product/format, and required PostgreSQL extensions. Incompatible restore must fail closed.
 10. The source is either a consistent whole Agent Server PostgreSQL database backup or a specifically documented supported memory export. Public Store APIs alone do not prove atomicity or checkpoint coverage.
 11. Future remote-primary database support is architecture compatibility only. This change adds no remote database, credentials, replication, or migration.
+12. The backup scope covers all current live persistent application data: Agent Server PostgreSQL and Redis; Plane PostgreSQL, Redis, MinIO object storage, and RabbitMQ; Temporal PostgreSQL; and `data/ocr/uploads/`. Dependency caches and generated front-end assets are excluded.
 
 ## Restore boundary
 

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import operator
 import os
+import stat
+import subprocess
 from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +32,7 @@ from src.custodian_backend import CustodianBackend, CustodianClient, CustodianEr
 from src.llm import get_coding_llm
 from src.phase5_tools import CODER_PHASE5_TOOLS
 from src.runtime_authority import RuntimeIdentityError, authoritative_thread_id
+from src.secure_coding_tools import redact_command_output
 from src.technical_report import (
     AuthorizationNeed,
     ChangedFile,
@@ -592,6 +596,215 @@ def _compatibility_coding_status(report: TechnicalReport) -> str:
     }[report.completion_status]
 
 
+def _safe_report_path(workspace: Path, raw_path: str) -> str | None:
+    """Return a normalized path only when it is confined to this exact workspace."""
+    path = raw_path.replace("\\", "/")
+    if not path or path.startswith("/") or ".." in path.split("/"):
+        return None
+    try:
+        candidate = (workspace / path).resolve()
+        candidate.relative_to(workspace.resolve())
+    except (OSError, ValueError):
+        return None
+    return path
+
+
+def _git_bytes(workspace: Path, *args: str) -> tuple[int, bytes]:
+    """Run the bounded, read-only Git boundary without a shell or diff drivers."""
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(workspace), "-c", "core.quotepath=false", *args],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 127, b""
+    return completed.returncode, completed.stdout
+
+
+def _git_output(workspace: Path, *args: str) -> tuple[int, str]:
+    """Read Git evidence without a shell, external diff driver, or text conversion."""
+    code, output = _git_bytes(workspace, *args)
+    return code, output.decode("utf-8", errors="replace")
+
+
+# Snapshotting only Git-visible paths deliberately excludes .git and ignored files.  The
+# report schema is capped at 256 files; this larger cap keeps snapshot work bounded while
+# still allowing a deterministic report from a normally sized selected repository.
+_REPOSITORY_SNAPSHOT_MAX_FILES = 4096
+
+
+def _repository_snapshot(workspace: Path) -> dict[str, tuple[str, int, tuple[int, int]]]:
+    """Fingerprint Git-visible regular files without following links outside workspace."""
+    code, output = _git_bytes(
+        workspace, "ls-files", "-z", "--cached", "--others", "--exclude-standard"
+    )
+    if code != 0:
+        return {}
+    paths = sorted(
+        {
+            path.decode("utf-8", errors="surrogateescape")
+            for path in output.split(b"\0")
+            if path
+        }
+    )[:_REPOSITORY_SNAPSHOT_MAX_FILES]
+    snapshot: dict[str, tuple[str, int, tuple[int, int]]] = {}
+    for raw_path in paths:
+        path = _safe_report_path(workspace, raw_path)
+        if path is None:
+            continue
+        candidate = workspace / path
+        try:
+            file_stat = candidate.lstat()
+            mode = stat.S_IFMT(file_stat.st_mode)
+            if stat.S_ISLNK(file_stat.st_mode):
+                # readlink reads the link itself, never its target.
+                content = os.readlink(candidate).encode("utf-8", errors="surrogateescape")
+            elif stat.S_ISREG(file_stat.st_mode):
+                digest = hashlib.sha256()
+                with candidate.open("rb") as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                snapshot[path] = (
+                    digest.hexdigest(),
+                    mode,
+                    (file_stat.st_dev, file_stat.st_ino),
+                )
+                continue
+            else:
+                continue
+        except OSError:
+            continue
+        snapshot[path] = (
+            hashlib.sha256(content).hexdigest(),
+            mode,
+            (file_stat.st_dev, file_stat.st_ino),
+        )
+    return snapshot
+
+
+def _changes_since_snapshot(
+    before: dict[str, tuple[str, int, tuple[int, int]]],
+    after: dict[str, tuple[str, int, tuple[int, int]]],
+    agent_changed_files: Any = None,
+) -> list[dict[str, str]]:
+    """Return deterministic, run-attributable changes and no pre-run dirty entries."""
+    added = set(after) - set(before)
+    deleted = set(before) - set(after)
+    renamed: dict[str, str] = {}
+    # An inode match catches renamed files even when their contents changed.  Hash/mode
+    # matching also covers Git's common copy-then-delete rename representation.
+    for old_path in sorted(deleted):
+        candidates = sorted(
+            new_path
+            for new_path in added
+            if before[old_path][2] == after[new_path][2]
+            or before[old_path][:2] == after[new_path][:2]
+        )
+        if candidates:
+            new_path = candidates[0]
+            renamed[new_path] = old_path
+            added.remove(new_path)
+            deleted.remove(old_path)
+
+    supplied: dict[tuple[str, str], str] = {}
+    for item in agent_changed_files if isinstance(agent_changed_files, list) else []:
+        try:
+            changed = ChangedFile.model_validate(item)
+        except Exception:
+            continue
+        # Agent output is only a summary; its path must still be a safe relative path.
+        path = changed.path.replace("\\", "/")
+        if path and not path.startswith("/") and ".." not in path.split("/"):
+            supplied.setdefault((path, changed.change_type), changed.summary)
+
+    changes: list[dict[str, str]] = []
+    for path in sorted(renamed):
+        summary = supplied.get((path, "renamed"), f"Renamed from {renamed[path]} during this Coder run.")
+        changes.append({"path": path, "change_type": "renamed", "summary": summary})
+    for path in sorted(added):
+        summary = supplied.get((path, "added"), "Added during this Coder run.")
+        changes.append({"path": path, "change_type": "added", "summary": summary})
+    for path in sorted(deleted):
+        summary = supplied.get((path, "deleted"), "Deleted during this Coder run.")
+        changes.append({"path": path, "change_type": "deleted", "summary": summary})
+    for path in sorted(set(before) & set(after)):
+        if before[path][:2] != after[path][:2]:
+            summary = supplied.get((path, "modified"), "Modified during this Coder run.")
+            changes.append({"path": path, "change_type": "modified", "summary": summary})
+    return changes[:256]
+
+
+def capture_repository_diffs(
+    workspace: Path, changed_files: list[ChangedFile]
+) -> list[dict[str, Any]]:
+    """Capture complete, redacted per-file Git patches from the selected repository.
+
+    This deliberately returns metadata for every validated report file.  Failed Git
+    reads and budget decisions are represented by the caller's artifact schema, never
+    by invented source text.
+    """
+    captured: list[dict[str, Any]] = []
+    for changed in changed_files:
+        path = _safe_report_path(workspace, changed.path)
+        base = {
+            "path": changed.path.replace("\\", "/"),
+            "change_type": changed.change_type,
+            "added_lines": 0,
+            "removed_lines": 0,
+            "availability": "unavailable",
+            "patch": None,
+        }
+        if path is None:
+            captured.append(base)
+            continue
+        code, numstat = _git_output(
+            workspace, "diff", "--no-ext-diff", "--no-textconv", "HEAD", "--numstat", "--", path
+        )
+        if code == 0 and numstat.strip():
+            fields = numstat.splitlines()[0].split("\t", 2)
+            if len(fields) >= 2 and (fields[0] == "-" or fields[1] == "-"):
+                base["availability"] = "binary"
+                captured.append(base)
+                continue
+            if len(fields) >= 2 and fields[0].isdigit() and fields[1].isdigit():
+                base["added_lines"], base["removed_lines"] = int(fields[0]), int(fields[1])
+        code, patch = _git_output(
+            workspace, "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "HEAD", "--", path
+        )
+        # An untracked added file has no HEAD patch. Git's no-index output is still
+        # actual before/after evidence and uses the repository-relative argument.
+        if not patch and changed.change_type == "added" and (workspace / path).is_file():
+            try:
+                raw = (workspace / path).read_bytes()
+            except OSError:
+                raw = b""
+            if b"\x00" in raw:
+                base["availability"] = "binary"
+                captured.append(base)
+                continue
+            base["added_lines"] = raw.count(b"\n") + (1 if raw else 0)
+            code, patch = _git_output(workspace, "diff", "--no-index", "--", "/dev/null", path)
+        if not patch:
+            captured.append(base)
+            continue
+        if "Binary files " in patch or "GIT binary patch" in patch:
+            base["availability"] = "binary"
+            captured.append(base)
+            continue
+        redacted = redact_command_output(patch)
+        if redacted != patch:
+            base["availability"] = "redacted"
+            captured.append(base)
+            continue
+        base.update(availability="available", patch=patch)
+        captured.append(base)
+    return captured
+
+
 def assemble_technical_report(
     *,
     completion_status: Literal["completed", "partial", "blocked", "failed", "cancelled"],
@@ -695,6 +908,12 @@ def assemble_technical_report(
         for evidence in evidence_records
         if set(evidence.reference_ids).issubset(known_reference_ids)
     ]
+    # A final assistant message is not enough to declare success when accepted test or
+    # validation evidence says the run failed.
+    if completion_status == "completed" and any(
+        evidence.result == "failed" for evidence in evidence_records
+    ):
+        completion_status = "partial"
     return TechnicalReport(
         version="1.0",
         completion_status=completion_status,
@@ -890,6 +1109,8 @@ async def deep_agents_coding_node(
     raw_todos: Any = []
     manifest: ExecutionManifest | None = None
     workspace: Path | None = None
+    repository_before: dict[str, tuple[str, int, tuple[int, int]]] = {}
+    repository_changes: list[dict[str, str]] = []
     try:
         thread_identity = authoritative_thread_id(
             state.get("thread_identity"),
@@ -906,7 +1127,23 @@ async def deep_agents_coding_node(
             state.get("model"),
             execution_mode,
         )
-        result = await _invoke_session(app, input_messages, config or {})
+        # Compare Git-visible contents immediately around execution rather than trusting
+        # an agent claim or status relative to HEAD. This excludes inherited dirty files.
+        repository_before = _repository_snapshot(workspace)
+        try:
+            result = await _invoke_session(app, input_messages, config or {})
+        except BaseException:
+            # Cancellation and failures are terminal outcomes too. Do not lose edits
+            # already made by this run, but never have an agent summary to trust here.
+            repository_changes = _changes_since_snapshot(
+                repository_before, _repository_snapshot(workspace)
+            )
+            raise
+        repository_changes = _changes_since_snapshot(
+            repository_before,
+            _repository_snapshot(workspace),
+            result.get("changed_files"),
+        )
         all_messages = result.get("messages", [])
         raw_todos = result.get("todos", [])
         new_messages = _current_turn_output(all_messages)
@@ -922,6 +1159,7 @@ async def deep_agents_coding_node(
                 coding_session_id=session_id,
                 model=state.get("model"),
                 manifest=manifest,
+                changed_files=repository_changes,
                 failure_note="Coder did not return a final result.",
             )
             return {
@@ -941,7 +1179,7 @@ async def deep_agents_coding_node(
             coding_session_id=session_id,
             model=state.get("model"),
             manifest=manifest,
-            changed_files=result.get("changed_files"),
+            changed_files=repository_changes,
             validation_evidence=result.get("validation_evidence"),
             blockers=result.get("blockers"),
             authorization_needs=result.get("remaining_authorization_needs"),
@@ -969,6 +1207,7 @@ async def deep_agents_coding_node(
             coding_session_id=session_id or thread_identity,
             model=state.get("model"),
             manifest=manifest,
+            changed_files=repository_changes,
             failure_note="Coder execution was cancelled before a final result.",
         )
         cancellation_messages = [AIMessage(content=_cancelled_report())]
@@ -1022,6 +1261,7 @@ async def deep_agents_coding_node(
         coding_session_id=session_id or "unknown",
         model=state.get("model"),
         manifest=manifest,
+        changed_files=repository_changes,
         failure_note=f"Coder stopped because of {error_code}.",
     )
     response: dict[str, Any] = {

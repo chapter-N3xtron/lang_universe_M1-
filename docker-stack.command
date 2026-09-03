@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE=(docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.yml")
 SIDECAR_URL="http://127.0.0.1:8000"
 UI_URL="http://127.0.0.1:3002"
+KOPIA_URL="http://127.0.0.1:51515"
 
 wait_for_docker() {
   if docker info >/dev/null 2>&1; then
@@ -33,9 +34,6 @@ ensure_sidecar_environment() {
 }
 
 ensure_langgraph_image() {
-  if docker image inspect jasper-langgraph:current >/dev/null 2>&1; then
-    return 0
-  fi
   if [ ! -x "$ROOT/backend/.venv/bin/langgraph" ]; then
     echo "LangGraph builder is missing at $ROOT/backend/.venv/bin/langgraph" >&2
     exit 1

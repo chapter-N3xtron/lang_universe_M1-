@@ -216,6 +216,24 @@ function ThreadImpl() {
       ? validatedEntry.value
       : null;
   const visualArtifacts = validatedJasperResponse?.artifacts ?? [];
+  const handledCoderReportArtifactIds = useRef(new Set<string>());
+  useEffect(() => {
+    let hasNewCoderReport = false;
+
+    for (const artifact of visualArtifacts) {
+      if (
+        artifact.renderer === "coder_report" &&
+        !handledCoderReportArtifactIds.current.has(artifact.artifact_id)
+      ) {
+        handledCoderReportArtifactIds.current.add(artifact.artifact_id);
+        hasNewCoderReport = true;
+      }
+    }
+
+    if (hasNewCoderReport) {
+      setSessionView("session");
+    }
+  }, [setSessionView, visualArtifacts]);
   const latestVisualArtifact = visualArtifacts.at(-1);
   const visualAvailable = true;
 

@@ -46,20 +46,25 @@ changing Compose actions require explicit approval.
 
 ## Run
 
-The canonical launcher starts native Custodian and the Docker-backed application:
+The canonical launcher starts native Custodian, the Docker-backed Jasper application,
+the local Plane/Temporal topology, and KopiaUI:
 
 ```bash
 ./bttm_lock_start.command start
 ```
 
-The application is served at `http://127.0.0.1:3002`. The Agent Server uses port
-8123, the speech/model sidecar uses port 8000, native Custodian uses port 8765, and
-the native Custodian orchestrator uses port 8767. The application rejects
-`langgraph dev` and other unverified runtimes so a separate in-memory server cannot
-silently present a different thread catalog.
+It opens the Jasper application at `http://127.0.0.1:3002` and attempts to open
+Kopia at `http://127.0.0.1:51515` in Brave. The Agent Server uses port 8123, the
+speech/model sidecar uses port 8000, native Custodian uses port 8765, and the native
+Custodian orchestrator uses port 8767. Plane is served locally on port 8080 and
+Temporal's UI on port 8088. The application rejects `langgraph dev` and other
+unverified runtimes so a separate in-memory server cannot silently present a different
+thread catalog.
 
 Starting this stack may build or recreate containers and must be an intentional
-operator action.
+operator action. Kopia is a native macOS application rather than a Docker container;
+its local web server must already be configured and running before its Brave page is
+available.
 
 ## Verification
 

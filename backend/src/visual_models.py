@@ -6,16 +6,83 @@ import json
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+
+from src.technical_report import TechnicalReport
 
 SCHEMA_VERSION = 2
 MAX_ARTIFACT_BYTES = 256 * 1024
 MAX_VOICE_TEXT_CHARACTERS = 24_000
 SAFE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+CODER_REPORT_ARTIFACT_VERSION = "1"
 
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+def _repository_relative_path(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    parts = normalized.split("/")
+    if not normalized or normalized.startswith("/") or ".." in parts or any(
+        not part for part in parts
+    ):
+        raise ValueError("Repository paths must be non-empty relative paths")
+    return normalized
+
+
+class CoderReportDiff(StrictModel):
+    """One changed file's bounded, non-executable visual evidence."""
+
+    path: str = Field(min_length=1, max_length=1024)
+    change_type: Literal["added", "modified", "deleted", "renamed"]
+    added_lines: StrictInt = Field(ge=0, le=10_000_000)
+    removed_lines: StrictInt = Field(ge=0, le=10_000_000)
+    availability: Literal["available", "binary", "unavailable", "redacted", "too_large"]
+    patch: str | None = Field(default=None, max_length=MAX_ARTIFACT_BYTES)
+
+    @model_validator(mode="after")
+    def validate_diff(self) -> CoderReportDiff:
+        self.path = _repository_relative_path(self.path)
+        if self.availability == "available" and not self.patch:
+            raise ValueError("Available diffs require a complete patch")
+        if self.availability != "available" and self.patch is not None:
+            raise ValueError("Unavailable diffs must not retain patch content")
+        return self
+
+
+class CoderReportPayload(StrictModel):
+    """A literal snapshot of the validated handoff plus captured Git evidence."""
+
+    report: TechnicalReport
+    files: list[CoderReportDiff] = Field(max_length=256)
+
+    @model_validator(mode="after")
+    def validate_files(self) -> CoderReportPayload:
+        paths = [file.path for file in self.files]
+        if len(paths) != len(set(paths)):
+            raise ValueError("Coder report diff paths must be unique")
+        report_paths = {changed.path.replace("\\", "/") for changed in self.report.changed_files}
+        if set(paths) != report_paths:
+            raise ValueError("Coder report diff records must match report changed files")
+        return self
+
+
+class CoderReportArtifact(StrictModel):
+    renderer: Literal["coder_report"] = "coder_report"
+    artifact_version: Literal[CODER_REPORT_ARTIFACT_VERSION] = CODER_REPORT_ARTIFACT_VERSION
+    artifact_id: str = Field(min_length=1, max_length=64, pattern=SAFE_ID_PATTERN)
+    title: str = Field(min_length=1, max_length=160)
+    source_message_id: str | None = Field(default=None, max_length=128)
+    payload: CoderReportPayload
+
+    @model_validator(mode="after")
+    def validate_serialized_size(self) -> CoderReportArtifact:
+        encoded = json.dumps(self.model_dump(mode="json"), separators=(",", ":")).encode("utf-8")
+        if len(encoded) > MAX_ARTIFACT_BYTES:
+            raise ValueError("Visual artifact exceeds the 256 KiB limit")
+        return self
+
 
 
 class EvidenceSource(StrictModel):
@@ -195,6 +262,55 @@ class ConceptMapArtifact(StrictModel):
         return self
 
 
+def coder_report_artifact(
+    report: TechnicalReport,
+    file_evidence: list[dict],
+    *,
+    source_message_id: str | None = None,
+) -> CoderReportArtifact | None:
+    """Derive one bounded artifact from an already validated report and Git evidence.
+
+    Candidates are accepted whole or disclosed as too large; no patch is ever sliced.
+    """
+    import hashlib
+
+    digest = hashlib.sha256(
+        report.model_dump_json().encode("utf-8")
+    ).hexdigest()[:24]
+    files = [
+        CoderReportDiff.model_validate({**item, "patch": None, "availability": (
+            item.get("availability") if item.get("availability") != "available" else "too_large"
+        )})
+        for item in file_evidence
+    ]
+    common = {
+        "artifact_id": f"coder-report-{digest}",
+        "title": f"Coder technical report: {report.completion_status}",
+        "source_message_id": source_message_id,
+        "payload": {"report": report, "files": files},
+    }
+    try:
+        artifact = CoderReportArtifact(**common)
+    except ValueError:
+        # The strict report itself cannot be represented below the shared ceiling.
+        return None
+    for index, evidence in enumerate(file_evidence):
+        if evidence.get("availability") != "available":
+            continue
+        candidate_files = list(artifact.payload.files)
+        try:
+            candidate_files[index] = CoderReportDiff.model_validate(evidence)
+            candidate = artifact.model_copy(
+                update={"payload": CoderReportPayload(report=report, files=candidate_files)}
+            )
+            # model_copy intentionally does not validate; enforce the ceiling here.
+            candidate = CoderReportArtifact.model_validate(candidate.model_dump())
+        except ValueError:
+            continue
+        artifact = candidate
+    return artifact
+
+
 class DrawConceptMapInput(StrictModel):
     """Arguments accepted by Jasper's validated concept-map tool."""
 
@@ -207,7 +323,9 @@ class DrawConceptMapInput(StrictModel):
     direction: Literal["top_to_bottom", "left_to_right"] = "left_to_right"
 
 
-VisualArtifact = Annotated[ConceptMapArtifact, Field(discriminator="renderer")]
+VisualArtifact = Annotated[
+    ConceptMapArtifact | CoderReportArtifact, Field(discriminator="renderer")
+]
 
 
 class LayoutSuggestion(StrictModel):

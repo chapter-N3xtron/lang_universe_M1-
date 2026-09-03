@@ -14,6 +14,9 @@ CODING_OLLAMA_BASE_URL = os.getenv("CODING_OLLAMA_BASE_URL", "http://127.0.0.1:1
 CODING_OLLAMA_CLOUD_BASE_URL = os.getenv(
     "CODING_OLLAMA_CLOUD_BASE_URL", "https://ollama.com"
 )
+FIREWORKS_BASE_URL = os.getenv(
+    "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
+)
 
 
 def _strip_provider_prefix(model_name: str) -> str:
@@ -47,6 +50,7 @@ def get_agent_llm(model_name: str | None = None):
         model_name.startswith(prefix)
         for prefix in (
             "openai/",
+            "fireworks/",
             "ollama/",
             "ollama-cloud/",
             "huggingface/",
@@ -70,6 +74,7 @@ def _coding_provider_and_model(model_name: str | None) -> tuple[str, str]:
     selected = model_name or CODING_MODEL
     for prefix, provider in (
         ("openai/", "openai"),
+        ("fireworks/", "fireworks"),
         ("ollama-cloud/", "ollama-cloud"),
         ("ollama/", "ollama"),
         ("huggingface/", "huggingface"),
@@ -92,6 +97,21 @@ def get_coding_llm(model_name: str | None = None, *, num_predict: int | None = N
             model=model,
             use_responses_api=True,
             model_kwargs={"parallel_tool_calls": False},
+        )
+
+    if provider == "fireworks":
+        from langchain_openai import ChatOpenAI
+
+        api_key = os.getenv("FIREWORKS_API_KEY", "")
+        if not api_key:
+            raise ValueError("FIREWORKS_API_KEY is not set")
+        return ChatOpenAI(
+            model=model,
+            api_key=api_key,
+            base_url=FIREWORKS_BASE_URL,
+            use_responses_api=False,
+            model_kwargs={"parallel_tool_calls": False},
+            temperature=0,
         )
 
     if provider == "huggingface":

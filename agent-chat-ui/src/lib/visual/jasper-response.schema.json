@@ -1,5 +1,205 @@
 {
   "$defs": {
+    "AuthorizationNeed": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "reason"
+      ],
+      "title": "AuthorizationNeed",
+      "type": "object"
+    },
+    "ChangedFile": {
+      "additionalProperties": false,
+      "properties": {
+        "change_type": {
+          "enum": [
+            "added",
+            "modified",
+            "deleted",
+            "renamed"
+          ],
+          "title": "Change Type",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "change_type",
+        "summary"
+      ],
+      "title": "ChangedFile",
+      "type": "object"
+    },
+    "CoderReportArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Artifact Version",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/CoderReportPayload"
+        },
+        "renderer": {
+          "const": "coder_report",
+          "default": "coder_report",
+          "title": "Renderer",
+          "type": "string"
+        },
+        "source_message_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Message Id"
+        },
+        "title": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "title",
+        "payload"
+      ],
+      "title": "CoderReportArtifact",
+      "type": "object"
+    },
+    "CoderReportDiff": {
+      "additionalProperties": false,
+      "description": "One changed file's bounded, non-executable visual evidence.",
+      "properties": {
+        "added_lines": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Added Lines",
+          "type": "integer"
+        },
+        "availability": {
+          "enum": [
+            "available",
+            "binary",
+            "unavailable",
+            "redacted",
+            "too_large"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "change_type": {
+          "enum": [
+            "added",
+            "modified",
+            "deleted",
+            "renamed"
+          ],
+          "title": "Change Type",
+          "type": "string"
+        },
+        "patch": {
+          "anyOf": [
+            {
+              "maxLength": 262144,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Patch"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "removed_lines": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Removed Lines",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "change_type",
+        "added_lines",
+        "removed_lines",
+        "availability"
+      ],
+      "title": "CoderReportDiff",
+      "type": "object"
+    },
+    "CoderReportPayload": {
+      "additionalProperties": false,
+      "description": "A literal snapshot of the validated handoff plus captured Git evidence.",
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/CoderReportDiff"
+          },
+          "maxItems": 256,
+          "title": "Files",
+          "type": "array"
+        },
+        "report": {
+          "$ref": "#/$defs/TechnicalReport"
+        }
+      },
+      "required": [
+        "report",
+        "files"
+      ],
+      "title": "CoderReportPayload",
+      "type": "object"
+    },
     "ConceptMapArtifact": {
       "additionalProperties": false,
       "properties": {
@@ -345,6 +545,91 @@
       "title": "LayoutSuggestion",
       "type": "object"
     },
+    "MaterialRisk": {
+      "additionalProperties": false,
+      "properties": {
+        "impact": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Impact",
+          "type": "string"
+        },
+        "mitigation": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Mitigation",
+          "type": "string"
+        },
+        "risk": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Risk",
+          "type": "string"
+        }
+      },
+      "required": [
+        "risk",
+        "impact",
+        "mitigation"
+      ],
+      "title": "MaterialRisk",
+      "type": "object"
+    },
+    "ReportProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "coding_session_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Coding Session Id",
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "producer": {
+          "const": "Coder",
+          "title": "Producer",
+          "type": "string"
+        },
+        "thread_identity": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Thread Identity",
+          "type": "string"
+        },
+        "workspace": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Workspace",
+          "type": "string"
+        }
+      },
+      "required": [
+        "producer",
+        "coding_session_id",
+        "thread_identity",
+        "workspace",
+        "generated_at"
+      ],
+      "title": "ReportProvenance",
+      "type": "object"
+    },
     "ResponseDiagnostic": {
       "additionalProperties": false,
       "properties": {
@@ -375,6 +660,226 @@
       ],
       "title": "ResponseDiagnostic",
       "type": "object"
+    },
+    "SupportingReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "command_output",
+            "test_output",
+            "execution_manifest",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "locator",
+        "summary"
+      ],
+      "title": "SupportingReference",
+      "type": "object"
+    },
+    "TaskNote": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Note",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "incomplete",
+            "blocked",
+            "failed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "task": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "status",
+        "note"
+      ],
+      "title": "TaskNote",
+      "type": "object"
+    },
+    "TechnicalReport": {
+      "additionalProperties": false,
+      "description": "The sole authoritative Coder result passed to Jasper.",
+      "properties": {
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Blockers",
+          "type": "array"
+        },
+        "changed_files": {
+          "items": {
+            "$ref": "#/$defs/ChangedFile"
+          },
+          "maxItems": 256,
+          "title": "Changed Files",
+          "type": "array"
+        },
+        "completion_status": {
+          "enum": [
+            "completed",
+            "partial",
+            "blocked",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Completion Status",
+          "type": "string"
+        },
+        "material_risks": {
+          "items": {
+            "$ref": "#/$defs/MaterialRisk"
+          },
+          "maxItems": 32,
+          "title": "Material Risks",
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/ReportProvenance"
+        },
+        "remaining_authorization_needs": {
+          "items": {
+            "$ref": "#/$defs/AuthorizationNeed"
+          },
+          "maxItems": 32,
+          "title": "Remaining Authorization Needs",
+          "type": "array"
+        },
+        "supporting_references": {
+          "items": {
+            "$ref": "#/$defs/SupportingReference"
+          },
+          "maxItems": 16,
+          "title": "Supporting References",
+          "type": "array"
+        },
+        "task_notes": {
+          "items": {
+            "$ref": "#/$defs/TaskNote"
+          },
+          "maxItems": 64,
+          "title": "Task Notes",
+          "type": "array"
+        },
+        "validation_evidence": {
+          "items": {
+            "$ref": "#/$defs/ValidationEvidence"
+          },
+          "maxItems": 64,
+          "title": "Validation Evidence",
+          "type": "array"
+        },
+        "version": {
+          "const": "1.0",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "completion_status",
+        "task_notes",
+        "changed_files",
+        "validation_evidence",
+        "blockers",
+        "remaining_authorization_needs",
+        "material_risks",
+        "provenance",
+        "supporting_references"
+      ],
+      "title": "TechnicalReport",
+      "type": "object"
+    },
+    "ValidationEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "reference_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Reference Ids",
+          "type": "array"
+        },
+        "result": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_run",
+            "inconclusive"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "source_test",
+            "static_analysis",
+            "build",
+            "runtime_check",
+            "deployment_check",
+            "manual_inspection"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "result",
+        "description"
+      ],
+      "title": "ValidationEvidence",
+      "type": "object"
     }
   },
   "$id": "https://agent-chat.local/schemas/jasper-response-v1.json",
@@ -385,6 +890,9 @@
         "oneOf": [
           {
             "$ref": "#/$defs/ConceptMapArtifact"
+          },
+          {
+            "$ref": "#/$defs/CoderReportArtifact"
           }
         ]
       },

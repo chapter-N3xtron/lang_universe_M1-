@@ -2,12 +2,103 @@ import { expect, test, type Page } from "@playwright/test";
 
 const THREAD_ID = "visual-workspace-thread";
 const SOURCE_ID = "repo-source";
+const MOCK_API_QUERY = "apiUrl=http%3A%2F%2Fmock&assistantId=agent";
 const evidence = {
   id: SOURCE_ID,
   kind: "repo_file",
   locator: "backend/src/chat_ui.py",
   title: "Outer LangGraph workflow",
   content_sha256: "a".repeat(64),
+};
+
+const coderReportArtifact = {
+  artifact_id: "coder-greeting-report",
+  artifact_version: "1",
+  renderer: "coder_report",
+  title: "Greeting implementation report",
+  source_message_id: "coder-report-answer",
+  payload: {
+    report: {
+      version: "1.0",
+      completion_status: "completed",
+      task_notes: [
+        {
+          task: "Implement a named greeting",
+          status: "completed",
+          note: "Updated the greeting return value.",
+        },
+      ],
+      changed_files: [
+        {
+          path: "src/lib/greeting.ts",
+          change_type: "modified",
+          summary: "Includes the supplied name in the greeting.",
+        },
+      ],
+      validation_evidence: [
+        {
+          type: "source_test",
+          result: "passed",
+          description: "The focused greeting test passed.",
+        },
+      ],
+      blockers: [],
+      remaining_authorization_needs: [],
+      material_risks: [],
+      provenance: {
+        producer: "Coder",
+        coding_session_id: "coding-session-1",
+        thread_identity: THREAD_ID,
+        workspace: "/workspace/agent-chat-ui",
+        generated_at: "2026-08-01T12:00:00Z",
+        model: "coder/test",
+      },
+      supporting_references: [
+        {
+          id: "greeting-test",
+          kind: "test_output",
+          locator: "tests/greeting.test.ts",
+          summary: "Greeting test output.",
+        },
+      ],
+    },
+    files: [
+      {
+        path: "src/lib/greeting.ts",
+        change_type: "modified",
+        added_lines: 1,
+        removed_lines: 1,
+        availability: "available",
+        patch: `diff --git a/src/lib/greeting.ts b/src/lib/greeting.ts
+index 1111111..2222222 100644
+--- a/src/lib/greeting.ts
++++ b/src/lib/greeting.ts
+@@ -1,3 +1,3 @@
+ export function greeting(name: string) {
+-  return "Hello";
++  return \`Hello, \${name}\`;
+ }`,
+      },
+      {
+        path: "docs/legacy.md",
+        change_type: "modified",
+        added_lines: 0,
+        removed_lines: 0,
+        availability: "unavailable",
+        patch: null,
+      },
+    ],
+  },
+};
+
+const unsupportedCoderReportArtifact = {
+  artifact_id: "future-coder-report",
+  artifact_version: "2",
+  renderer: "coder_report",
+  title: "Future Coder report",
+  payload: {
+    must_not_be_rendered: "UNSAFE_FUTURE_REPORT_PAYLOAD",
+  },
 };
 
 const artifact = {
@@ -127,6 +218,45 @@ function historyState(
   };
 }
 
+async function mockPersistedArtifacts(
+  page: Page,
+  threadId: string,
+  artifacts: Record<string, unknown>[],
+) {
+  await page.route(`**/session-catalog/${threadId}/artifacts**`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        artifacts: artifacts.map((artifact, position) => ({
+          artifact,
+          relationship: "created",
+          position,
+          linked_at: "2026-08-01T12:00:00Z",
+        })),
+      }),
+    }),
+  );
+  await page.route(`**/session-catalog/${threadId}?**`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        session_id: threadId,
+        thread_id: threadId,
+        status: "open",
+        short_description: "Coder report test session",
+        long_description:
+          "A persisted Coder report for visual workspace tests.",
+        parent_session_id: null,
+        parent_thread_id: null,
+        created_at: "2026-08-01T12:00:00Z",
+        last_activity_at: "2026-08-01T12:00:00Z",
+        active_minutes: 1,
+        tent_poles: [],
+      }),
+    }),
+  );
+}
+
 async function mockBase(page: Page) {
   await page.route("**/threads/search", (route) =>
     route.fulfill({ contentType: "application/json", body: "[]" }),
@@ -165,7 +295,7 @@ test.beforeEach(async ({ page }) => {
 test("workspace modes remain available and persistent without an artifact", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto(`/?${MOCK_API_QUERY}`);
 
   const workspace = page.locator("[data-workspace-mode]");
   await expect(page.getByRole("button", { name: "Focus chat" })).toBeVisible();
@@ -178,12 +308,16 @@ test("workspace modes remain available and persistent without an artifact", asyn
 
   await page.getByRole("button", { name: "Focus visual" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-mode", "visual");
-  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "All sessions" }),
+  ).toBeVisible();
   await expect(page.locator("textarea")).toBeVisible();
 
   await page.reload();
   await expect(workspace).toHaveAttribute("data-workspace-mode", "visual");
-  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "All sessions" }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Split chat and visual" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-mode", "split");
@@ -215,7 +349,7 @@ test("the human controls whether a suggested visual takes the foreground", async
     }),
   );
 
-  await page.goto(`/?threadId=${THREAD_ID}`);
+  await page.goto(`/?threadId=${THREAD_ID}&${MOCK_API_QUERY}`);
 
   const workspace = page.locator("[data-workspace-mode]");
   await expect(workspace).toHaveAttribute("data-workspace-mode", "chat");
@@ -329,6 +463,141 @@ test("the human controls whether a suggested visual takes the foreground", async
   await expect(workspace).toHaveAttribute("data-workspace-mode", "visual");
 });
 
+test("persisted Coder reports render technical details, diffs, and accessible tabs", async ({
+  page,
+}) => {
+  const reportThread = "persisted-coder-report-thread";
+  const response = {
+    version: 2,
+    voice_text: "Jasper prose should stay in the chat.",
+    artifacts: [],
+    layout_suggestion: null,
+    diagnostic: null,
+  };
+  const state = historyState(reportThread, response);
+  state.values.messages[3].content = "Jasper prose should stay in the chat.";
+  await page.route(`**/threads/${reportThread}/history`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([state]),
+    }),
+  );
+  await mockPersistedArtifacts(page, reportThread, [coderReportArtifact]);
+
+  await page.goto(`/?threadId=${reportThread}&${MOCK_API_QUERY}`);
+  await page.getByRole("button", { name: "Focus visual" }).click();
+
+  const visual = page.locator('[data-workspace-surface="visual"]');
+  await expect(
+    visual.getByRole("heading", { name: "Greeting implementation report" }),
+  ).toBeVisible();
+  await expect(
+    visual.getByRole("tab", { name: "Report", exact: true }),
+  ).toBeVisible();
+  await expect(visual.getByText("Completion status")).toBeVisible();
+  await expect(visual.getByText("Implement a named greeting")).toBeVisible();
+
+  const reportFileTree = visual.locator("[data-coder-report-file-tree]");
+  const treeGreetingFile = reportFileTree.getByRole("treeitem", {
+    name: "greeting.ts",
+    exact: true,
+  });
+  await expect(reportFileTree).toBeVisible();
+  await expect(treeGreetingFile).toBeVisible();
+  await expect(
+    treeGreetingFile.locator('[title="Git status: modified"]'),
+  ).toBeVisible();
+  await treeGreetingFile.click();
+  await expect(
+    visual.getByRole("tab", {
+      name: "src/lib/greeting.ts −1 +1",
+      exact: true,
+    }),
+  ).toHaveAttribute("data-state", "active");
+  await expect(
+    visual.getByText("Hello, ${name}", { exact: false }),
+  ).toBeVisible();
+
+  await expect(
+    visual.getByText("Jasper prose should stay in the chat."),
+  ).toHaveCount(0);
+
+  const greetingFile = visual.getByRole("tab", {
+    name: "src/lib/greeting.ts −1 +1",
+    exact: true,
+  });
+  const unavailableFile = visual.getByRole("tab", {
+    name: "docs/legacy.md −0 +0",
+    exact: true,
+  });
+  await expect(greetingFile).toBeVisible();
+  await expect(unavailableFile).toBeVisible();
+
+  await greetingFile.click();
+  await expect(
+    visual.getByText("Hello, ${name}", { exact: false }),
+  ).toBeVisible();
+
+  await unavailableFile.click();
+  await expect(
+    visual.getByText("A safe diff was not captured for this file."),
+  ).toBeVisible();
+
+  const reportTab = visual.getByRole("tab", { name: "Report", exact: true });
+  await reportTab.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(greetingFile).toBeFocused();
+  await expect(greetingFile).toHaveAttribute("data-state", "active");
+  await expect(
+    visual.getByText("Hello, ${name}", { exact: false }),
+  ).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(unavailableFile).toBeFocused();
+  await expect(unavailableFile).toHaveAttribute("data-state", "active");
+  await expect(
+    visual.getByText("A safe diff was not captured for this file."),
+  ).toBeVisible();
+});
+
+test("unsupported persisted Coder reports hide their raw payload", async ({
+  page,
+}) => {
+  const unsupportedThread = "unsupported-coder-report-thread";
+  const response = {
+    version: 2,
+    voice_text: "Jasper prose should stay in the chat.",
+    artifacts: [],
+    layout_suggestion: null,
+    diagnostic: null,
+  };
+  const state = historyState(unsupportedThread, response);
+  state.values.messages[3].content = "Jasper prose should stay in the chat.";
+  await page.route(`**/threads/${unsupportedThread}/history`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([state]),
+    }),
+  );
+  await mockPersistedArtifacts(page, unsupportedThread, [
+    unsupportedCoderReportArtifact,
+  ]);
+
+  await page.goto(`/?threadId=${unsupportedThread}&${MOCK_API_QUERY}`);
+  await page.getByRole("button", { name: "Focus visual" }).click();
+
+  const visual = page.locator('[data-workspace-surface="visual"]');
+  await expect(
+    visual.getByRole("alert", { name: "Unsupported Coder report version" }),
+  ).toBeVisible();
+  await expect(
+    visual.getByText(
+      "This report uses version 2, which this client cannot safely display.",
+      { exact: false },
+    ),
+  ).toBeVisible();
+  await expect(visual.getByText("UNSAFE_FUTURE_REPORT_PAYLOAD")).toHaveCount(0);
+});
+
 test("concept-map controls and labels retain contrast in dark mode", async ({
   page,
 }) => {
@@ -348,7 +617,7 @@ test("concept-map controls and labels retain contrast in dark mode", async ({
     }),
   );
 
-  await page.goto(`/?threadId=${darkThread}`);
+  await page.goto(`/?threadId=${darkThread}&${MOCK_API_QUERY}`);
   await page.getByRole("button", { name: "Apply" }).click();
   const control = page.locator(".react-flow__controls-button").first();
   await expect(control).toBeVisible();
@@ -417,7 +686,7 @@ test("return edges use separate lanes around the left-to-right flow", async ({
     }),
   );
 
-  await page.goto(`/?threadId=${feedbackThread}`);
+  await page.goto(`/?threadId=${feedbackThread}&${MOCK_API_QUERY}`);
   await page.getByRole("button", { name: "Apply" }).click();
 
   const feedbackEdges = page.locator(".concept-map-feedback-edge");
@@ -459,7 +728,7 @@ test("node narration highlights, replays, and seeds a grounded Jasper follow-up"
     }),
   );
 
-  await page.goto(`/?threadId=${interactionThread}`);
+  await page.goto(`/?threadId=${interactionThread}&${MOCK_API_QUERY}`);
   await page.getByRole("button", { name: "Apply" }).click();
   const jasperNode = page
     .locator(".react-flow__node")
@@ -525,7 +794,7 @@ test("malformed visual data is rejected without breaking chat", async ({
     }),
   );
 
-  await page.goto(`/?threadId=${badThread}`);
+  await page.goto(`/?threadId=${badThread}&${MOCK_API_QUERY}`);
 
   await expect(
     page.getByText("The text answer remains available."),
@@ -534,7 +803,9 @@ test("malformed visual data is rejected without breaking chat", async ({
     page.getByRole("button", { name: "Focus visual" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Focus visual" }).click();
-  await expect(page.getByText("No saved visualization in this session")).toBeVisible();
+  await expect(
+    page.getByText("No saved visualization in this session"),
+  ).toBeVisible();
 });
 
 test("a disconnected request-flow artifact is rejected", async ({ page }) => {
@@ -643,7 +914,7 @@ test("a disconnected request-flow artifact is rejected", async ({ page }) => {
     }),
   );
 
-  await page.goto(`/?threadId=${brokenThread}`);
+  await page.goto(`/?threadId=${brokenThread}&${MOCK_API_QUERY}`);
 
   await expect(
     page.getByText("The explanation remains readable."),
@@ -652,5 +923,7 @@ test("a disconnected request-flow artifact is rejected", async ({ page }) => {
     page.getByRole("button", { name: "Focus visual" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Focus visual" }).click();
-  await expect(page.getByText("No saved visualization in this session")).toBeVisible();
+  await expect(
+    page.getByText("No saved visualization in this session"),
+  ).toBeVisible();
 });

@@ -90,3 +90,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+data/ocr/uploads/7105a598f30b43879f3a1e9832068164-19720005243.pdf
+data/ocr/uploads/db0eb12d209e41ff8cb780cf2aa9f705-2210.07229v2.pdf
+.gitignore
+.gitignore
+data/ocr/uploads/ffa186d06c514e308a6bb803b38af166-2210.07229v2.pdf
+data/ocr/uploads/ff7077b683a84b438ff813775829213d-pg61-images.html
+.gitignore
+data/ocr/uploads/5a3d4676176948d5b9be2a37a677cc5c-pg61-images.html
+.gitignore
+data/ocr/uploads/eb2682a1414972ff64c8cb6d9867703f-2210.07229v2.pdf

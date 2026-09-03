@@ -1,0 +1,15 @@
+{
+  "artifact": "/app-data/ocr/uploads/.ocr-artifacts/0a339495659341f4bef86c14da5a635a/result.md",
+  "docx_artifact": "/app-data/ocr/uploads/.ocr-artifacts/0a339495659341f4bef86c14da5a635a/result.docx",
+  "workspace_output": null,
+  "workspace_docx_output": null,
+  "pages": [],
+  "layout_authority": "docling",
+  "model_role": "text_verification_only",
+  "models": {
+    "surya": "hf.co/datalab-to/surya-ocr-2-gguf:latest",
+    "glm_ocr": "glm-ocr:bf16"
+  },
+  "model_disagreement": false,
+  "verification_failures": []
+}

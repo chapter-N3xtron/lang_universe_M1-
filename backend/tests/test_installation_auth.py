@@ -136,6 +136,8 @@ def test_assistant_search_and_exact_reads_allow_server_configured_assistants():
         (("owner_opaque_01", "preferences"), True),
         (("owner_opaque_01", "reports", "report-1"), True),
         (("local-owner-v1", "sessions"), True),
+        (("local-owner-v1", "workspaces"), True),
+        (("local-owner-v1", "workspace-session-links"), True),
         (("local-owner-v1", "session-library-views"), True),
         (("other", "preferences"), False),
         (("owner_opaque_01", "unknown"), False),

@@ -1,6 +1,7 @@
 """Focused tests for the provider-neutral Deep Agents coding subgraph."""
 
 import asyncio
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -153,6 +154,50 @@ def test_deep_agents_node_returns_neutral_messages_events_and_session(
     assert result["workspace"] == str(tmp_path.resolve())
     assert result["coding_session_id"] == "thread-7"
     assert result["coding_status"] == "completed"
+
+
+def test_deep_agents_node_reports_only_files_changed_during_its_execution(monkeypatch, tmp_path):
+    from src import coding_agent
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True)
+    (tmp_path / "dirty.py").write_text("before\n")
+    (tmp_path / "run.py").write_text("before\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "initial"], check=True, capture_output=True)
+    (tmp_path / "dirty.py").write_text("human's earlier change\n")
+
+    class WritingApp:
+        async def ainvoke(self, payload, config=None):
+            del config
+            (tmp_path / "run.py").write_text("Coder's change\n")
+            return {
+                "messages": [*payload["messages"], AIMessage(content="Finished")],
+                "changed_files": [
+                    {"path": "run.py", "change_type": "modified", "summary": "Agent summary."},
+                    {"path": "dirty.py", "change_type": "modified", "summary": "Untrusted claim."},
+                ],
+            }
+
+    async def session_agent(*_args):
+        return WritingApp()
+
+    monkeypatch.setattr(coding_agent, "_session_agent", session_agent)
+    result = asyncio.run(
+        coding_agent.deep_agents_coding_node(
+            {
+                "messages": [{"role": "user", "content": "Change run.py"}],
+                "workspace": str(tmp_path),
+                "execution_mode": "autonomous",
+                "thread_identity": "snapshot-thread",
+            }
+        )
+    )
+
+    assert [(item.path, item.change_type, item.summary) for item in result["technical_report"].changed_files] == [
+        ("run.py", "modified", "Agent summary.")
+    ]
 
 
 def test_deep_agents_node_does_not_complete_without_final_assistant_message(

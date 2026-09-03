@@ -34,6 +34,7 @@ import {
 } from "../ui/tooltip";
 import { Label } from "../ui/label";
 import {
+  ChevronRight,
   Folder,
   LoaderCircle,
   Mic,
@@ -177,17 +178,86 @@ function ChatInputImpl({
   const selectedModelLabel =
     modelOptions.find((option) => option.value === effectiveSelectedModel)
       ?.label ?? effectiveSelectedModel;
+  const selectedModelProvider = modelProviders[effectiveSelectedModel] ?? "";
   const selectedModelLocation =
-    modelProviders[effectiveSelectedModel] === "ollama" ? "Local" : "Cloud";
+    selectedModelProvider === "ollama"
+      ? "Ollama · Local"
+      : selectedModelProvider === "ollama-cloud"
+        ? "Ollama · Cloud"
+        : selectedModelProvider === "fireworks"
+          ? "Fireworks"
+          : "Cloud";
   const [executionMode, setExecutionMode] = useState<
     "read_only" | "approval" | "autonomous"
   >("approval");
+  const [expandedModelGroups, setExpandedModelGroups] = useState<
+    Record<string, boolean>
+  >({});
 
-  const localModels = sortModelOptions(
+  const localOllamaModels = sortModelOptions(
     modelOptions.filter((option) => modelProviders[option.value] === "ollama"),
   );
-  const cloudModels = sortModelOptions(
-    modelOptions.filter((option) => modelProviders[option.value] !== "ollama"),
+  const cloudOllamaModels = sortModelOptions(
+    modelOptions.filter(
+      (option) => modelProviders[option.value] === "ollama-cloud",
+    ),
+  );
+  const fireworksModels = sortModelOptions(
+    modelOptions.filter((option) => modelProviders[option.value] === "fireworks"),
+  );
+  const openaiModels = sortModelOptions(
+    modelOptions.filter((option) => modelProviders[option.value] === "openai"),
+  );
+  const otherCloudModels = sortModelOptions(
+    modelOptions.filter((option) => {
+      const provider = modelProviders[option.value];
+      return !["ollama", "ollama-cloud", "fireworks", "openai"].includes(
+        provider,
+      );
+    }),
+  );
+  const openaiVersionGroups = Array.from(
+    openaiModels.reduce((groups, option) => {
+      const match = option.label.match(/^(gpt-\d+(?:\.\d+)?)/i);
+      const version = match ? match[1].toUpperCase() : "Other";
+      groups.set(version, [...(groups.get(version) ?? []), option]);
+      return groups;
+    }, new Map<string, ModelOption[]>()),
+  );
+  const isModelGroupExpanded = (group: string, containsSelection: boolean) =>
+    expandedModelGroups[group] ?? containsSelection;
+  const toggleModelGroup = (group: string, containsSelection: boolean) => {
+    setExpandedModelGroups((groups) => ({
+      ...groups,
+      [group]: !isModelGroupExpanded(group, containsSelection),
+    }));
+  };
+  const ollamaContainsSelection = ["ollama", "ollama-cloud"].includes(
+    selectedModelProvider,
+  );
+  const ollamaExpanded = isModelGroupExpanded("ollama", ollamaContainsSelection);
+  const localOllamaExpanded = isModelGroupExpanded(
+    "ollama-local",
+    selectedModelProvider === "ollama",
+  );
+  const cloudOllamaExpanded = isModelGroupExpanded(
+    "ollama-cloud",
+    selectedModelProvider === "ollama-cloud",
+  );
+  const fireworksExpanded = isModelGroupExpanded(
+    "fireworks",
+    selectedModelProvider === "fireworks",
+  );
+  const openaiExpanded = isModelGroupExpanded(
+    "openai",
+    selectedModelProvider === "openai",
+  );
+  const otherCloudExpanded = isModelGroupExpanded(
+    "other-cloud",
+    !selectedModelProvider ||
+      !["ollama", "ollama-cloud", "fireworks", "openai"].includes(
+        selectedModelProvider,
+      ),
   );
   const [hideToolCalls, setHideToolCalls] = useQueryState(
     "hideToolCalls",
@@ -471,37 +541,7 @@ function ChatInputImpl({
                                 : undefined}
                             </SelectValue>
                           </SelectTrigger>
-                          <SelectContent>
-                            {localModels.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Local</SelectLabel>
-                                {localModels.map((opt) => (
-                                  <SelectItem
-                                    key={opt.value}
-                                    value={opt.value}
-                                  >
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                            {cloudModels.length > 0 && (
-                              <>
-                                <SelectSeparator />
-                                <SelectGroup>
-                                  <SelectLabel>Cloud</SelectLabel>
-                                  {cloudModels.map((opt) => (
-                                    <SelectItem
-                                      key={opt.value}
-                                      value={opt.value}
-                                    >
-                                      {opt.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              </>
-                            )}
-                          </SelectContent>
+                          <SelectContent><div className="bg-muted/50 sticky top-0 z-10 mx-1 rounded-sm px-2 py-1.5 text-xs"><div className="text-muted-foreground">Current model</div><div className="truncate font-medium" title={effectiveSelectedModel}>{selectedModelLocation} · {effectiveSelectedModel}</div></div><SelectSeparator /><details open={ollamaContainsSelection}><summary>Ollama ({localOllamaModels.length + cloudOllamaModels.length})</summary><details open={selectedModelProvider === "ollama"}><summary>Local ({localOllamaModels.length})</summary>{localOllamaModels.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</details><details open={selectedModelProvider === "ollama-cloud"}><summary>Cloud ({cloudOllamaModels.length})</summary>{cloudOllamaModels.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</details></details><details open={selectedModelProvider === "fireworks"}><summary>Fireworks ({fireworksModels.length})</summary>{fireworksModels.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</details><details open={selectedModelProvider === "openai"}><summary>OpenAI ({openaiModels.length})</summary>{openaiVersionGroups.map(([version, models]) => <details key={version}><summary>{version} ({models.length})</summary>{models.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}</details>)}</details></SelectContent>
                         </Select>
                       </span>
                     </TooltipTrigger>

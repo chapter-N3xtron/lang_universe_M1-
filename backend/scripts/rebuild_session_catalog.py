@@ -275,7 +275,14 @@ async def run(args: argparse.Namespace) -> None:
             "POSTGRES_URI must identify the existing durable PostgreSQL service"
         )
     await ensure_catalog_schema()
-    client = get_client(url=args.api_url)
+    api_key = os.getenv("INSTALLATION_OWNER_API_KEY", "")
+    if not api_key:
+        raise SystemExit("INSTALLATION_OWNER_API_KEY is required for catalog rebuild")
+    client = get_client(
+        url=args.api_url,
+        api_key=None,
+        headers={"X-Api-Key": api_key},
+    )
     runtime = RuntimeAdapter(client)
     threads = await all_threads(client)
     for thread in threads:

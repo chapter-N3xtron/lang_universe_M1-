@@ -1,12 +1,18 @@
 """Focused Phase 6 contract, Coder assembly, and Jasper handoff tests."""
 
 import asyncio
+import subprocess
 from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
-from src.coding_agent import _compatibility_coding_status, assemble_technical_report
+from src.coding_agent import (
+    _changes_since_snapshot,
+    _compatibility_coding_status,
+    _repository_snapshot,
+    assemble_technical_report,
+)
 from src.jasper_agent import _coder_jasper_output
 from src.technical_report import TechnicalReport
 
@@ -73,6 +79,52 @@ def test_coder_assembly_retains_changed_files_on_failed_validation_and_bounds_re
     assert report.provenance.producer == "Coder"
 
 
+def test_repository_snapshot_only_reports_changes_made_after_start_and_keeps_matching_summary(tmp_path):
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True)
+    (tmp_path / "dirty.py").write_text("original\n")
+    (tmp_path / "changed.py").write_text("original\n")
+    (tmp_path / "deleted.py").write_text("delete me\n")
+    (tmp_path / "renamed.py").write_text("rename me\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "initial"], check=True, capture_output=True)
+    # This dirty file predates Coder and must not acquire a report tab.
+    (tmp_path / "dirty.py").write_text("human change\n")
+    before = _repository_snapshot(tmp_path)
+    (tmp_path / "changed.py").write_text("coder change\n")
+    (tmp_path / "deleted.py").unlink()
+    (tmp_path / "renamed.py").rename(tmp_path / "new_name.py")
+    (tmp_path / "added.py").write_text("new\n")
+
+    changes = _changes_since_snapshot(
+        before,
+        _repository_snapshot(tmp_path),
+        [
+            {"path": "changed.py", "change_type": "modified", "summary": "Agent summary."},
+            {"path": "dirty.py", "change_type": "modified", "summary": "Do not retain."},
+            {"path": "outside.py", "change_type": "added", "summary": "Do not retain."},
+        ],
+    )
+
+    assert {(item["path"], item["change_type"]) for item in changes} == {
+        ("changed.py", "modified"), ("deleted.py", "deleted"),
+        ("new_name.py", "renamed"), ("added.py", "added"),
+    }
+    assert next(item for item in changes if item["path"] == "changed.py")["summary"] == "Agent summary."
+    assert all(item["path"] != "dirty.py" for item in changes)
+
+
+def test_failed_validation_downgrades_completed_report():
+    report = assemble_technical_report(
+        completion_status="completed", raw_todos=[], workspace="/repo", thread_identity="thread",
+        coding_session_id="session", model=None, manifest=None,
+        validation_evidence=[{"type": "source_test", "result": "failed", "description": "Tests failed.", "reference_ids": []}],
+    )
+
+    assert report.completion_status == "partial"
+
+
 def test_jasper_report_is_authoritative_evidence_aware_and_fail_closed():
     result = _coder_jasper_output({"coding_result": {"technical_report": report_data(), "messages": [{"role": "assistant", "content": "DEPLOYED despite everything"}]}})
     voice = result["jasper_result"]["jasper_response"]
@@ -83,6 +135,33 @@ def test_jasper_report_is_authoritative_evidence_aware_and_fail_closed():
     invalid = _coder_jasper_output({"coding_result": {"technical_report": {"version": "2.0"}, "messages": [{"role": "assistant", "content": "completed"}]}})
     assert "could not be verified" in invalid["jasper_result"]["jasper_response"]
     assert "completed" not in invalid["jasper_result"]["jasper_response"].lower()
+
+
+def test_coder_return_creates_one_bounded_report_artifact_from_selected_git_workspace(tmp_path):
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True)
+    target = tmp_path / "src"
+    target.mkdir()
+    source = target / "report.py"
+    source.write_text("before = 1\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "initial"], check=True, capture_output=True)
+    source.write_text("before = 2\nafter = 3\n")
+
+    raw = report_data(provenance={**report_data()["provenance"], "workspace": str(tmp_path)})
+    result = _coder_jasper_output({"coding_result": {"technical_report": raw, "workspace": str(tmp_path)}})["jasper_result"]
+
+    artifacts = result["visual_artifacts"]
+    assert len(artifacts) == 1
+    artifact = artifacts[0]
+    assert artifact["renderer"] == "coder_report"
+    assert artifact["artifact_version"] == "1"
+    diff = artifact["payload"]["files"][0]
+    assert (diff["path"], diff["added_lines"], diff["removed_lines"]) == ("src/report.py", 2, 1)
+    assert diff["availability"] == "available"
+    assert "+after = 3" in diff["patch"]
+    assert result["jasper_structured_response"]["artifacts"] == artifacts
 
 
 def test_jasper_revalidates_a_mutated_report_instance():

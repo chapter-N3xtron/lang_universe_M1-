@@ -13,6 +13,8 @@ ALLOWED_LEGACY_STORE_FAMILIES = frozenset(
     {
         "preferences",
         "sessions",
+        "workspaces",
+        "workspace-session-links",
         "session-artifacts",
         "session-library-views",
         "reports",

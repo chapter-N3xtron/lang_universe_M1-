@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+LOCAL_COMPOSE=(docker compose --project-directory "$ROOT/local-deployment-sandbox" -f "$ROOT/local-deployment-sandbox/compose.yaml")
+KOPIA_URL="http://127.0.0.1:51515"
 
 CUSTODIAN_WORKER_PID="$ROOT/backend/.custodian_worker.pid"
 CUSTODIAN_ORCHESTRATOR_PID="$ROOT/backend/.custodian_orchestrator.pid"
@@ -95,21 +97,40 @@ stop_host_custodian() {
   lsof -nP -tiTCP:8767 -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
 }
 
+start_local_topology() {
+  "${LOCAL_COMPOSE[@]}" up -d
+}
+
+stop_local_topology() {
+  "${LOCAL_COMPOSE[@]}" down
+}
+
+open_kopia() {
+  open -a KopiaUI
+  open -a "Brave Browser" "$KOPIA_URL"
+}
+
 case "${1:-start}" in
   start)
     ensure_custodian_token
     start_host_custodian
-    exec "$ROOT/docker-stack.command" "$@"
+    "$ROOT/docker-stack.command" start
+    start_local_topology
+    open_kopia
     ;;
   stop)
+    stop_local_topology
     stop_host_custodian
     exec "$ROOT/docker-stack.command" "$@"
     ;;
   restart)
+    stop_local_topology
     stop_host_custodian
     ensure_custodian_token
     start_host_custodian
-    exec "$ROOT/docker-stack.command" start
+    "$ROOT/docker-stack.command" start
+    start_local_topology
+    open_kopia
     ;;
   *)
     exec "$ROOT/docker-stack.command" "$@"

@@ -36,6 +36,13 @@ from src.stt import transcribe
 load_dotenv()
 
 
+FIREWORKS_MODELS = (
+    "accounts/fireworks/models/minimax-m3",
+    "accounts/fireworks/models/gpt-oss-120b",
+    "accounts/fireworks/models/qwen3-vl-235b-a22b-instruct",
+)
+
+
 def _allowed_origins() -> list[str]:
     """Allowed origins for CORS, configurable via env.
 
@@ -288,6 +295,8 @@ def list_models() -> dict:
     def provider(model_id: str) -> str:
         if model_id.startswith("openai/"):
             return "openai"
+        if model_id.startswith("fireworks/"):
+            return "fireworks"
         if model_id.startswith(("huggingface/", "hf/")):
             return "huggingface"
         if model_id.startswith("ollama-cloud/"):
@@ -295,7 +304,13 @@ def list_models() -> dict:
         return "ollama"
 
     models = [
-        {"id": model_id, "name": model_id, "provider": provider(model_id)}
+        {
+            "id": model_id,
+            "name": model_id.rsplit("/", 1)[-1]
+            if provider(model_id) == "fireworks"
+            else model_id,
+            "provider": provider(model_id),
+        }
         for model_id in configured
     ]
     cloud_models = [
@@ -313,8 +328,16 @@ def list_models() -> dict:
         if m.get("name")
     ]
     openai_models = list_openai_gpt_models()
+    fireworks_models = [
+        {
+            "id": f"fireworks/{model_id}",
+            "name": model_id.rsplit("/", 1)[-1],
+            "provider": "fireworks",
+        }
+        for model_id in FIREWORKS_MODELS
+    ] if os.getenv("FIREWORKS_API_KEY") else []
     seen = {model["id"] for model in models}
-    for discovered in (openai_models, cloud_models, local_models):
+    for discovered in (openai_models, fireworks_models, cloud_models, local_models):
         for model in discovered:
             if model["id"] not in seen:
                 models.append(model)

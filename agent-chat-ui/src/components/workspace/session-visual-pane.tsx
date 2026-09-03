@@ -5,13 +5,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { Trash2, Workflow } from "lucide-react";
 import type { ReactNode } from "react";
-import type { ConceptMapArtifact } from "@/lib/visual/jasper-response.generated";
-import { validateJasperResponse } from "@/lib/visual/validate";
+import type {
+  Artifacts,
+  ConceptMapArtifact,
+} from "@/lib/visual/jasper-response.generated";
+import {
+  getUnsupportedCoderReportArtifact,
+  type UnsupportedCoderReportArtifact,
+  validateJasperResponse,
+} from "@/lib/visual/validate";
 import {
   deleteSessionArtifact,
   fetchSessionArtifacts,
   fetchSessionDetail,
   forkSession,
+  type SessionArtifactEntry,
   renameSessionArtifact,
 } from "@/lib/session-catalog";
 import { Button } from "@/components/ui/button";
@@ -25,7 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ConceptMapRenderer } from "./concept-map-renderer";
+import { VisualArtifactRenderer } from "./visual-artifact-renderer";
 import { SessionLibrary } from "./session-library";
 import { SessionSources } from "./session-sources";
 import { SessionDocuments } from "./session-documents";
@@ -41,6 +49,19 @@ const viewParser = parseAsStringLiteral([
 const SESSION_REMINDER_MINUTES = Number(
   process.env.NEXT_PUBLIC_SESSION_REMINDER_MINUTES ?? 90,
 );
+type VisualArtifact = Artifacts[number] | UnsupportedCoderReportArtifact;
+type SessionVisualArtifactEntry = Omit<SessionArtifactEntry, "artifact"> & {
+  artifact: VisualArtifact;
+};
+
+function isConceptMapArtifact(
+  artifact: VisualArtifact,
+): artifact is ConceptMapArtifact {
+  return (
+    artifact.renderer !== "coder_report" &&
+    artifact.renderer !== "unsupported_coder_report"
+  );
+}
 
 export function SessionVisualPane({
   apiUrl,
@@ -56,7 +77,7 @@ export function SessionVisualPane({
   apiUrl: string;
   authScheme?: string;
   threadId: string | null;
-  latestArtifact?: ConceptMapArtifact;
+  latestArtifact?: VisualArtifact;
   selectedVoice?: string;
   legacyTitle?: ReactNode;
   legacyContent?: ReactNode;
@@ -121,19 +142,29 @@ export function SessionVisualPane({
     },
   });
   const artifacts = useMemo(() => {
-    return (artifactsQuery.data ?? []).flatMap((entry) => {
-      const validated = validateJasperResponse({
-        version: 2,
-        voice_text: "Saved visualization",
-        artifacts: [entry.artifact],
-        layout_suggestion: null,
-        diagnostic: null,
-      });
-      const artifact = validated.valid ? validated.value.artifacts?.[0] : null;
-      return artifact?.renderer === "react_flow"
-        ? [{ ...entry, artifact }]
-        : [];
-    });
+    return (artifactsQuery.data ?? []).flatMap<SessionVisualArtifactEntry>(
+      (entry) => {
+        // An older client must not validate, parse, or render the payload of a
+        // persisted Coder report from a newer artifact version.
+        const unsupportedArtifact = getUnsupportedCoderReportArtifact(
+          entry.artifact,
+        );
+        if (unsupportedArtifact)
+          return [{ ...entry, artifact: unsupportedArtifact }];
+
+        const validated = validateJasperResponse({
+          version: 2,
+          voice_text: "Saved visualization",
+          artifacts: [entry.artifact],
+          layout_suggestion: null,
+          diagnostic: null,
+        });
+        const artifact = validated.valid
+          ? validated.value.artifacts?.[0]
+          : null;
+        return artifact ? [{ ...entry, artifact }] : [];
+      },
+    );
   }, [artifactsQuery.data]);
   const selectedArtifact =
     artifacts.find((entry) => entry.artifact.artifact_id === selectedArtifactId)
@@ -143,6 +174,7 @@ export function SessionVisualPane({
   const sourceUsage = useMemo(() => {
     const usage = new Map<string, string[]>();
     for (const entry of artifacts) {
+      if (!isConceptMapArtifact(entry.artifact)) continue;
       for (const source of entry.artifact.payload.sources) {
         usage.set(source.id, [
           ...(usage.get(source.id) ?? []),
@@ -349,7 +381,7 @@ export function SessionVisualPane({
           )}
           <div className="relative min-w-0 flex-1">
             {selectedArtifact ? (
-              <ConceptMapRenderer
+              <VisualArtifactRenderer
                 artifact={selectedArtifact}
                 selectedVoice={selectedVoice}
               />
